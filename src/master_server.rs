@@ -39,6 +39,8 @@ pub enum Error {
     BindSocket(io::Error),
     #[error("Failed to decode packet: {0}")]
     ClientPacket(#[from] crate::client::Error),
+    #[error("Missing challenge in ServerInfo")]
+    MissingChallenge,
     #[error(transparent)]
     Io(#[from] io::Error),
 }
@@ -129,6 +131,10 @@ impl MasterServer {
                 self.remove_outdated_challenges();
             }
             Packet::ServerAdd(challenge, info) => {
+                let challenge = match challenge {
+                    Some(c) => c,
+                    None => return Err(Error::MissingChallenge),
+                };
                 let entry = match self.challenges.get(&from) {
                     Some(e) => e,
                     None => {

@@ -13,8 +13,6 @@ use crate::parser::{Error as ParserError, ParseValue, Parser};
 pub enum Error {
     #[error("Invalid region")]
     InvalidRegion,
-    #[error("Missing challenge in ServerInfo")]
-    MissingChallenge,
     #[error(transparent)]
     Parser(#[from] ParserError),
 }
@@ -182,7 +180,7 @@ impl<'a, T> ServerInfo<T>
 where
     T: 'a + Default + ParseValue<'a, Err = ParserError>,
 {
-    pub fn from_bytes(src: &'a [u8]) -> Result<(u32, Self, &'a [u8]), Error> {
+    pub fn from_bytes(src: &'a [u8]) -> Result<(Option<u32>, Self, &'a [u8]), Error> {
         let mut parser = Parser::new(src);
         let (challenge, info) = parser.parse()?;
         let tail = match parser.end() {
@@ -193,7 +191,7 @@ where
     }
 }
 
-impl<'a, T> ParseValue<'a> for (u32, ServerInfo<T>)
+impl<'a, T> ParseValue<'a> for (Option<u32>, ServerInfo<T>)
 where
     T: 'a + Default + ParseValue<'a, Err = ParserError>,
 {
@@ -239,10 +237,7 @@ where
             }
         }
 
-        match challenge {
-            Some(challenge) => Ok((challenge, info)),
-            None => Err(Error::MissingChallenge),
-        }
+        Ok((challenge, info))
     }
 }
 
@@ -313,7 +308,7 @@ mod tests {
         assert_eq!(
             ServerInfo::from_bytes(&buf[..]),
             Ok((
-                12345678,
+                Some(12345678),
                 ServerInfo::<&str> {
                     protocol: 47,
                     players: 16,

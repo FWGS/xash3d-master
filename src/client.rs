@@ -38,7 +38,7 @@ impl<'a> Deref for Filter<'a> {
 #[derive(Debug)]
 pub enum Packet<'a> {
     Challenge(Option<u32>),
-    ServerAdd(u32, ServerInfo<&'a str>),
+    ServerAdd(Option<u32>, ServerInfo<&'a str>),
     ServerRemove,
     QueryServers(Region, Filter<'a>),
 }

@@ -152,8 +152,7 @@ impl MasterServer {
                 self.remove_outdated_servers();
             }
             Packet::ServerRemove => {
-                // XXX: anyone can delete server from the list?
-                self.servers.remove(&from);
+                /* ignore */
             }
             Packet::QueryServers(region, filter) => match Filter::from_bytes(&filter) {
                 Ok(filter) => self.send_server_list(from, region, &filter)?,

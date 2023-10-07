@@ -15,7 +15,6 @@ thiserror = "1.0.49"
 getopts = "0.2.21"
 log = "<0.4.19"
 bitflags = "2.4"
-byteorder = "1.4.3"
 fastrand = "2.0.1"
 
 [dependencies.chrono]

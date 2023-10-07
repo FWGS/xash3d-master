@@ -2,11 +2,10 @@
 // SPDX-FileCopyrightText: 2023 Denis Drakhnia <numas13@gmail.com>
 
 use std::fmt;
-use std::io::{self, Cursor};
+use std::io;
 use std::ops::Deref;
 use std::str;
 
-use byteorder::{ReadBytesExt, LE};
 use log::debug;
 use thiserror::Error;
 
@@ -57,8 +56,8 @@ impl<'a> Packet<'a> {
 
                 Ok(Self::QueryServers(region, Filter(filter)))
             }
-            [b'q', 0xff, tail @ ..] => {
-                let challenge = Cursor::new(tail).read_u32::<LE>()?;
+            [b'q', 0xff, b0, b1, b2, b3] => {
+                let challenge = u32::from_le_bytes([*b0, *b1, *b2, *b3]);
                 Ok(Self::Challenge(Some(challenge)))
             }
             [b'0', b'\n', tail @ ..] => {

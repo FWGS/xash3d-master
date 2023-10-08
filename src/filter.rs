@@ -108,6 +108,9 @@ impl Filter<'_> {
         if self.gamedir.map_or(false, |i| &*server.gamedir != i) {
             return false;
         }
+        if self.map.map_or(false, |i| &*server.map != i) {
+            return false;
+        }
         if self.version_match.map_or(false, |i| &*server.version != i) {
             return false;
         }
@@ -401,5 +404,197 @@ mod tests {
                 flags_mask: FilterFlags::all(),
             }
         }
+    }
+
+    macro_rules! servers {
+        ($($addr:expr => $info:expr $(=> $func:expr)?)+) => (
+            [$({
+                let addr = $addr.parse::<SocketAddrV4>().unwrap();
+                let (_, info, _) = ServerInfo::<&str>::from_bytes($info).unwrap();
+                let server = Server::new(&info);
+                $(
+                    let mut server = server;
+                    let func: fn(&mut Server) = $func;
+                    func(&mut server);
+                )?
+                (addr, server)
+            }),+]
+        );
+    }
+
+    macro_rules! matches {
+        ($servers:expr, $filter:expr$(, $expected:expr)*) => (
+            let servers = &$servers;
+            let filter = Filter::from_bytes($filter).unwrap();
+            let iter = servers
+                .iter()
+                .enumerate()
+                .filter(|(_, (addr, server))| filter.matches(*addr, &server))
+                .map(|(i, _)| i);
+            assert_eq!(iter.collect::<Vec<_>>(), [$($expected),*])
+        );
+    }
+
+    #[test]
+    fn match_dedicated() {
+        let s = servers! {
+            "0.0.0.0:0" => b""
+            "0.0.0.0:0" => b"\\type\\d"
+            "0.0.0.0:0" => b"\\type\\p"
+            "0.0.0.0:0" => b"\\type\\l"
+        };
+        matches!(s, b"", 0, 1, 2, 3);
+        matches!(s, b"\\dedicated\\0", 0, 2, 3);
+        matches!(s, b"\\dedicated\\1", 1);
+    }
+
+    #[test]
+    fn match_proxy() {
+        let s = servers! {
+            "0.0.0.0:0" => b""
+            "0.0.0.0:0" => b"\\type\\d"
+            "0.0.0.0:0" => b"\\type\\p"
+            "0.0.0.0:0" => b"\\type\\l"
+        };
+        matches!(s, b"", 0, 1, 2, 3);
+        matches!(s, b"\\proxy\\0", 0, 1, 3);
+        matches!(s, b"\\proxy\\1", 2);
+    }
+
+    #[test]
+    fn match_linux() {
+        let s = servers! {
+            "0.0.0.0:0" => b""
+            "0.0.0.0:0" => b"\\os\\w"
+            "0.0.0.0:0" => b"\\os\\l"
+            "0.0.0.0:0" => b"\\os\\m"
+        };
+        matches!(s, b"", 0, 1, 2, 3);
+        matches!(s, b"\\linux\\0", 0, 1, 3);
+        matches!(s, b"\\linux\\1", 2);
+    }
+
+    #[test]
+    fn match_password() {
+        let s = servers! {
+            "0.0.0.0:0" => b""
+            "0.0.0.0:0" => b"\\password\\0"
+            "0.0.0.0:0" => b"\\password\\1"
+        };
+        matches!(s, b"", 0, 1, 2);
+        matches!(s, b"\\password\\0", 0, 1);
+        matches!(s, b"\\password\\1", 2);
+    }
+
+    #[test]
+    fn match_not_empty() {
+        let servers = servers! {
+            "0.0.0.0:0" => b"\\players\\0\\max\\8"
+            "0.0.0.0:0" => b"\\players\\4\\max\\8"
+            "0.0.0.0:0" => b"\\players\\8\\max\\8"
+        };
+        matches!(servers, b"", 0, 1, 2);
+        matches!(servers, b"\\empty\\0", 0);
+        matches!(servers, b"\\empty\\1", 1, 2);
+    }
+
+    #[test]
+    fn match_full() {
+        let servers = servers! {
+            "0.0.0.0:0" => b"\\players\\0\\max\\8"
+            "0.0.0.0:0" => b"\\players\\4\\max\\8"
+            "0.0.0.0:0" => b"\\players\\8\\max\\8"
+        };
+        matches!(servers, b"", 0, 1, 2);
+        matches!(servers, b"\\full\\0", 0, 1);
+        matches!(servers, b"\\full\\1", 2);
+    }
+
+    #[test]
+    fn match_noplayers() {
+        let servers = servers! {
+            "0.0.0.0:0" => b"\\players\\0\\max\\8"
+            "0.0.0.0:0" => b"\\players\\4\\max\\8"
+            "0.0.0.0:0" => b"\\players\\8\\max\\8"
+        };
+        matches!(servers, b"", 0, 1, 2);
+        matches!(servers, b"\\noplayers\\0", 1, 2);
+        matches!(servers, b"\\noplayers\\1", 0);
+    }
+
+    #[test]
+    fn match_nat() {
+        let servers = servers! {
+            "0.0.0.0:0" => b""
+            "0.0.0.0:0" => b"\\nat\\0"
+            "0.0.0.0:0" => b"\\nat\\1"
+        };
+        matches!(servers, b"", 0, 1, 2);
+        matches!(servers, b"\\nat\\0", 0, 1);
+        matches!(servers, b"\\nat\\1", 2);
+    }
+
+    #[test]
+    fn match_lan() {
+        let servers = servers! {
+            "0.0.0.0:0" => b""
+            "0.0.0.0:0" => b"\\lan\\0"
+            "0.0.0.0:0" => b"\\lan\\1"
+        };
+        matches!(servers, b"", 0, 1, 2);
+        matches!(servers, b"\\lan\\0", 0, 1);
+        matches!(servers, b"\\lan\\1", 2);
+    }
+
+    #[test]
+    fn match_bots() {
+        let servers = servers! {
+            "0.0.0.0:0" => b""
+            "0.0.0.0:0" => b"\\bots\\0"
+            "0.0.0.0:0" => b"\\bots\\1"
+        };
+        matches!(servers, b"", 0, 1, 2);
+        matches!(servers, b"\\bots\\0", 0, 1);
+        matches!(servers, b"\\bots\\1", 2);
+    }
+
+    #[test]
+    fn match_white() {
+        let servers = servers! {
+            "0.0.0.0:0" => b""
+            "0.0.0.0:0" => b"" => |s| { s.flags |= FilterFlags::WHITE; }
+        };
+        matches!(servers, b"", 0, 1);
+        matches!(servers, b"\\white\\0", 0);
+        matches!(servers, b"\\white\\1", 1);
+    }
+
+    #[test]
+    fn match_gamedir() {
+        let servers = servers! {
+            "0.0.0.0:0" => b"\\gamedir\\valve"
+            "0.0.0.0:0" => b"\\gamedir\\cstrike"
+            "0.0.0.0:0" => b"\\gamedir\\dod"
+            "0.0.0.0:0" => b"\\gamedir\\portal"
+            "0.0.0.0:0" => b"\\gamedir\\left4dead"
+        };
+        matches!(servers, b"", 0, 1, 2, 3, 4);
+        matches!(servers, b"\\gamedir\\valve", 0);
+        matches!(servers, b"\\gamedir\\portal", 3);
+        matches!(servers, b"\\gamedir\\left4dead", 4);
+    }
+
+    #[test]
+    fn match_map() {
+        let servers = servers! {
+            "0.0.0.0:0" => b"\\map\\crossfire"
+            "0.0.0.0:0" => b"\\map\\boot_camp"
+            "0.0.0.0:0" => b"\\map\\de_dust"
+            "0.0.0.0:0" => b"\\map\\cs_office"
+        };
+        matches!(servers, b"", 0, 1, 2, 3);
+        matches!(servers, b"\\map\\crossfire", 0);
+        matches!(servers, b"\\map\\de_dust", 2);
+        matches!(servers, b"\\map\\cs_office", 3);
     }
 }

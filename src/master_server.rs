@@ -13,6 +13,7 @@ use log::{error, info, trace, warn};
 use thiserror::Error;
 
 use crate::client::Packet;
+use crate::config::{self, Config};
 use crate::filter::Filter;
 use crate::server::Server;
 use crate::server_info::Region;
@@ -23,13 +24,9 @@ const MAX_PACKET_SIZE: usize = 512;
 const CHALLENGE_RESPONSE_HEADER: &[u8] = b"\xff\xff\xff\xffs\n";
 const SERVER_LIST_HEADER: &[u8] = b"\xff\xff\xff\xfff\n";
 
-/// Time in seconds while server is valid.
-const SERVER_TIMEOUT: u32 = 300;
 /// How many cleanup calls should be skipped before removing outdated servers.
 const SERVER_CLEANUP_MAX: usize = 100;
 
-/// Time in seconds while challenge is valid.
-const CHALLENGE_TIMEOUT: u32 = 300;
 /// How many cleanup calls should be skipped before removing outdated challenges.
 const CHALLENGE_CLEANUP_MAX: usize = 100;
 
@@ -83,10 +80,12 @@ struct MasterServer {
     rng: Rng,
     cleanup_challenges: usize,
     cleanup_servers: usize,
+    timeout: config::TimeoutConfig,
 }
 
 impl MasterServer {
-    fn new(addr: SocketAddr) -> Result<Self, Error> {
+    fn new(cfg: Config) -> Result<Self, Error> {
+        let addr = SocketAddr::new(cfg.server.ip, cfg.server.port);
         info!("Listen address: {}", addr);
         let sock = UdpSocket::bind(addr).map_err(Error::BindSocket)?;
 
@@ -98,6 +97,7 @@ impl MasterServer {
             rng: Rng::new(),
             cleanup_challenges: 0,
             cleanup_servers: 0,
+            timeout: cfg.server.timeout,
         })
     }
 
@@ -142,7 +142,7 @@ impl MasterServer {
                         return Ok(());
                     }
                 };
-                if !entry.is_valid(self.now(), CHALLENGE_TIMEOUT) {
+                if !entry.is_valid(self.now(), self.timeout.challenge) {
                     return Ok(());
                 }
                 if challenge != entry.value {
@@ -189,7 +189,7 @@ impl MasterServer {
         let now = self.now();
         let old = self.challenges.len();
         self.challenges
-            .retain(|_, v| v.is_valid(now, CHALLENGE_TIMEOUT));
+            .retain(|_, v| v.is_valid(now, self.timeout.challenge));
         let new = self.challenges.len();
         if old != new {
             trace!("Removed {} outdated challenges", old - new);
@@ -198,8 +198,7 @@ impl MasterServer {
     }
 
     fn add_server(&mut self, addr: SocketAddrV4, server: Server) {
-        let entry = Entry::new(self.now(), server);
-        match self.servers.insert(addr, entry) {
+        match self.servers.insert(addr, Entry::new(self.now(), server)) {
             Some(_) => trace!("{}: Updated GameServer", addr),
             None => trace!("{}: New GameServer", addr),
         }
@@ -212,7 +211,8 @@ impl MasterServer {
         }
         let now = self.now();
         let old = self.servers.len();
-        self.servers.retain(|_, v| v.is_valid(now, SERVER_TIMEOUT));
+        self.servers
+            .retain(|_, v| v.is_valid(now, self.timeout.server));
         let new = self.servers.len();
         if old != new {
             trace!("Removed {} outdated servers", old - new);
@@ -250,7 +250,7 @@ impl MasterServer {
         let mut iter = self
             .servers
             .iter()
-            .filter(|i| i.1.is_valid(now, SERVER_TIMEOUT))
+            .filter(|i| i.1.is_valid(now, self.timeout.server))
             .filter(|i| i.1.matches(*i.0, region, filter))
             .map(|i| i.0);
 
@@ -287,6 +287,6 @@ impl MasterServer {
     }
 }
 
-pub fn run(addr: SocketAddr) -> Result<(), Error> {
-    MasterServer::new(addr)?.run()
+pub fn run(cfg: Config) -> Result<(), Error> {
+    MasterServer::new(cfg)?.run()
 }

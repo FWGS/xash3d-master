@@ -1,0 +1,15 @@
+# Default config file
+
+[log]
+# Possible values: 0-5, off, error, warn, info, debug, trace
+level = "warn"
+
+[server]
+ip = "0.0.0.0"
+port = 27010
+
+[server.timeout]
+# Time in seconds while challenge is valid
+challenge = 300
+# Time in seconds while server is valid
+server = 300

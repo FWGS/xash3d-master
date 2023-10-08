@@ -3,6 +3,7 @@
 
 mod cli;
 mod client;
+mod config;
 mod filter;
 mod logger;
 mod master_server;
@@ -18,9 +19,26 @@ fn main() {
         std::process::exit(1);
     });
 
-    logger::init(cli.log_level);
+    let mut cfg = config::load(cli.config_path.as_ref()).unwrap_or_else(|e| {
+        eprintln!("Failed to load config \"{}\": {}", cli.config_path, e);
+        std::process::exit(1);
+    });
 
-    if let Err(e) = master_server::run(cli.listen) {
+    if let Some(level) = cli.log_level {
+        cfg.log.level = level;
+    }
+
+    if let Some(ip) = cli.listen_ip {
+        cfg.server.ip = ip;
+    }
+
+    if let Some(port) = cli.listen_port {
+        cfg.server.port = port;
+    }
+
+    logger::init(cfg.log.level);
+
+    if let Err(e) = master_server::run(cfg) {
         error!("{}", e);
         std::process::exit(1);
     }

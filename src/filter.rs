@@ -54,10 +54,6 @@ impl<T> From<&ServerInfo<T>> for FilterFlags {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Filter<'a> {
-    // A special filter, specifies that servers matching any of the following [x] conditions should not be returned
-    // TODO: \nor\[x]
-    // A special filter, specifies that servers matching all of the following [x] conditions should not be returned
-    // TODO: \nand\[x]
     /// Servers running the specified modification (ex. cstrike)
     pub gamedir: Option<&'a str>,
     /// Servers running the specified map (ex. cs_italy)

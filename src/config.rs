@@ -3,12 +3,14 @@
 
 use std::fs;
 use std::io;
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddrV4};
 use std::path::Path;
 
 use log::LevelFilter;
 use serde::{de::Error as _, Deserialize, Deserializer};
 use thiserror::Error;
+
+use crate::filter::Version;
 
 pub const DEFAULT_CONFIG_PATH: &str = "config/main.toml";
 
@@ -31,6 +33,8 @@ pub struct Config {
     pub log: LogConfig,
     #[serde(default)]
     pub server: ServerConfig,
+    #[serde(default)]
+    pub client: ClientConfig,
 }
 
 #[derive(Deserialize, Debug)]
@@ -88,6 +92,20 @@ impl Default for TimeoutConfig {
     }
 }
 
+#[derive(Deserialize, Default, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct ClientConfig {
+    #[serde(default)]
+    #[serde(deserialize_with = "deserialize_version")]
+    pub version: Version,
+    #[serde(default)]
+    pub update_map: Box<str>,
+    #[serde(default)]
+    pub update_title: Box<str>,
+    #[serde(default)]
+    pub update_addr: Option<SocketAddrV4>,
+}
+
 fn default_log_level() -> LevelFilter {
     LevelFilter::Warn
 }
@@ -109,8 +127,7 @@ where
     D: Deserializer<'de>,
 {
     let s = <&str>::deserialize(de)?;
-    parse_log_level(s)
-        .ok_or_else(|| D::Error::custom(format!("Invalid value for log option: \"{}\"", s)))
+    parse_log_level(s).ok_or_else(|| D::Error::custom(format!("Invalid log level: \"{}\"", s)))
 }
 
 pub fn parse_log_level(s: &str) -> Option<LevelFilter> {
@@ -134,6 +151,15 @@ pub fn parse_log_level(s: &str) -> Option<LevelFilter> {
         },
     };
     Some(level_filter)
+}
+
+fn deserialize_version<'de, D>(de: D) -> Result<Version, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s = <&str>::deserialize(de)?;
+    s.parse()
+        .map_err(|_| D::Error::custom(format!("Invalid version: \"{}\"", s)))
 }
 
 pub fn load<P: AsRef<Path>>(path: P) -> Result<Config, Error> {

@@ -14,7 +14,7 @@ use thiserror::Error;
 
 use crate::client::Packet;
 use crate::config::{self, Config};
-use crate::filter::Filter;
+use crate::filter::{Filter, Version};
 use crate::server::Server;
 use crate::server_info::Region;
 
@@ -74,13 +74,19 @@ impl<T> Deref for Entry<T> {
 
 struct MasterServer {
     sock: UdpSocket,
-    start_time: Instant,
     challenges: HashMap<SocketAddrV4, Entry<u32>>,
     servers: HashMap<SocketAddrV4, Entry<Server>>,
     rng: Rng,
+
+    start_time: Instant,
     cleanup_challenges: usize,
     cleanup_servers: usize,
     timeout: config::TimeoutConfig,
+
+    clver: Version,
+    update_title: Box<str>,
+    update_map: Box<str>,
+    update_addr: SocketAddrV4,
 }
 
 impl MasterServer {
@@ -88,6 +94,13 @@ impl MasterServer {
         let addr = SocketAddr::new(cfg.server.ip, cfg.server.port);
         info!("Listen address: {}", addr);
         let sock = UdpSocket::bind(addr).map_err(Error::BindSocket)?;
+        let update_addr =
+            cfg.client
+                .update_addr
+                .unwrap_or_else(|| match sock.local_addr().unwrap() {
+                    SocketAddr::V4(addr) => addr,
+                    _ => todo!(),
+                });
 
         Ok(Self {
             sock,
@@ -98,6 +111,10 @@ impl MasterServer {
             cleanup_challenges: 0,
             cleanup_servers: 0,
             timeout: cfg.server.timeout,
+            clver: cfg.client.version,
+            update_title: cfg.client.update_title,
+            update_map: cfg.client.update_map,
+            update_addr,
         })
     }
 
@@ -120,7 +137,14 @@ impl MasterServer {
     }
 
     fn handle_packet(&mut self, from: SocketAddrV4, s: &[u8]) -> Result<(), Error> {
-        let packet = Packet::decode(s)?;
+        let packet = match Packet::decode(s) {
+            Ok(p) => p,
+            Err(_) => {
+                trace!("{}: Failed to decode {:?}", from, s);
+                return Ok(());
+            }
+        };
+
         trace!("{}: recv {:?}", from, packet);
 
         match packet {
@@ -158,13 +182,48 @@ impl MasterServer {
                 self.remove_outdated_servers();
             }
             Packet::ServerRemove => { /* ignore */ }
-            Packet::QueryServers(region, filter) => match Filter::from_bytes(&filter) {
-                Ok(filter) => self.send_server_list(from, region, &filter)?,
-                _ => {
-                    warn!("{}: Invalid filter: {:?}", from, filter);
-                    return Ok(());
+            Packet::QueryServers(region, filter) => {
+                let filter = match Filter::from_bytes(&filter) {
+                    Ok(f) => f,
+                    _ => {
+                        warn!("{}: Invalid filter: {:?}", from, filter);
+                        return Ok(());
+                    }
+                };
+
+                if filter.clver.map_or(true, |v| v < self.clver) {
+                    let iter = std::iter::once(&self.update_addr);
+                    self.send_server_list(from, iter)?;
+                } else {
+                    let now = self.now();
+                    let iter = self
+                        .servers
+                        .iter()
+                        .filter(|i| i.1.is_valid(now, self.timeout.server))
+                        .filter(|i| i.1.matches(*i.0, region, &filter))
+                        .map(|i| i.0);
+                    self.send_server_list(from, iter)?;
                 }
-            },
+            }
+            Packet::ServerInfo => {
+                let mut buf = [0; MAX_PACKET_SIZE];
+                let mut cur = Cursor::new(&mut buf[..]);
+                cur.write_all(b"\xff\xff\xff\xffinfo\n")?;
+                cur.write_all(b"\\p\\49")?;
+                cur.write_all(b"\\map\\")?;
+                cur.write_all(self.update_map.as_bytes())?;
+                cur.write_all(b"\\dm\\1")?;
+                cur.write_all(b"\\team\\0")?;
+                cur.write_all(b"\\coop\\0")?;
+                cur.write_all(b"\\numcl\\0")?;
+                cur.write_all(b"\\maxcl\\0")?;
+                cur.write_all(b"\\gamedir\\valve")?;
+                cur.write_all(b"\\password\\0")?;
+                cur.write_all(b"\\host\\")?;
+                cur.write_all(self.update_title.as_bytes())?;
+                let n = cur.position() as usize;
+                self.sock.send_to(&buf[..n], from)?;
+            }
         }
 
         Ok(())
@@ -240,20 +299,11 @@ impl MasterServer {
         Ok(())
     }
 
-    fn send_server_list<A: ToSocketAddrs>(
-        &self,
-        to: A,
-        region: Region,
-        filter: &Filter,
-    ) -> Result<(), io::Error> {
-        let now = self.now();
-        let mut iter = self
-            .servers
-            .iter()
-            .filter(|i| i.1.is_valid(now, self.timeout.server))
-            .filter(|i| i.1.matches(*i.0, region, filter))
-            .map(|i| i.0);
-
+    fn send_server_list<'a, A, I>(&self, to: A, mut iter: I) -> Result<(), io::Error>
+    where
+        A: ToSocketAddrs,
+        I: Iterator<Item = &'a SocketAddrV4>,
+    {
         let mut buf = [0; MAX_PACKET_SIZE];
         let mut done = false;
         while !done {

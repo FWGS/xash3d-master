@@ -28,7 +28,10 @@
 //! * Do not have bots
 //! * Is not protected by a password
 
+use std::fmt;
 use std::net::SocketAddrV4;
+use std::num::ParseIntError;
+use std::str::FromStr;
 
 use bitflags::bitflags;
 use log::{debug, log_enabled, Level};
@@ -79,6 +82,49 @@ impl<T> From<&ServerInfo<T>> for FilterFlags {
     }
 }
 
+#[derive(Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Version {
+    pub major: u8,
+    pub minor: u8,
+}
+
+impl Version {
+    pub fn new(major: u8, minor: u8) -> Self {
+        Self { major, minor }
+    }
+}
+
+impl fmt::Debug for Version {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        write!(fmt, "{}.{}", self.major, self.minor)
+    }
+}
+
+impl fmt::Display for Version {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        write!(fmt, "{}.{}", self.major, self.minor)
+    }
+}
+
+impl FromStr for Version {
+    type Err = ParseIntError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (major, minor) = s.split_once('.').unwrap_or((s, "0"));
+        Ok(Self::new(major.parse()?, minor.parse()?))
+    }
+}
+
+impl ParseValue<'_> for Version {
+    type Err = ParserError;
+
+    fn parse(p: &mut Parser<'_>) -> Result<Self, Self::Err> {
+        let s = p.parse::<&str>()?;
+        let v = s.parse()?;
+        Ok(v)
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Filter<'a> {
     /// Servers running the specified modification (ex. cstrike)
@@ -92,7 +138,7 @@ pub struct Filter<'a> {
     /// Return only servers on the specified IP address (port supported and optional)
     pub gameaddr: Option<SocketAddrV4>,
     /// Client version.
-    pub clver: Option<&'a str>,
+    pub clver: Option<Version>,
 
     pub flags: FilterFlags,
     pub flags_mask: FilterFlags,

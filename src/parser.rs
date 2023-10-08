@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // SPDX-FileCopyrightText: 2023 Denis Drakhnia <numas13@gmail.com>
 
+use std::num::ParseIntError;
 use std::str;
 
 use thiserror::Error;
@@ -17,6 +18,12 @@ pub enum Error {
     InvalidBool,
     #[error("Invalid integer")]
     InvalidInteger,
+}
+
+impl From<ParseIntError> for Error {
+    fn from(_: ParseIntError) -> Self {
+        Error::InvalidInteger
+    }
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

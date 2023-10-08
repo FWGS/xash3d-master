@@ -13,3 +13,10 @@ port = 27010
 challenge = 300
 # Time in seconds while server is valid
 server = 300
+
+[client]
+# If client version is less then show update message
+version = "0.20"
+update_title = "https://github.com/FWGS/xash3d-fwgs"
+update_map = "Update please"
+update_addr = "127.0.0.1:27010"

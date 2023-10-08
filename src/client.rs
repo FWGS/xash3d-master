@@ -41,6 +41,7 @@ pub enum Packet<'a> {
     ServerAdd(Option<u32>, ServerInfo<&'a str>),
     ServerRemove,
     QueryServers(Region, Filter<'a>),
+    ServerInfo,
 }
 
 impl<'a> Packet<'a> {
@@ -70,6 +71,7 @@ impl<'a> Packet<'a> {
             }
             [b'b', b'\n'] => Ok(Self::ServerRemove),
             [b'q'] => Ok(Self::Challenge(None)),
+            [0xff, 0xff, 0xff, 0xff, b'i', b'n', b'f', b'o', b' ', _, _] => Ok(Self::ServerInfo),
             _ => Err(Error::InvalidPacket),
         }
     }

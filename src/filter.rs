@@ -68,7 +68,7 @@ impl<T> From<&ServerInfo<T>> for FilterFlags {
         flags.set(Self::DEDICATED, info.server_type == ServerType::Dedicated);
         flags.set(Self::SECURE, info.flags.contains(ServerFlags::SECURE));
         flags.set(Self::PASSWORD, info.flags.contains(ServerFlags::PASSWORD));
-        flags.set(Self::NOT_EMPTY, info.players > 0); // XXX: and not full?
+        flags.set(Self::NOT_EMPTY, info.players > 0);
         flags.set(Self::FULL, info.players >= info.max);
         flags.set(Self::NOPLAYERS, info.players == 0);
         flags.set(Self::NAT, info.flags.contains(ServerFlags::NAT));

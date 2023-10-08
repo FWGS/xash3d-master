@@ -1,6 +1,33 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // SPDX-FileCopyrightText: 2023 Denis Drakhnia <numas13@gmail.com>
 
+//! Server query filter
+//!
+//! # Supported filters:
+//!
+//! | Filter    | Type | Description                    | Examples |
+//! | --------- | ---- | ------------------------------ | -------- |
+//! | map       | str  | Map name                       | `crossfire`, `de_dust` |
+//! | gamedir   | str  | Game directory                 | `valve`, `cstrike` |
+//! | dedicated | bool | Server running dedicated       | `0`, `1` |
+//! | lan       | bool | Server is LAN                  | `0`, `1` |
+//! | nat       | bool | Server behind NAT              | `0`, `1` |
+//! | noplayers | bool | Server is empty                | `0`, `1` |
+//! | empty     | bool | Server is not empty            | `0`, `1` |
+//! | full      | bool | Server is not full             | `0`, `1` |
+//! | password  | bool | Server is password prodected   | `0`, `1` |
+//! | secure    | bool | Server using anti-cheat        | `0`, `1` |
+//! | bots      | bool | Server has bots                | `0`, `1` |
+//!
+//! # Examples:
+//!
+//! Filter `\gamedir\valve\full\1\bots\0\password\0` will select server if:
+//!
+//! * It is Half-Life server
+//! * Is not full
+//! * Do not have bots
+//! * Is not protected by a password
+
 use std::net::SocketAddrV4;
 
 use bitflags::bitflags;
@@ -58,9 +85,9 @@ pub struct Filter<'a> {
     pub gamedir: Option<&'a str>,
     /// Servers running the specified map (ex. cs_italy)
     pub map: Option<&'a str>,
-    /// Servers with their hostname matching [hostname] (can use * as a wildcard)
+    /// Servers with their hostname matching \[hostname\] (can use * as a wildcard)
     pub name_match: Option<&'a str>,
-    /// Servers running version [version] (can use * as a wildcard)
+    /// Servers running version \[version\] (can use * as a wildcard)
     pub version_match: Option<&'a str>,
     /// Return only servers on the specified IP address (port supported and optional)
     pub gameaddr: Option<SocketAddrV4>,
@@ -282,30 +309,21 @@ mod tests {
 
         parse_all {
             b"\
-              \\appid\\70\
               \\bots\\1\
               \\clver\\0.20\
-              \\collapse_addr_hash\\1\
               \\dedicated\\1\
               \\empty\\1\
               \\full\\1\
               \\gameaddr\\192.168.1.100\
-              \\gamedata\\a,b,c,d\
-              \\gamedataor\\a,b,c,d\
               \\gamedir\\valve\
-              \\gametype\\a,b,c,d\
               \\lan\\1\
-              \\linux\\1\
               \\map\\crossfire\
               \\name_match\\localhost\
-              \\napp\\60\
               \\nat\\1\
               \\noplayers\\1\
               \\password\\1\
-              \\proxy\\1\
               \\secure\\1\
               \\version_match\\1.2.3.4\
-              \\white\\1\
             " => {
                 gamedir: Some("valve"),
                 map: Some("crossfire"),

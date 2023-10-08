@@ -25,14 +25,12 @@ bitflags! {
         const FULL          = 1 << 4;
         /// Servers that are empty
         const NOPLAYERS     = 1 << 5;
-        /// Servers that are whitelisted
-        const WHITE         = 1 << 6;
         /// Servers that are behind NAT
-        const NAT           = 1 << 7;
+        const NAT           = 1 << 6;
         /// Servers that are LAN
-        const LAN           = 1 << 8;
+        const LAN           = 1 << 7;
         /// Servers that has bots
-        const BOTS          = 1 << 9;
+        const BOTS          = 1 << 8;
     }
 }
 
@@ -138,7 +136,6 @@ impl<'a> ParseValue<'a> for Filter<'a> {
                 b"full" => filter.insert_flag(FilterFlags::FULL, p.parse()?),
                 b"password" => filter.insert_flag(FilterFlags::PASSWORD, p.parse()?),
                 b"noplayers" => filter.insert_flag(FilterFlags::NOPLAYERS, p.parse()?),
-                b"white" => filter.insert_flag(FilterFlags::WHITE, p.parse()?),
                 b"name_match" => filter.name_match = Some(p.parse()?),
                 b"version_match" => filter.version_match = Some(p.parse()?),
                 b"gameaddr" => {
@@ -266,12 +263,6 @@ mod tests {
             b"\\noplayers\\0" => {}
             b"\\noplayers\\1" => {
                 flags: FilterFlags::NOPLAYERS,
-            }
-        }
-        parse_white(flags_mask: FilterFlags::WHITE) {
-            b"\\white\\0" => {}
-            b"\\white\\1" => {
-                flags: FilterFlags::WHITE,
             }
         }
         parse_nat(flags_mask: FilterFlags::NAT) {
@@ -456,17 +447,6 @@ mod tests {
         matches!(servers, b"", 0, 1, 2);
         matches!(servers, b"\\bots\\0", 0, 1);
         matches!(servers, b"\\bots\\1", 2);
-    }
-
-    #[test]
-    fn match_white() {
-        let servers = servers! {
-            "0.0.0.0:0" => b""
-            "0.0.0.0:0" => b"" => |s| { s.flags |= FilterFlags::WHITE; }
-        };
-        matches!(servers, b"", 0, 1);
-        matches!(servers, b"\\white\\0", 0);
-        matches!(servers, b"\\white\\1", 1);
     }
 
     #[test]

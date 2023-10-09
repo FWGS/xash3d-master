@@ -131,12 +131,6 @@ pub struct Filter<'a> {
     pub gamedir: Option<&'a str>,
     /// Servers running the specified map (ex. cs_italy)
     pub map: Option<&'a str>,
-    /// Servers with their hostname matching \[hostname\] (can use * as a wildcard)
-    pub name_match: Option<&'a str>,
-    /// Servers running version \[version\] (can use * as a wildcard)
-    pub version_match: Option<&'a str>,
-    /// Return only servers on the specified IP address (port supported and optional)
-    pub gameaddr: Option<SocketAddrV4>,
     /// Client version.
     pub clver: Option<Version>,
 
@@ -150,7 +144,7 @@ impl Filter<'_> {
         self.flags_mask.insert(flag);
     }
 
-    pub fn matches(&self, addr: SocketAddrV4, server: &Server) -> bool {
+    pub fn matches(&self, _addr: SocketAddrV4, server: &Server) -> bool {
         if (server.flags & self.flags_mask) != self.flags {
             return false;
         }
@@ -159,17 +153,6 @@ impl Filter<'_> {
         }
         if self.map.map_or(false, |i| &*server.map != i) {
             return false;
-        }
-        if self.version_match.map_or(false, |i| &*server.version != i) {
-            return false;
-        }
-        if let Some(a) = self.gameaddr {
-            if addr.ip() != a.ip() {
-                return false;
-            }
-            if a.port() != 0 && addr.port() != a.port() {
-                return false;
-            }
         }
         true
     }
@@ -205,16 +188,6 @@ impl<'a> ParseValue<'a> for Filter<'a> {
                 b"full" => filter.insert_flag(FilterFlags::FULL, p.parse()?),
                 b"password" => filter.insert_flag(FilterFlags::PASSWORD, p.parse()?),
                 b"noplayers" => filter.insert_flag(FilterFlags::NOPLAYERS, p.parse()?),
-                b"name_match" => filter.name_match = Some(p.parse()?),
-                b"version_match" => filter.version_match = Some(p.parse()?),
-                b"gameaddr" => {
-                    let s = p.parse::<&str>()?;
-                    if let Ok(addr) = s.parse() {
-                        filter.gameaddr = Some(addr);
-                    } else if let Ok(ip) = s.parse() {
-                        filter.gameaddr = Some(SocketAddrV4::new(ip, 0));
-                    }
-                }
                 b"clver" => filter.clver = Some(p.parse()?),
                 b"nat" => filter.insert_flag(FilterFlags::NAT, p.parse()?),
                 b"lan" => filter.insert_flag(FilterFlags::LAN, p.parse()?),
@@ -238,8 +211,6 @@ impl<'a> ParseValue<'a> for Filter<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    use std::net::Ipv4Addr;
 
     macro_rules! tests {
         ($($name:ident$(($($predefined_f:ident: $predefined_v:expr),+ $(,)?))? {
@@ -275,27 +246,9 @@ mod tests {
                 map: Some("crossfire"),
             }
         }
-        parse_name_match {
-            b"\\name_match\\localhost" => {
-                name_match: Some("localhost"),
-            }
-        }
-        parse_version_match {
-            b"\\version_match\\1.2.3.4" => {
-                version_match: Some("1.2.3.4"),
-            }
-        }
-        parse_gameaddr {
-            b"\\gameaddr\\192.168.1.100" => {
-                gameaddr: Some(SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 100), 0)),
-            }
-            b"\\gameaddr\\192.168.1.100:27015" => {
-                gameaddr: Some(SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 100), 27015)),
-            }
-        }
         parse_clver {
             b"\\clver\\0.20" => {
-                clver: Some("0.20"),
+                clver: Some(Version::new(0, 20)),
             }
         }
         parse_dedicated(flags_mask: FilterFlags::DEDICATED) {
@@ -360,23 +313,17 @@ mod tests {
               \\dedicated\\1\
               \\empty\\1\
               \\full\\1\
-              \\gameaddr\\192.168.1.100\
               \\gamedir\\valve\
               \\lan\\1\
               \\map\\crossfire\
-              \\name_match\\localhost\
               \\nat\\1\
               \\noplayers\\1\
               \\password\\1\
               \\secure\\1\
-              \\version_match\\1.2.3.4\
             " => {
                 gamedir: Some("valve"),
                 map: Some("crossfire"),
-                name_match: Some("localhost"),
-                version_match: Some("1.2.3.4"),
-                gameaddr: Some(SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 100), 0)),
-                clver: Some("0.20"),
+                clver: Some(Version::new(0, 20)),
                 flags: FilterFlags::all(),
                 flags_mask: FilterFlags::all(),
             }

@@ -49,3 +49,27 @@ impl<T> Deref for Str<T> {
         &self.0
     }
 }
+
+/// Wrapper for slice of bytes without printing
+#[derive(Copy, Clone, PartialEq, Eq, Default)]
+pub struct Hide<T>(pub T);
+
+impl<T> fmt::Debug for Hide<T> {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        write!(fmt, "<hidden>")
+    }
+}
+
+impl<T> fmt::Display for Hide<T> {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        write!(fmt, "<hidden>")
+    }
+}
+
+impl<T> Deref for Hide<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}

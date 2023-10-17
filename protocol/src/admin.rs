@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2023 Denis Drakhnia <numas13@gmail.com>
 
 use crate::cursor::{Cursor, CursorMut};
-use crate::types::Str;
+use crate::types::{Hide, Str};
 use crate::Error;
 
 pub const HASH_LEN: usize = 64;
@@ -30,7 +30,7 @@ impl AdminChallenge {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct AdminCommand<'a> {
-    pub hash: &'a [u8],
+    pub hash: Hide<&'a [u8]>,
     pub command: Str<&'a [u8]>,
 }
 
@@ -39,7 +39,7 @@ impl<'a> AdminCommand<'a> {
 
     pub fn new(hash: &'a [u8], command: &'a str) -> Self {
         Self {
-            hash,
+            hash: Hide(hash),
             command: Str(command.as_bytes()),
         }
     }
@@ -47,7 +47,7 @@ impl<'a> AdminCommand<'a> {
     pub fn decode_with_hash_len(hash_len: usize, src: &'a [u8]) -> Result<Self, Error> {
         let mut cur = Cursor::new(src);
         cur.expect(Self::HEADER)?;
-        let hash = cur.get_bytes(hash_len)?;
+        let hash = Hide(cur.get_bytes(hash_len)?);
         let command = Str(cur.get_bytes(cur.remaining())?);
         cur.expect_empty()?;
         Ok(Self { hash, command })
@@ -61,7 +61,7 @@ impl<'a> AdminCommand<'a> {
     pub fn encode(&self, buf: &mut [u8]) -> Result<usize, Error> {
         Ok(CursorMut::new(buf)
             .put_bytes(Self::HEADER)?
-            .put_bytes(self.hash)?
+            .put_bytes(&self.hash)?
             .put_bytes(&self.command)?
             .pos())
     }

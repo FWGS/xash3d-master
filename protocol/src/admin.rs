@@ -44,13 +44,18 @@ impl<'a> AdminCommand<'a> {
         }
     }
 
-    pub fn decode(src: &'a [u8]) -> Result<Self, Error> {
+    pub fn decode_with_hash_len(hash_len: usize, src: &'a [u8]) -> Result<Self, Error> {
         let mut cur = Cursor::new(src);
         cur.expect(Self::HEADER)?;
-        let hash = cur.get_bytes(HASH_LEN)?;
+        let hash = cur.get_bytes(hash_len)?;
         let command = Str(cur.get_bytes(cur.remaining())?);
         cur.expect_empty()?;
         Ok(Self { hash, command })
+    }
+
+    #[inline]
+    pub fn decode(src: &'a [u8]) -> Result<Self, Error> {
+        Self::decode_with_hash_len(HASH_LEN, src)
     }
 
     pub fn encode(&self, buf: &mut [u8]) -> Result<usize, Error> {

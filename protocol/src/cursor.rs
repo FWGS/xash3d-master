@@ -323,10 +323,7 @@ macro_rules! impl_put {
 impl<'a> CursorMut<'a> {
     pub fn new(buffer: &'a mut [u8]) -> Self {
         let (buffer, buffer_mut) = buffer.split_at_mut(0);
-        Self {
-            buffer,
-            buffer_mut,
-        }
+        Self { buffer, buffer_mut }
     }
 
     pub fn buffer(&self) -> &'a [u8] {

@@ -60,6 +60,26 @@ impl<'a> AdminCommand<'a> {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum Packet<'a> {
+    AdminChallenge(AdminChallenge),
+    AdminCommand(AdminCommand<'a>),
+}
+
+impl<'a> Packet<'a> {
+    pub fn decode(src: &'a [u8]) -> Result<Self, Error> {
+        if let Ok(p) = AdminChallenge::decode(src) {
+            return Ok(Self::AdminChallenge(p));
+        }
+
+        if let Ok(p) = AdminCommand::decode(src) {
+            return Ok(Self::AdminCommand(p));
+        }
+
+        Err(Error::InvalidPacket)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

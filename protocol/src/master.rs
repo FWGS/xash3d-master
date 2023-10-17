@@ -133,6 +133,31 @@ impl AdminChallengeResponse {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum Packet<'a> {
+    ChallengeResponse(ChallengeResponse),
+    QueryServersResponse(QueryServersResponse<&'a [u8]>),
+    AdminChallengeResponse(AdminChallengeResponse),
+}
+
+impl<'a> Packet<'a> {
+    pub fn decode(src: &'a [u8]) -> Result<Self, Error> {
+        if let Ok(p) = ChallengeResponse::decode(src) {
+            return Ok(Self::ChallengeResponse(p));
+        }
+
+        if let Ok(p) = QueryServersResponse::decode(src) {
+            return Ok(Self::QueryServersResponse(p));
+        }
+
+        if let Ok(p) = AdminChallengeResponse::decode(src) {
+            return Ok(Self::AdminChallengeResponse(p));
+        }
+
+        Err(Error::InvalidPacket)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

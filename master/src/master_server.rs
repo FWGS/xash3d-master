@@ -12,8 +12,7 @@ use log::{error, info, trace, warn};
 use thiserror::Error;
 use xash3d_protocol::filter::{Filter, Version};
 use xash3d_protocol::server::Region;
-use xash3d_protocol::ServerInfo;
-use xash3d_protocol::{game, master, server, Error as ProtocolError};
+use xash3d_protocol::{ServerInfo, admin, game, master, server, Error as ProtocolError};
 
 use crate::config::{self, Config};
 
@@ -207,6 +206,22 @@ impl MasterServer {
                     let mut buf = [0; MAX_PACKET_SIZE];
                     let n = p.encode(&mut buf)?;
                     self.sock.send_to(&buf[..n], from)?;
+                }
+            }
+        }
+
+        if let Ok(p) = admin::Packet::decode(src) {
+            match p {
+                admin::Packet::AdminChallenge(p) => {
+                    trace!("{}: recv {:?}", from, p);
+                    let challenge = 0x12345678; // TODO:
+                    let p = master::AdminChallengeResponse::new(challenge);
+                    let mut buf = [0; 64];
+                    let n = p.encode(&mut buf)?;
+                    self.sock.send_to(&buf[..n], from)?;
+                }
+                admin::Packet::AdminCommand(p) => {
+                    trace!("{}: recv {:?}", from, p);
                 }
             }
         }

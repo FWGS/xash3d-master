@@ -3,9 +3,10 @@
 
 mod cli;
 
-use std::io;
+use std::io::{self, Write};
 use std::net::UdpSocket;
 
+use termion::input::TermRead;
 use blake2b_simd::Params;
 use thiserror::Error;
 use xash3d_protocol::{admin, master};
@@ -34,12 +35,18 @@ fn send_command(cli: &cli::Cli) -> Result<(), Error> {
         _ => return Err(Error::UnexpectedPacket),
     };
 
-    println!("Password:");
-    let mut password = String::new();
-    io::stdin().read_line(&mut password)?;
-    if password.ends_with('\n') {
-        password.pop();
-    }
+    let stdout = io::stdout();
+    let stdin = io::stdin();
+    let mut stdout = stdout.lock();
+    let mut stdin = stdin.lock();
+
+    stdout.write_all(b"Password:\n")?;
+    stdout.flush()?;
+
+    let password = match stdin.read_passwd(&mut stdout)? {
+        Some(pass) => pass,
+        None => return Ok(()),
+    };
 
     let hash = Params::new()
         .hash_length(cli.hash_len)

@@ -9,5 +9,6 @@ rust-version = "1.56"
 [dependencies]
 thiserror = "1.0.49"
 getopts = "0.2.21"
+termion = "2"
 blake2b_simd = "<0.6"
 xash3d-protocol = { path = "../protocol", version = "0.1.0" }

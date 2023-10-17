@@ -1,0 +1,13 @@
+[package]
+name = "admin"
+version = "0.1.0"
+license = "GPL-3.0-only"
+authors = ["Denis Drakhnia <numas13@gmail.com>"]
+edition = "2021"
+rust-version = "1.56"
+
+[dependencies]
+thiserror = "1.0.49"
+getopts = "0.2.21"
+blake2b_simd = "<0.6"
+xash3d-protocol = { path = "../protocol", version = "0.1.0" }

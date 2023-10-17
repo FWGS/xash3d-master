@@ -6,6 +6,8 @@ use crate::types::Str;
 use crate::Error;
 
 pub const HASH_LEN: usize = 64;
+pub const HASH_KEY: &str = "Half-Life";
+pub const HASH_PERSONAL: &str = "Freeman";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct AdminChallenge;

@@ -322,9 +322,10 @@ macro_rules! impl_put {
 
 impl<'a> CursorMut<'a> {
     pub fn new(buffer: &'a mut [u8]) -> Self {
+        let (buffer, buffer_mut) = buffer.split_at_mut(0);
         Self {
-            buffer: unsafe { slice::from_raw_parts(buffer.as_ptr(), 0) },
-            buffer_mut: buffer,
+            buffer,
+            buffer_mut,
         }
     }
 

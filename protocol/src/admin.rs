@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2023 Denis Drakhnia <numas13@gmail.com>
 
 use crate::cursor::{Cursor, CursorMut};
-use crate::types::{Hide, Str};
+use crate::types::Hide;
 use crate::Error;
 
 pub const HASH_LEN: usize = 64;
@@ -31,7 +31,7 @@ impl AdminChallenge {
 #[derive(Clone, Debug, PartialEq)]
 pub struct AdminCommand<'a> {
     pub hash: Hide<&'a [u8]>,
-    pub command: Str<&'a [u8]>,
+    pub command: &'a str,
 }
 
 impl<'a> AdminCommand<'a> {
@@ -40,7 +40,7 @@ impl<'a> AdminCommand<'a> {
     pub fn new(hash: &'a [u8], command: &'a str) -> Self {
         Self {
             hash: Hide(hash),
-            command: Str(command.as_bytes()),
+            command,
         }
     }
 
@@ -48,7 +48,7 @@ impl<'a> AdminCommand<'a> {
         let mut cur = Cursor::new(src);
         cur.expect(Self::HEADER)?;
         let hash = Hide(cur.get_bytes(hash_len)?);
-        let command = Str(cur.get_bytes(cur.remaining())?);
+        let command = cur.get_str(cur.remaining())?;
         cur.expect_empty()?;
         Ok(Self { hash, command })
     }
@@ -62,7 +62,7 @@ impl<'a> AdminCommand<'a> {
         Ok(CursorMut::new(buf)
             .put_bytes(Self::HEADER)?
             .put_bytes(&self.hash)?
-            .put_bytes(&self.command)?
+            .put_str(self.command)?
             .pos())
     }
 }
@@ -74,12 +74,12 @@ pub enum Packet<'a> {
 }
 
 impl<'a> Packet<'a> {
-    pub fn decode(src: &'a [u8]) -> Result<Self, Error> {
+    pub fn decode(hash_len: usize, src: &'a [u8]) -> Result<Self, Error> {
         if let Ok(p) = AdminChallenge::decode(src) {
             return Ok(Self::AdminChallenge(p));
         }
 
-        if let Ok(p) = AdminCommand::decode(src) {
+        if let Ok(p) = AdminCommand::decode_with_hash_len(hash_len, src) {
             return Ok(Self::AdminCommand(p));
         }
 

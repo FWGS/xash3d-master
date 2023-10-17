@@ -461,6 +461,7 @@ name = "xash3d-master"
 version = "0.1.0"
 dependencies = [
  "bitflags 2.4.0",
+ "blake2b_simd",
  "chrono",
  "fastrand",
  "getopts",

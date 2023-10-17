@@ -6,8 +6,8 @@ mod cli;
 use std::io::{self, Write};
 use std::net::UdpSocket;
 
-use termion::input::TermRead;
 use blake2b_simd::Params;
+use termion::input::TermRead;
 use thiserror::Error;
 use xash3d_protocol::{admin, master};
 

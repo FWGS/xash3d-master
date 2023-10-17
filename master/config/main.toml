@@ -20,3 +20,16 @@ version = "0.20"
 update_title = "https://github.com/FWGS/xash3d-fwgs"
 update_map = "Update please"
 update_addr = "127.0.0.1:27010"
+
+[hash]
+len = 64
+key = "Half-Life"
+personal = "Freeman"
+
+#[[admin]]
+#name = "gordon"
+#password = "crowbar"
+
+#[[admin]]
+#name = "gman"
+#password = "time2choose"

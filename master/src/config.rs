@@ -9,6 +9,7 @@ use std::path::Path;
 use log::LevelFilter;
 use serde::{de::Error as _, Deserialize, Deserializer};
 use thiserror::Error;
+use xash3d_protocol::admin;
 use xash3d_protocol::filter::Version;
 
 pub const DEFAULT_CONFIG_PATH: &str = "config/main.toml";
@@ -34,6 +35,11 @@ pub struct Config {
     pub server: ServerConfig,
     #[serde(default)]
     pub client: ClientConfig,
+    #[serde(default)]
+    pub hash: HashConfig,
+    #[serde(rename = "admin")]
+    #[serde(default)]
+    pub admin_list: Box<[AdminConfig]>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -105,6 +111,24 @@ pub struct ClientConfig {
     pub update_addr: Option<SocketAddrV4>,
 }
 
+#[derive(Deserialize, Default, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct HashConfig {
+    #[serde(default = "default_hash_len")]
+    pub len: usize,
+    #[serde(default = "default_hash_key")]
+    pub key: Box<str>,
+    #[serde(default = "default_hash_personal")]
+    pub personal: Box<str>,
+}
+
+#[derive(Deserialize, Default, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct AdminConfig {
+    pub name: Box<str>,
+    pub password: Box<str>,
+}
+
 fn default_log_level() -> LevelFilter {
     LevelFilter::Warn
 }
@@ -119,6 +143,18 @@ fn default_server_port() -> u16 {
 
 fn default_timeout() -> u32 {
     DEFAULT_TIMEOUT
+}
+
+fn default_hash_len() -> usize {
+    admin::HASH_LEN
+}
+
+fn default_hash_key() -> Box<str> {
+    Box::from(admin::HASH_KEY)
+}
+
+fn default_hash_personal() -> Box<str> {
+    Box::from(admin::HASH_PERSONAL)
 }
 
 fn deserialize_log_level<'de, D>(de: D) -> Result<LevelFilter, D::Error>

@@ -1,18 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // SPDX-FileCopyrightText: 2023 Denis Drakhnia <numas13@gmail.com>
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io;
-use std::net::{SocketAddr, SocketAddrV4, ToSocketAddrs, UdpSocket};
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, ToSocketAddrs, UdpSocket};
 use std::ops::Deref;
 use std::time::Instant;
 
+use blake2b_simd::Params;
 use fastrand::Rng;
 use log::{error, info, trace, warn};
 use thiserror::Error;
 use xash3d_protocol::filter::{Filter, Version};
 use xash3d_protocol::server::Region;
-use xash3d_protocol::{ServerInfo, admin, game, master, server, Error as ProtocolError};
+use xash3d_protocol::{admin, game, master, server, Error as ProtocolError, ServerInfo};
 
 use crate::config::{self, Config};
 
@@ -25,6 +26,9 @@ const SERVER_CLEANUP_MAX: usize = 100;
 /// How many cleanup calls should be skipped before removing outdated challenges.
 const CHALLENGE_CLEANUP_MAX: usize = 100;
 
+/// How many cleanup calls should be skipped before removing outdated admin challenges.
+const ADMIN_CHALLENGE_CLEANUP_MAX: usize = 100;
+
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Failed to bind server socket: {0}")]
@@ -33,10 +37,12 @@ pub enum Error {
     Protocol(#[from] ProtocolError),
     #[error(transparent)]
     Io(#[from] io::Error),
+    #[error("Admin challenge do not exist")]
+    AdminChallengeNotFound,
 }
 
 /// HashMap entry to keep tracking creation time.
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug)]
 struct Entry<T> {
     time: u32,
     value: T,
@@ -66,21 +72,49 @@ impl<T> Deref for Entry<T> {
     }
 }
 
+struct Counter {
+    max: usize,
+    cur: usize,
+}
+
+impl Counter {
+    fn new(max: usize) -> Self {
+        Self { max, cur: 0 }
+    }
+
+    fn next(&mut self) -> bool {
+        if self.cur <= self.max {
+            self.cur += 1;
+            false
+        } else {
+            self.cur = 0;
+            true
+        }
+    }
+}
+
 struct MasterServer {
     sock: UdpSocket,
     challenges: HashMap<SocketAddrV4, Entry<u32>>,
+    challenges_counter: Counter,
     servers: HashMap<SocketAddrV4, Entry<ServerInfo>>,
+    servers_counter: Counter,
     rng: Rng,
 
     start_time: Instant,
-    cleanup_challenges: usize,
-    cleanup_servers: usize,
     timeout: config::TimeoutConfig,
 
     clver: Version,
     update_title: Box<str>,
     update_map: Box<str>,
     update_addr: SocketAddrV4,
+
+    admin_challenges: HashMap<Ipv4Addr, Entry<u32>>,
+    admin_challenges_counter: Counter,
+    admin_list: Box<[config::AdminConfig]>,
+    hash: config::HashConfig,
+
+    blocklist: HashSet<Ipv4Addr>,
 }
 
 impl MasterServer {
@@ -100,15 +134,20 @@ impl MasterServer {
             sock,
             start_time: Instant::now(),
             challenges: Default::default(),
+            challenges_counter: Counter::new(CHALLENGE_CLEANUP_MAX),
             servers: Default::default(),
+            servers_counter: Counter::new(SERVER_CLEANUP_MAX),
             rng: Rng::new(),
-            cleanup_challenges: 0,
-            cleanup_servers: 0,
             timeout: cfg.server.timeout,
             clver: cfg.client.version,
             update_title: cfg.client.update_title,
             update_map: cfg.client.update_map,
             update_addr,
+            admin_challenges: Default::default(),
+            admin_challenges_counter: Counter::new(ADMIN_CHALLENGE_CLEANUP_MAX),
+            admin_list: cfg.admin_list,
+            hash: cfg.hash,
+            blocklist: Default::default(),
         })
     }
 
@@ -116,6 +155,7 @@ impl MasterServer {
         let mut buf = [0; MAX_PACKET_SIZE];
         loop {
             let (n, from) = self.sock.recv_from(&mut buf)?;
+
             let from = match from {
                 SocketAddr::V4(a) => a,
                 _ => {
@@ -131,6 +171,10 @@ impl MasterServer {
     }
 
     fn handle_packet(&mut self, from: SocketAddrV4, src: &[u8]) -> Result<(), Error> {
+        if self.is_blocked(from.ip()) {
+            return Ok(());
+        }
+
         if let Ok(p) = server::Packet::decode(src) {
             match p {
                 server::Packet::Challenge(p) => {
@@ -210,18 +254,53 @@ impl MasterServer {
             }
         }
 
-        if let Ok(p) = admin::Packet::decode(src) {
+        if let Ok(p) = admin::Packet::decode(self.hash.len, src) {
+            // TODO: throttle
             match p {
                 admin::Packet::AdminChallenge(p) => {
                     trace!("{}: recv {:?}", from, p);
-                    let challenge = 0x12345678; // TODO:
+                    let challenge = self.admin_challenge_add(from);
+
                     let p = master::AdminChallengeResponse::new(challenge);
+                    trace!("{}: send {:?}", from, p);
                     let mut buf = [0; 64];
                     let n = p.encode(&mut buf)?;
                     self.sock.send_to(&buf[..n], from)?;
+
+                    self.admin_challenges_cleanup();
                 }
                 admin::Packet::AdminCommand(p) => {
                     trace!("{}: recv {:?}", from, p);
+                    let challenge = *self
+                        .admin_challenges
+                        .get(from.ip())
+                        .ok_or(Error::AdminChallengeNotFound)?;
+
+                    let state = Params::new()
+                        .hash_length(self.hash.len)
+                        .key(self.hash.key.as_bytes())
+                        .personal(self.hash.personal.as_bytes())
+                        .to_state();
+
+                    let admin = self.admin_list.iter().find(|i| {
+                        let hash = state
+                            .clone()
+                            .update(i.password.as_bytes())
+                            .update(&challenge.to_le_bytes())
+                            .finalize();
+                        *p.hash == hash.as_bytes()
+                    });
+
+                    match admin {
+                        Some(admin) => {
+                            info!("{}: admin({}), command: {:?}", from, &admin.name, p.command);
+                            self.admin_command(p.command);
+                            self.admin_challenge_remove(from);
+                        }
+                        None => {
+                            warn!("{}: invalid admin hash, command: {:?}", from, p.command);
+                        }
+                    }
                 }
             }
         }
@@ -241,19 +320,31 @@ impl MasterServer {
     }
 
     fn remove_outdated_challenges(&mut self) {
-        if self.cleanup_challenges < CHALLENGE_CLEANUP_MAX {
-            self.cleanup_challenges += 1;
-            return;
+        if self.challenges_counter.next() {
+            let now = self.now();
+            self.challenges
+                .retain(|_, v| v.is_valid(now, self.timeout.challenge));
         }
-        let now = self.now();
-        let old = self.challenges.len();
-        self.challenges
-            .retain(|_, v| v.is_valid(now, self.timeout.challenge));
-        let new = self.challenges.len();
-        if old != new {
-            trace!("Removed {} outdated challenges", old - new);
+    }
+
+    fn admin_challenge_add(&mut self, addr: SocketAddrV4) -> u32 {
+        let x = self.rng.u32(..);
+        let entry = Entry::new(self.now(), x);
+        self.admin_challenges.insert(*addr.ip(), entry);
+        x
+    }
+
+    fn admin_challenge_remove(&mut self, addr: SocketAddrV4) {
+        self.admin_challenges.remove(addr.ip());
+    }
+
+    /// Remove outdated entries
+    fn admin_challenges_cleanup(&mut self) {
+        if self.admin_challenges_counter.next() {
+            let now = self.now();
+            self.admin_challenges
+                .retain(|_, v| v.is_valid(now, self.timeout.challenge));
         }
-        self.cleanup_challenges = 0;
     }
 
     fn add_server(&mut self, addr: SocketAddrV4, server: ServerInfo) {
@@ -264,19 +355,11 @@ impl MasterServer {
     }
 
     fn remove_outdated_servers(&mut self) {
-        if self.cleanup_servers < SERVER_CLEANUP_MAX {
-            self.cleanup_servers += 1;
-            return;
+        if self.servers_counter.next() {
+            let now = self.now();
+            self.servers
+                .retain(|_, v| v.is_valid(now, self.timeout.server));
         }
-        let now = self.now();
-        let old = self.servers.len();
-        self.servers
-            .retain(|_, v| v.is_valid(now, self.timeout.server));
-        let new = self.servers.len();
-        if old != new {
-            trace!("Removed {} outdated servers", old - new);
-        }
-        self.cleanup_servers = 0;
     }
 
     fn send_server_list<A, I>(&self, to: A, iter: I) -> Result<(), Error>
@@ -294,6 +377,45 @@ impl MasterServer {
             }
         }
         Ok(())
+    }
+
+    #[inline]
+    fn is_blocked(&self, ip: &Ipv4Addr) -> bool {
+        self.blocklist.contains(ip)
+    }
+
+    fn admin_command(&mut self, cmd: &str) {
+        let args: Vec<_> = cmd.split(' ').collect();
+
+        fn helper<F: FnMut(&str, Ipv4Addr)>(args: &[&str], mut op: F) {
+            let iter = args.iter().map(|i| (i, i.parse::<Ipv4Addr>()));
+            for (i, ip) in iter {
+                match ip {
+                    Ok(ip) => op(i, ip),
+                    Err(_) => warn!("invalid ip: {}", i),
+                }
+            }
+        }
+
+        match args[0] {
+            "ban" => {
+                helper(&args[1..], |_, ip| {
+                    if self.blocklist.insert(ip) {
+                        info!("ban ip: {}", ip);
+                    }
+                });
+            }
+            "unban" => {
+                helper(&args[1..], |_, ip| {
+                    if self.blocklist.remove(&ip) {
+                        info!("unban ip: {}", ip);
+                    }
+                });
+            }
+            _ => {
+                warn!("invalid command: {}", args[0]);
+            }
+        }
     }
 }
 

@@ -1,0 +1,29 @@
+[package]
+name = "xash3d-master"
+version = "0.1.0"
+license = "GPL-3.0-only"
+authors = ["Denis Drakhnia <numas13@gmail.com>"]
+edition = "2021"
+rust-version = "1.56"
+
+[features]
+default = ["logtime"]
+logtime = ["chrono"]
+
+[dependencies]
+thiserror = "1.0.49"
+getopts = "0.2.21"
+log = "<0.4.19"
+bitflags = "2.4"
+fastrand = "2.0.1"
+serde = { version = "1.0.188", features = ["derive"] }
+toml = "0.5.11"
+xash3d-protocol = { path = "../protocol", version = "0.1.0" }
+
+[dependencies.chrono]
+version = "<0.4.27"
+optional = true
+default-features = false
+features = ["clock"]
+[target.wasm32-unknown-emscripten.dependencies]
+once_cell = { version = "<1.18", optional = true }

@@ -34,11 +34,12 @@ use std::num::ParseIntError;
 use std::str::FromStr;
 
 use bitflags::bitflags;
-use log::{debug, log_enabled, Level};
+use log::debug;
 
-use crate::parser::{Error as ParserError, ParseValue, Parser};
-use crate::server::Server;
-use crate::server_info::{ServerFlags, ServerInfo, ServerType};
+use crate::cursor::{Cursor, GetKeyValue, PutKeyValue};
+use crate::server::{ServerAdd, ServerFlags, ServerType};
+use crate::types::Str;
+use crate::{Error, ServerInfo};
 
 bitflags! {
     #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
@@ -64,8 +65,8 @@ bitflags! {
     }
 }
 
-impl<T> From<&ServerInfo<T>> for FilterFlags {
-    fn from(info: &ServerInfo<T>) -> Self {
+impl<T> From<&ServerAdd<T>> for FilterFlags {
+    fn from(info: &ServerAdd<T>) -> Self {
         let mut flags = Self::empty();
 
         flags.set(Self::DEDICATED, info.server_type == ServerType::Dedicated);
@@ -115,24 +116,31 @@ impl FromStr for Version {
     }
 }
 
-impl ParseValue<'_> for Version {
-    type Err = ParserError;
+impl GetKeyValue<'_> for Version {
+    fn get_key_value(cur: &mut Cursor) -> Result<Self, Error> {
+        Self::from_str(cur.get_key_value()?).map_err(|_| Error::InvalidPacket)
+    }
+}
 
-    fn parse(p: &mut Parser<'_>) -> Result<Self, Self::Err> {
-        let s = p.parse::<&str>()?;
-        let v = s.parse()?;
-        Ok(v)
+impl PutKeyValue for Version {
+    fn put_key_value<'a, 'b>(
+        &self,
+        cur: &'b mut crate::cursor::CursorMut<'a>,
+    ) -> Result<&'b mut crate::cursor::CursorMut<'a>, Error> {
+        cur.put_key_value(self.major)?
+            .put_u8(b'.')?
+            .put_key_value(self.minor)
     }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Filter<'a> {
     /// Servers running the specified modification (ex. cstrike)
-    pub gamedir: Option<&'a str>,
+    pub gamedir: &'a [u8],
     /// Servers running the specified map (ex. cs_italy)
-    pub map: Option<&'a str>,
+    pub map: &'a [u8],
     /// Client version.
-    pub clver: Option<Version>,
+    pub clver: Version,
 
     pub flags: FilterFlags,
     pub flags_mask: FilterFlags,
@@ -144,62 +152,47 @@ impl Filter<'_> {
         self.flags_mask.insert(flag);
     }
 
-    pub fn matches(&self, _addr: SocketAddrV4, server: &Server) -> bool {
-        if (server.flags & self.flags_mask) != self.flags {
-            return false;
-        }
-        if self.gamedir.map_or(false, |i| &*server.gamedir != i) {
-            return false;
-        }
-        if self.map.map_or(false, |i| &*server.map != i) {
-            return false;
-        }
-        true
+    pub fn matches(&self, _addr: SocketAddrV4, info: &ServerInfo) -> bool {
+        !((info.flags & self.flags_mask) != self.flags
+            || (!self.gamedir.is_empty() && self.gamedir != &*info.gamedir)
+            || (!self.map.is_empty() && self.map != &*info.map))
     }
 }
 
 impl<'a> Filter<'a> {
-    pub fn from_bytes(src: &'a [u8]) -> Result<Self, ParserError> {
-        let mut parser = Parser::new(src);
-        let filter = parser.parse()?;
-        Ok(filter)
-    }
-}
-
-impl<'a> ParseValue<'a> for Filter<'a> {
-    type Err = ParserError;
-
-    fn parse(p: &mut Parser<'a>) -> Result<Self, Self::Err> {
+    pub fn from_bytes(src: &'a [u8]) -> Result<Self, Error> {
+        let mut cur = Cursor::new(src);
         let mut filter = Self::default();
 
         loop {
-            let name = match p.parse_bytes() {
+            let key = match cur.get_key_raw().map(Str) {
                 Ok(s) => s,
-                Err(ParserError::End) => break,
+                Err(Error::UnexpectedEnd) => break,
                 Err(e) => return Err(e),
             };
 
-            match name {
-                b"dedicated" => filter.insert_flag(FilterFlags::DEDICATED, p.parse()?),
-                b"secure" => filter.insert_flag(FilterFlags::SECURE, p.parse()?),
-                b"gamedir" => filter.gamedir = Some(p.parse()?),
-                b"map" => filter.map = Some(p.parse()?),
-                b"empty" => filter.insert_flag(FilterFlags::NOT_EMPTY, p.parse()?),
-                b"full" => filter.insert_flag(FilterFlags::FULL, p.parse()?),
-                b"password" => filter.insert_flag(FilterFlags::PASSWORD, p.parse()?),
-                b"noplayers" => filter.insert_flag(FilterFlags::NOPLAYERS, p.parse()?),
-                b"clver" => filter.clver = Some(p.parse()?),
-                b"nat" => filter.insert_flag(FilterFlags::NAT, p.parse()?),
-                b"lan" => filter.insert_flag(FilterFlags::LAN, p.parse()?),
-                b"bots" => filter.insert_flag(FilterFlags::BOTS, p.parse()?),
+            match *key {
+                b"dedicated" => filter.insert_flag(FilterFlags::DEDICATED, cur.get_key_value()?),
+                b"secure" => filter.insert_flag(FilterFlags::SECURE, cur.get_key_value()?),
+                b"gamedir" => filter.gamedir = cur.get_key_value()?,
+                b"map" => filter.map = cur.get_key_value()?,
+                b"empty" => filter.insert_flag(FilterFlags::NOT_EMPTY, cur.get_key_value()?),
+                b"full" => filter.insert_flag(FilterFlags::FULL, cur.get_key_value()?),
+                b"password" => filter.insert_flag(FilterFlags::PASSWORD, cur.get_key_value()?),
+                b"noplayers" => filter.insert_flag(FilterFlags::NOPLAYERS, cur.get_key_value()?),
+                b"clver" => {
+                    filter.clver = cur
+                        .get_key_value::<&str>()?
+                        .parse()
+                        .map_err(|_| Error::InvalidPacket)?
+                }
+                b"nat" => filter.insert_flag(FilterFlags::NAT, cur.get_key_value()?),
+                b"lan" => filter.insert_flag(FilterFlags::LAN, cur.get_key_value()?),
+                b"bots" => filter.insert_flag(FilterFlags::BOTS, cur.get_key_value()?),
                 _ => {
                     // skip unknown fields
-                    let value = p.parse_bytes()?;
-                    if log_enabled!(Level::Debug) {
-                        let name = String::from_utf8_lossy(name);
-                        let value = String::from_utf8_lossy(value);
-                        debug!("Invalid Filter field \"{}\" = \"{}\"", name, value);
-                    }
+                    let value = Str(cur.get_key_value_raw()?);
+                    debug!("Invalid Filter field \"{}\" = \"{}\"", key, value);
                 }
             }
         }
@@ -208,8 +201,43 @@ impl<'a> ParseValue<'a> for Filter<'a> {
     }
 }
 
+impl fmt::Display for &Filter<'_> {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        macro_rules! display_flag {
+            ($n:expr, $f:expr) => {
+                if self.flags_mask.contains($f) {
+                    let flag = if self.flags.contains($f) { '1' } else { '0' };
+                    write!(fmt, "\\{}\\{}", $n, flag)?;
+                }
+            };
+        }
+
+        display_flag!("dedicated", FilterFlags::DEDICATED);
+        display_flag!("secure", FilterFlags::SECURE);
+        if !self.gamedir.is_empty() {
+            write!(fmt, "\\gamedir\\{}", Str(self.gamedir))?;
+        }
+        display_flag!("secure", FilterFlags::SECURE);
+        if !self.map.is_empty() {
+            write!(fmt, "\\map\\{}", Str(self.map))?;
+        }
+        display_flag!("empty", FilterFlags::NOT_EMPTY);
+        display_flag!("full", FilterFlags::FULL);
+        display_flag!("password", FilterFlags::PASSWORD);
+        display_flag!("noplayers", FilterFlags::NOPLAYERS);
+        write!(fmt, "\\clver\\{}", self.clver)?;
+        display_flag!("nat", FilterFlags::NAT);
+        display_flag!("lan", FilterFlags::LAN);
+        display_flag!("bots", FilterFlags::BOTS);
+
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::super::cursor::CursorMut;
+    use super::super::types::Str;
     use super::*;
 
     macro_rules! tests {
@@ -238,17 +266,17 @@ mod tests {
     tests! {
         parse_gamedir {
             b"\\gamedir\\valve" => {
-                gamedir: Some("valve"),
+                gamedir: &b"valve"[..],
             }
         }
         parse_map {
             b"\\map\\crossfire" => {
-                map: Some("crossfire"),
+                map: &b"crossfire"[..],
             }
         }
         parse_clver {
             b"\\clver\\0.20" => {
-                clver: Some(Version::new(0, 20)),
+                clver: Version::new(0, 20),
             }
         }
         parse_dedicated(flags_mask: FilterFlags::DEDICATED) {
@@ -321,9 +349,9 @@ mod tests {
               \\password\\1\
               \\secure\\1\
             " => {
-                gamedir: Some("valve"),
-                map: Some("crossfire"),
-                clver: Some(Version::new(0, 20)),
+                gamedir: &b"valve"[..],
+                map: &b"crossfire"[..],
+                clver: Version::new(0, 20),
                 flags: FilterFlags::all(),
                 flags_mask: FilterFlags::all(),
             }
@@ -334,8 +362,14 @@ mod tests {
         ($($addr:expr => $info:expr $(=> $func:expr)?)+) => (
             [$({
                 let addr = $addr.parse::<SocketAddrV4>().unwrap();
-                let (_, info, _) = ServerInfo::<&str>::from_bytes($info).unwrap();
-                let server = Server::new(&info);
+                let mut buf = [0; 512];
+                let n = CursorMut::new(&mut buf)
+                    .put_bytes(ServerAdd::HEADER).unwrap()
+                    .put_key("challenge", 0).unwrap()
+                    .put_bytes($info).unwrap()
+                    .pos();
+                let p = ServerAdd::<Str<&[u8]>>::decode(&buf[..n]).unwrap();
+                let server = ServerInfo::new(&p);
                 $(
                     let mut server = server;
                     let func: fn(&mut Server) = $func;

@@ -2,14 +2,9 @@
 // SPDX-FileCopyrightText: 2023 Denis Drakhnia <numas13@gmail.com>
 
 mod cli;
-mod client;
 mod config;
-mod filter;
 mod logger;
 mod master_server;
-mod parser;
-mod server;
-mod server_info;
 
 use log::error;
 

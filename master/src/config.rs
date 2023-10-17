@@ -9,8 +9,7 @@ use std::path::Path;
 use log::LevelFilter;
 use serde::{de::Error as _, Deserialize, Deserializer};
 use thiserror::Error;
-
-use crate::filter::Version;
+use xash3d_protocol::filter::Version;
 
 pub const DEFAULT_CONFIG_PATH: &str = "config/main.toml";
 

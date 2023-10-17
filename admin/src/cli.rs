@@ -51,7 +51,7 @@ pub fn parse() -> Cli {
     opts.optflag("h", "help", "print usage help");
     opts.optflag("v", "version", "print program version");
     let help = format!("address to connect [default: {}]", cli.address);
-    opts.optopt("h", "host", &help, "ADDR");
+    opts.optopt("a", "host", &help, "ADDR");
     let help = format!("hash length [default: {}]", cli.hash_len);
     opts.optopt("l", "hash-length", &help, "N");
     let help = format!("hash key [default: {}]", cli.hash_key);

@@ -30,6 +30,7 @@ impl AdminChallenge {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct AdminCommand<'a> {
+    pub master_challenge: u32,
     pub hash: Hide<&'a [u8]>,
     pub command: &'a str,
 }
@@ -37,8 +38,9 @@ pub struct AdminCommand<'a> {
 impl<'a> AdminCommand<'a> {
     pub const HEADER: &'static [u8] = b"admin";
 
-    pub fn new(hash: &'a [u8], command: &'a str) -> Self {
+    pub fn new(master_challenge: u32, hash: &'a [u8], command: &'a str) -> Self {
         Self {
+            master_challenge,
             hash: Hide(hash),
             command,
         }
@@ -47,10 +49,15 @@ impl<'a> AdminCommand<'a> {
     pub fn decode_with_hash_len(hash_len: usize, src: &'a [u8]) -> Result<Self, Error> {
         let mut cur = Cursor::new(src);
         cur.expect(Self::HEADER)?;
+        let master_challenge = cur.get_u32_le()?;
         let hash = Hide(cur.get_bytes(hash_len)?);
         let command = cur.get_str(cur.remaining())?;
         cur.expect_empty()?;
-        Ok(Self { hash, command })
+        Ok(Self {
+            master_challenge,
+            hash,
+            command,
+        })
     }
 
     #[inline]
@@ -61,6 +68,7 @@ impl<'a> AdminCommand<'a> {
     pub fn encode(&self, buf: &mut [u8]) -> Result<usize, Error> {
         Ok(CursorMut::new(buf)
             .put_bytes(Self::HEADER)?
+            .put_u32_le(self.master_challenge)?
             .put_bytes(&self.hash)?
             .put_str(self.command)?
             .pos())
@@ -101,7 +109,7 @@ mod tests {
 
     #[test]
     fn admin_command() {
-        let p = AdminCommand::new(&[1; HASH_LEN], "foo bar baz");
+        let p = AdminCommand::new(0x12345678, &[1; HASH_LEN], "foo bar baz");
         let mut buf = [0; 512];
         let n = p.encode(&mut buf).unwrap();
         assert_eq!(AdminCommand::decode(&buf[..n]), Ok(p));

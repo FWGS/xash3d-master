@@ -13,6 +13,8 @@ port = 27010
 challenge = 300
 # Time in seconds while server is valid
 server = 300
+# TIme in seconds before next admin request is allowed after wrong password
+admin = 10
 
 [client]
 # If client version is less then show update message

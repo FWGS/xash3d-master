@@ -29,6 +29,9 @@ const CHALLENGE_CLEANUP_MAX: usize = 100;
 /// How many cleanup calls should be skipped before removing outdated admin challenges.
 const ADMIN_CHALLENGE_CLEANUP_MAX: usize = 100;
 
+/// How many cleanup calls should be skipped before removing outdated admin limit entries
+const ADMIN_LIMIT_CLEANUP_MAX: usize = 100;
+
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Failed to bind server socket: {0}")]
@@ -109,9 +112,12 @@ struct MasterServer {
     update_map: Box<str>,
     update_addr: SocketAddrV4,
 
-    admin_challenges: HashMap<Ipv4Addr, Entry<u32>>,
+    admin_challenges: HashMap<Ipv4Addr, Entry<(u32, u32)>>,
     admin_challenges_counter: Counter,
     admin_list: Box<[config::AdminConfig]>,
+    // rate limit if hash is invalid
+    admin_limit: HashMap<Ipv4Addr, Entry<()>>,
+    admin_limit_counter: Counter,
     hash: config::HashConfig,
 
     blocklist: HashSet<Ipv4Addr>,
@@ -146,6 +152,8 @@ impl MasterServer {
             admin_challenges: Default::default(),
             admin_challenges_counter: Counter::new(ADMIN_CHALLENGE_CLEANUP_MAX),
             admin_list: cfg.admin_list,
+            admin_limit: Default::default(),
+            admin_limit_counter: Counter::new(ADMIN_LIMIT_CLEANUP_MAX),
             hash: cfg.hash,
             blocklist: Default::default(),
         })
@@ -255,13 +263,21 @@ impl MasterServer {
         }
 
         if let Ok(p) = admin::Packet::decode(self.hash.len, src) {
-            // TODO: throttle
+            let now = self.now();
+
+            if let Some(e) = self.admin_limit.get(from.ip()) {
+                if e.is_valid(now, self.timeout.admin) {
+                    trace!("{}: rate limit", from);
+                    return Ok(());
+                }
+            }
+
             match p {
                 admin::Packet::AdminChallenge(p) => {
                     trace!("{}: recv {:?}", from, p);
-                    let challenge = self.admin_challenge_add(from);
+                    let (master_challenge, hash_challenge) = self.admin_challenge_add(from);
 
-                    let p = master::AdminChallengeResponse::new(challenge);
+                    let p = master::AdminChallengeResponse::new(master_challenge, hash_challenge);
                     trace!("{}: send {:?}", from, p);
                     let mut buf = [0; 64];
                     let n = p.encode(&mut buf)?;
@@ -271,10 +287,20 @@ impl MasterServer {
                 }
                 admin::Packet::AdminCommand(p) => {
                     trace!("{}: recv {:?}", from, p);
-                    let challenge = *self
+                    let entry = *self
                         .admin_challenges
                         .get(from.ip())
                         .ok_or(Error::AdminChallengeNotFound)?;
+
+                    if entry.0 != p.master_challenge {
+                        trace!("{}: master challenge is not valid", from);
+                        return Ok(());
+                    }
+
+                    if !entry.is_valid(now, self.timeout.challenge) {
+                        trace!("{}: challenge is outdated", from);
+                        return Ok(());
+                    }
 
                     let state = Params::new()
                         .hash_length(self.hash.len)
@@ -286,7 +312,7 @@ impl MasterServer {
                         let hash = state
                             .clone()
                             .update(i.password.as_bytes())
-                            .update(&challenge.to_le_bytes())
+                            .update(&entry.1.to_le_bytes())
                             .finalize();
                         *p.hash == hash.as_bytes()
                     });
@@ -299,6 +325,8 @@ impl MasterServer {
                         }
                         None => {
                             warn!("{}: invalid admin hash, command: {:?}", from, p.command);
+                            self.admin_limit.insert(*from.ip(), Entry::new(now, ()));
+                            self.admin_limit_cleanup();
                         }
                     }
                 }
@@ -327,11 +355,12 @@ impl MasterServer {
         }
     }
 
-    fn admin_challenge_add(&mut self, addr: SocketAddrV4) -> u32 {
+    fn admin_challenge_add(&mut self, addr: SocketAddrV4) -> (u32, u32) {
         let x = self.rng.u32(..);
-        let entry = Entry::new(self.now(), x);
+        let y = self.rng.u32(..);
+        let entry = Entry::new(self.now(), (x, y));
         self.admin_challenges.insert(*addr.ip(), entry);
-        x
+        (x, y)
     }
 
     fn admin_challenge_remove(&mut self, addr: SocketAddrV4) {
@@ -344,6 +373,14 @@ impl MasterServer {
             let now = self.now();
             self.admin_challenges
                 .retain(|_, v| v.is_valid(now, self.timeout.challenge));
+        }
+    }
+
+    fn admin_limit_cleanup(&mut self) {
+        if self.admin_limit_counter.next() {
+            let now = self.now();
+            self.admin_limit
+                .retain(|_, v| v.is_valid(now, self.timeout.admin));
         }
     }
 

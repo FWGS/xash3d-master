@@ -17,6 +17,7 @@ pub const DEFAULT_CONFIG_PATH: &str = "config/main.toml";
 pub const DEFAULT_MASTER_SERVER_IP: IpAddr = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0));
 pub const DEFAULT_MASTER_SERVER_PORT: u16 = 27010;
 pub const DEFAULT_TIMEOUT: u32 = 300;
+pub const DEFAULT_ADMIN_TIMEOUT: u32 = 10;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -86,6 +87,8 @@ pub struct TimeoutConfig {
     pub challenge: u32,
     #[serde(default = "default_timeout")]
     pub server: u32,
+    #[serde(default = "default_admin_timeout")]
+    pub admin: u32,
 }
 
 impl Default for TimeoutConfig {
@@ -93,6 +96,7 @@ impl Default for TimeoutConfig {
         Self {
             challenge: default_timeout(),
             server: default_timeout(),
+            admin: default_admin_timeout(),
         }
     }
 }
@@ -143,6 +147,10 @@ fn default_server_port() -> u16 {
 
 fn default_timeout() -> u32 {
     DEFAULT_TIMEOUT
+}
+
+fn default_admin_timeout() -> u32 {
+    DEFAULT_ADMIN_TIMEOUT
 }
 
 fn default_hash_len() -> usize {

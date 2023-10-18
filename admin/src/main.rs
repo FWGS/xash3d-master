@@ -30,8 +30,8 @@ fn send_command(cli: &cli::Cli) -> Result<(), Error> {
     sock.send(&buf[..n])?;
 
     let n = sock.recv(&mut buf)?;
-    let challenge = match master::Packet::decode(&buf[..n])? {
-        master::Packet::AdminChallengeResponse(p) => p.challenge,
+    let (master_challenge, hash_challenge) = match master::Packet::decode(&buf[..n])? {
+        master::Packet::AdminChallengeResponse(p) => (p.master_challenge, p.hash_challenge),
         _ => return Err(Error::UnexpectedPacket),
     };
 
@@ -54,10 +54,11 @@ fn send_command(cli: &cli::Cli) -> Result<(), Error> {
         .personal(cli.hash_personal.as_bytes())
         .to_state()
         .update(password.as_bytes())
-        .update(&challenge.to_le_bytes())
+        .update(&hash_challenge.to_le_bytes())
         .finalize();
 
-    let n = admin::AdminCommand::new(hash.as_bytes(), &cli.command).encode(&mut buf)?;
+    let n = admin::AdminCommand::new(master_challenge, hash.as_bytes(), &cli.command)
+        .encode(&mut buf)?;
     sock.send(&buf[..n])?;
 
     Ok(())

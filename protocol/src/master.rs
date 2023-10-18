@@ -107,28 +107,37 @@ where
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct AdminChallengeResponse {
-    pub challenge: u32,
+    pub master_challenge: u32,
+    pub hash_challenge: u32,
 }
 
 impl AdminChallengeResponse {
     pub const HEADER: &'static [u8] = b"\xff\xff\xff\xffadminchallenge";
 
-    pub fn new(challenge: u32) -> Self {
-        Self { challenge }
+    pub fn new(master_challenge: u32, hash_challenge: u32) -> Self {
+        Self {
+            master_challenge,
+            hash_challenge,
+        }
     }
 
     pub fn decode(src: &[u8]) -> Result<Self, Error> {
         let mut cur = Cursor::new(src);
         cur.expect(Self::HEADER)?;
-        let challenge = cur.get_u32_le()?;
+        let master_challenge = cur.get_u32_le()?;
+        let hash_challenge = cur.get_u32_le()?;
         cur.expect_empty()?;
-        Ok(Self { challenge })
+        Ok(Self {
+            master_challenge,
+            hash_challenge,
+        })
     }
 
     pub fn encode(&self, buf: &mut [u8]) -> Result<usize, Error> {
         Ok(CursorMut::new(buf)
             .put_bytes(Self::HEADER)?
-            .put_u32_le(self.challenge)?
+            .put_u32_le(self.master_challenge)?
+            .put_u32_le(self.hash_challenge)?
             .pos())
     }
 }
@@ -187,7 +196,7 @@ mod tests {
 
     #[test]
     fn admin_challenge_response() {
-        let p = AdminChallengeResponse::new(0x12345678);
+        let p = AdminChallengeResponse::new(0x12345678, 0x87654321);
         let mut buf = [0; 64];
         let n = p.encode(&mut buf).unwrap();
         assert_eq!(AdminChallengeResponse::decode(&buf[..n]), Ok(p));

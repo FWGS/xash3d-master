@@ -65,7 +65,14 @@ macro_rules! impl_get_value {
     ($($t:ty),+ $(,)?) => {
         $(impl<'a> GetKeyValue<'a> for $t {
             fn get_key_value(cur: &mut Cursor<'a>) -> Result<Self, Error> {
-                cur.get_key_value::<&str>()?.parse().map_err(|_| Error::InvalidPacket)
+                let s = cur.get_key_value::<&str>()?;
+                // HACK: special case for one asshole
+                let s = if s.len() > 2 && s.as_bytes()[0] == b'^' && s.as_bytes()[1].is_ascii_digit() {
+                    &s[2..]
+                } else {
+                    s
+                };
+                s.parse().map_err(|_| Error::InvalidPacket)
             }
         })+
     };

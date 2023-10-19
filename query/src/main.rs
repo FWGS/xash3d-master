@@ -31,7 +31,7 @@ enum Error {
 }
 
 #[derive(Clone, Debug, Serialize)]
-#[serde(tag = "type")]
+#[serde(tag = "status")]
 enum ServerResultKind {
     #[serde(rename = "ok")]
     Ok { info: ServerInfo },
@@ -48,28 +48,30 @@ enum ServerResultKind {
 #[derive(Clone, Debug, Serialize)]
 struct ServerResult {
     address: String,
+    ping: f32,
     #[serde(flatten)]
     kind: ServerResultKind,
 }
 
 impl ServerResult {
-    fn new(address: String, kind: ServerResultKind) -> Self {
+    fn new(address: String, ping: f32, kind: ServerResultKind) -> Self {
         Self {
             address: address.to_string(),
+            ping,
             kind,
         }
     }
 
-    fn ok<T: Into<ServerInfo>>(address: String, info: T) -> Self {
-        Self::new(address, ServerResultKind::Ok { info: info.into() })
+    fn ok(address: String, ping: f32, info: ServerInfo) -> Self {
+        Self::new(address, ping, ServerResultKind::Ok { info })
     }
 
     fn timeout(address: String) -> Self {
-        Self::new(address, ServerResultKind::Timeout)
+        Self::new(address, 0.0, ServerResultKind::Timeout)
     }
 
-    fn protocol(address: String) -> Self {
-        Self::new(address, ServerResultKind::Protocol)
+    fn protocol(address: String, ping: f32) -> Self {
+        Self::new(address, ping, ServerResultKind::Protocol)
     }
 
     fn error<T>(address: String, message: T) -> Self
@@ -78,18 +80,20 @@ impl ServerResult {
     {
         Self::new(
             address,
+            0.0,
             ServerResultKind::Error {
                 message: message.to_string(),
             },
         )
     }
 
-    fn invalid<T>(address: String, message: T, response: &[u8]) -> Self
+    fn invalid<T>(address: String, ping: f32, message: T, response: &[u8]) -> Self
     where
         T: fmt::Display,
     {
         Self::new(
             address,
+            ping,
             ServerResultKind::Invalid {
                 message: message.to_string(),
                 response: Str(response).to_string(),
@@ -112,7 +116,7 @@ struct ServerInfo {
     pub password: bool,
 }
 
-impl From<server::GetServerInfoResponse<&str>> for ServerInfo {
+impl ServerInfo {
     fn from(other: server::GetServerInfoResponse<&str>) -> Self {
         Self {
             gamedir: other.gamedir.to_owned(),
@@ -251,10 +255,12 @@ fn get_server_info(
     sock.connect(&addr)?;
     sock.set_read_timeout(Some(timeout))?;
 
+    let mut ping = 0.0;
     for &i in versions {
         let p = game::GetServerInfo::new(i);
         let mut buf = [0; 2048];
         let n = p.encode(&mut buf)?;
+        let start = Instant::now();
         sock.send(&buf[..n])?;
 
         let n = match sock.recv(&mut buf) {
@@ -266,22 +272,24 @@ fn get_server_info(
                 _ => Err(e)?,
             },
         };
+        ping = start.elapsed().as_micros() as f32 / 1000.0;
 
         let response = &buf[..n];
         match server::GetServerInfoResponse::decode(response) {
             Ok(packet) => {
-                return Ok(ServerResult::ok(addr, packet));
+                let info = ServerInfo::from(packet);
+                return Ok(ServerResult::ok(addr, ping, info));
             }
             Err(ProtocolError::InvalidProtocolVersion) => {
                 // try another protocol version
             }
             Err(e) => {
-                return Ok(ServerResult::invalid(addr, e, response));
+                return Ok(ServerResult::invalid(addr, ping, e, response));
             }
         }
     }
 
-    Ok(ServerResult::protocol(addr))
+    Ok(ServerResult::protocol(addr, ping))
 }
 
 fn query_server_info(cli: &Arc<Cli>, servers: &[String]) -> Result<(), Error> {
@@ -357,7 +365,7 @@ fn query_server_info(cli: &Arc<Cli>, servers: &[String]) -> Result<(), Error> {
         }
     } else {
         for i in servers {
-            println!("server: {}", i.address);
+            println!("server: {} [{:.3} ms]", i.address, i.ping);
 
             macro_rules! p {
                 ($($key:ident: $value:expr),+ $(,)?) => {
@@ -368,7 +376,7 @@ fn query_server_info(cli: &Arc<Cli>, servers: &[String]) -> Result<(), Error> {
             match &i.kind {
                 ServerResultKind::Ok { info } => {
                     p! {
-                        type: "ok",
+                        status: "ok",
                         host: Colored::new(&info.host, cli.force_color),
                         gamedir: info.gamedir,
                         map: info.map,
@@ -383,23 +391,23 @@ fn query_server_info(cli: &Arc<Cli>, servers: &[String]) -> Result<(), Error> {
                 }
                 ServerResultKind::Timeout => {
                     p! {
-                        type: "timeout",
+                        status: "timeout",
                     }
                 }
                 ServerResultKind::Protocol => {
                     p! {
-                        type: "protocol",
+                        status: "protocol",
                     }
                 }
                 ServerResultKind::Error { message } => {
                     p! {
-                        type: "error",
+                        status: "error",
                         message: message,
                     }
                 }
                 ServerResultKind::Invalid { message, response } => {
                     p! {
-                        type: "invalid",
+                        status: "invalid",
                         message: message,
                         response: response,
                     }

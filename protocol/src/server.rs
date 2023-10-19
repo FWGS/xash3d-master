@@ -361,6 +361,16 @@ where
         let mut cur = Cursor::new(src);
         cur.expect(GetServerInfoResponse::HEADER)?;
 
+        if !cur.as_slice().starts_with(b"\\") {
+            let s = cur.get_str(cur.remaining())?;
+            let p = s.rfind(':').ok_or(Error::InvalidPacket)?;
+            let msg = &s[p + 1..];
+            match msg.trim() {
+                "wrong version" => return Err(Error::InvalidProtocolVersion),
+                _ => return Err(Error::InvalidPacket),
+            }
+        }
+
         let mut ret = Self::default();
         loop {
             let key = match cur.get_key_raw() {

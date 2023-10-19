@@ -19,17 +19,7 @@ where
     T: AsRef<[u8]>,
 {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        for &c in self.0.as_ref() {
-            match c {
-                b'\n' => write!(fmt, "\\n")?,
-                b'\t' => write!(fmt, "\\t")?,
-                _ if c.is_ascii_graphic() || c == b' ' => {
-                    write!(fmt, "{}", c as char)?;
-                }
-                _ => write!(fmt, "\\x{:02x}", c)?,
-            }
-        }
-        Ok(())
+        write!(fmt, "\"{}\"", self)
     }
 }
 
@@ -38,7 +28,18 @@ where
     T: AsRef<[u8]>,
 {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        <Self as fmt::Debug>::fmt(self, fmt)
+        for &c in self.0.as_ref() {
+            match c {
+                b'\n' => write!(fmt, "\\n")?,
+                b'\t' => write!(fmt, "\\t")?,
+                b'\\' => write!(fmt, "\\\\")?,
+                _ if c.is_ascii_graphic() || c == b' ' => {
+                    write!(fmt, "{}", c as char)?;
+                }
+                _ => write!(fmt, "\\x{:02x}", c)?,
+            }
+        }
+        Ok(())
     }
 }
 

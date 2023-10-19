@@ -15,7 +15,7 @@ pub use server_info::ServerInfo;
 
 use thiserror::Error;
 
-pub const VERSION: u32 = 49;
+pub const VERSION: u8 = 49;
 
 #[derive(Error, Debug, PartialEq, Eq)]
 pub enum Error {
@@ -25,4 +25,6 @@ pub enum Error {
     InvalidString,
     #[error("Unexpected end of buffer")]
     UnexpectedEnd,
+    #[error("Invalid protocol version")]
+    InvalidProtocolVersion,
 }

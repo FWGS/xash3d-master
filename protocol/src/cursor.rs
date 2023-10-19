@@ -33,6 +33,24 @@ impl<'a> GetKeyValue<'a> for &'a str {
     }
 }
 
+impl<'a> GetKeyValue<'a> for Box<str> {
+    fn get_key_value(cur: &mut Cursor<'a>) -> Result<Self, Error> {
+        let raw = cur.get_key_value_raw()?;
+        str::from_utf8(raw)
+            .map(|s| s.to_owned().into_boxed_str())
+            .map_err(|_| Error::InvalidString)
+    }
+}
+
+impl<'a> GetKeyValue<'a> for String {
+    fn get_key_value(cur: &mut Cursor<'a>) -> Result<Self, Error> {
+        let raw = cur.get_key_value_raw()?;
+        str::from_utf8(raw)
+            .map(|s| s.to_owned())
+            .map_err(|_| Error::InvalidString)
+    }
+}
+
 impl<'a> GetKeyValue<'a> for bool {
     fn get_key_value(cur: &mut Cursor<'a>) -> Result<Self, Error> {
         match cur.get_key_value_raw()? {
@@ -88,6 +106,10 @@ impl<'a> Cursor<'a> {
     }
 
     pub fn end(self) -> &'a [u8] {
+        self.buffer
+    }
+
+    pub fn as_slice(&'a self) -> &'a [u8] {
         self.buffer
     }
 

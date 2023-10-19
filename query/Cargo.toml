@@ -1,0 +1,14 @@
+[package]
+name = "xash3d-query"
+version = "0.1.0"
+license = "GPL-3.0-only"
+authors = ["Denis Drakhnia <numas13@gmail.com>"]
+edition = "2021"
+rust-version = "1.56"
+
+[dependencies]
+thiserror = "1.0.49"
+getopts = "0.2.21"
+serde = { version = "1.0.188", features = ["derive"] }
+serde_json = "1.0.107"
+xash3d-protocol = { path = "../protocol", version = "0.1.0" }

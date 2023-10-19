@@ -34,7 +34,10 @@ enum Error {
 #[serde(tag = "status")]
 enum ServerResultKind {
     #[serde(rename = "ok")]
-    Ok { info: ServerInfo },
+    Ok {
+        #[serde(flatten)]
+        info: ServerInfo,
+    },
     #[serde(rename = "error")]
     Error { message: String },
     #[serde(rename = "invalid")]

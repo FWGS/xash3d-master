@@ -8,7 +8,7 @@ use std::slice;
 use std::str;
 
 use super::types::Str;
-use super::Error;
+use super::{Error, color};
 
 pub trait GetKeyValue<'a>: Sized {
     fn get_key_value(cur: &mut Cursor<'a>) -> Result<Self, Error>;
@@ -67,11 +67,7 @@ macro_rules! impl_get_value {
             fn get_key_value(cur: &mut Cursor<'a>) -> Result<Self, Error> {
                 let s = cur.get_key_value::<&str>()?;
                 // HACK: special case for one asshole
-                let s = if s.len() > 2 && s.as_bytes()[0] == b'^' && s.as_bytes()[1].is_ascii_digit() {
-                    &s[2..]
-                } else {
-                    s
-                };
+                let (_, s) = color::trim_start_color(s);
                 s.parse().map_err(|_| Error::InvalidPacket)
             }
         })+

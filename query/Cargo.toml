@@ -6,9 +6,14 @@ authors = ["Denis Drakhnia <numas13@gmail.com>"]
 edition = "2021"
 rust-version = "1.56"
 
+[features]
+default = ["color"]
+color = ["termion"]
+
 [dependencies]
 thiserror = "1.0.49"
 getopts = "0.2.21"
 serde = { version = "1.0.188", features = ["derive"] }
 serde_json = "1.0.107"
+termion = { version = "2", optional = true }
 xash3d-protocol = { path = "../protocol", version = "0.1.0" }

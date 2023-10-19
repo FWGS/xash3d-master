@@ -21,6 +21,7 @@ pub struct Cli {
     pub protocol: Vec<u8>,
     pub json: bool,
     pub debug: bool,
+    pub force_color: bool,
 }
 
 impl Default for Cli {
@@ -36,6 +37,7 @@ impl Default for Cli {
             protocol: vec![xash3d_protocol::VERSION, xash3d_protocol::VERSION - 1],
             json: false,
             debug: false,
+            force_color: false,
         }
     }
 }
@@ -91,6 +93,7 @@ pub fn parse() -> Cli {
     opts.optopt("p", "protocol", &help, "VERSION");
     opts.optflag("j", "json", "output JSON");
     opts.optflag("d", "debug", "output debug");
+    opts.optflag("F", "force-color", "force colored output");
 
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => m,
@@ -160,6 +163,7 @@ pub fn parse() -> Cli {
 
     cli.json = matches.opt_present("json");
     cli.debug = matches.opt_present("debug");
+    cli.force_color = matches.opt_present("force-color");
     cli.args = matches.free;
 
     cli

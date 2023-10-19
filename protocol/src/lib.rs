@@ -10,6 +10,7 @@ pub mod game;
 pub mod master;
 pub mod server;
 pub mod types;
+pub mod color;
 
 pub use server_info::ServerInfo;
 

@@ -512,6 +512,7 @@ dependencies = [
  "getopts",
  "serde",
  "serde_json",
+ "termion",
  "thiserror",
  "xash3d-protocol",
 ]

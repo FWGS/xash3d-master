@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use thiserror::Error;
 use xash3d_protocol::types::Str;
-use xash3d_protocol::{filter, game, master, server, Error as ProtocolError};
+use xash3d_protocol::{color, filter, game, master, server, Error as ProtocolError};
 
 use crate::cli::Cli;
 
@@ -143,6 +143,47 @@ struct ListResult<'a> {
     master_timeout: u32,
     masters: &'a [Box<str>],
     servers: &'a [&'a str],
+}
+
+struct Colored<'a> {
+    inner: &'a str,
+    forced: bool,
+}
+
+impl<'a> Colored<'a> {
+    fn new(s: &'a str, forced: bool) -> Self {
+        Self { inner: s, forced }
+    }
+}
+
+impl fmt::Display for Colored<'_> {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        #[cfg(feature = "color")]
+        if self.forced || termion::is_tty(&io::stdout()) {
+            use termion::color::*;
+
+            for (color, text) in color::ColorIter::new(self.inner) {
+                match color::Color::try_from(color) {
+                    Ok(color::Color::Black) => write!(fmt, "{}", Fg(Black))?,
+                    Ok(color::Color::Red) => write!(fmt, "{}", Fg(Red))?,
+                    Ok(color::Color::Green) => write!(fmt, "{}", Fg(Green))?,
+                    Ok(color::Color::Yellow) => write!(fmt, "{}", Fg(Yellow))?,
+                    Ok(color::Color::Blue) => write!(fmt, "{}", Fg(Blue))?,
+                    Ok(color::Color::Cyan) => write!(fmt, "{}", Fg(Cyan))?,
+                    Ok(color::Color::Magenta) => write!(fmt, "{}", Fg(Magenta))?,
+                    Ok(color::Color::White) => write!(fmt, "{}", Fg(White))?,
+                    _ => {}
+                }
+                write!(fmt, "{}", text)?;
+            }
+            return write!(fmt, "{}", Fg(Reset));
+        }
+
+        for (_, text) in color::ColorIter::new(self.inner) {
+            write!(fmt, "{}", text)?;
+        }
+        Ok(())
+    }
 }
 
 enum Message {
@@ -324,7 +365,7 @@ fn query_server_info(cli: &Cli, servers: &[String]) -> Result<(), Error> {
                 ServerResultKind::Ok { info } => {
                     p! {
                         type: "ok",
-                        host: info.host,
+                        host: Colored::new(&info.host, cli.force_color),
                         gamedir: info.gamedir,
                         map: info.map,
                         protocol: info.protocol,

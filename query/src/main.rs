@@ -13,7 +13,7 @@ use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use serde::Serialize;
+use serde::{Serialize, Serializer};
 use thiserror::Error;
 use xash3d_protocol::types::Str;
 use xash3d_protocol::{color, game, master, server, Error as ProtocolError};
@@ -106,6 +106,7 @@ impl ServerResult {
 struct ServerInfo {
     pub gamedir: String,
     pub map: String,
+    #[serde(serialize_with = "serialize_colored")]
     pub host: String,
     pub protocol: u8,
     pub numcl: u8,
@@ -149,6 +150,13 @@ struct ListResult<'a> {
     masters: &'a [Box<str>],
     filter: &'a str,
     servers: &'a [&'a str],
+}
+
+fn serialize_colored<S>(s: &str, ser: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    ser.serialize_str(color::trim_color(s).as_ref())
 }
 
 struct Colored<'a> {

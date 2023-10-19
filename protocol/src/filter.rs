@@ -90,7 +90,7 @@ pub struct Version {
 }
 
 impl Version {
-    pub fn new(major: u8, minor: u8) -> Self {
+    pub const fn new(major: u8, minor: u8) -> Self {
         Self { major, minor }
     }
 }
@@ -136,11 +136,11 @@ impl PutKeyValue for Version {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Filter<'a> {
     /// Servers running the specified modification (ex. cstrike)
-    pub gamedir: &'a [u8],
+    pub gamedir: Option<&'a [u8]>,
     /// Servers running the specified map (ex. cs_italy)
-    pub map: &'a [u8],
+    pub map: Option<&'a [u8]>,
     /// Client version.
-    pub clver: Version,
+    pub clver: Option<Version>,
 
     pub flags: FilterFlags,
     pub flags_mask: FilterFlags,
@@ -154,13 +154,15 @@ impl Filter<'_> {
 
     pub fn matches(&self, _addr: SocketAddrV4, info: &ServerInfo) -> bool {
         !((info.flags & self.flags_mask) != self.flags
-            || (!self.gamedir.is_empty() && self.gamedir != &*info.gamedir)
-            || (!self.map.is_empty() && self.map != &*info.map))
+            || self.gamedir.map_or(false, |s| s != &*info.gamedir)
+            || self.map.map_or(false, |s| s != &*info.map))
     }
 }
 
-impl<'a> Filter<'a> {
-    pub fn from_bytes(src: &'a [u8]) -> Result<Self, Error> {
+impl<'a> TryFrom<&'a [u8]> for Filter<'a> {
+    type Error = Error;
+
+    fn try_from(src: &'a [u8]) -> Result<Self, Self::Error> {
         let mut cur = Cursor::new(src);
         let mut filter = Self::default();
 
@@ -174,17 +176,18 @@ impl<'a> Filter<'a> {
             match *key {
                 b"dedicated" => filter.insert_flag(FilterFlags::DEDICATED, cur.get_key_value()?),
                 b"secure" => filter.insert_flag(FilterFlags::SECURE, cur.get_key_value()?),
-                b"gamedir" => filter.gamedir = cur.get_key_value()?,
-                b"map" => filter.map = cur.get_key_value()?,
+                b"gamedir" => filter.gamedir = Some(cur.get_key_value()?),
+                b"map" => filter.map = Some(cur.get_key_value()?),
                 b"empty" => filter.insert_flag(FilterFlags::NOT_EMPTY, cur.get_key_value()?),
                 b"full" => filter.insert_flag(FilterFlags::FULL, cur.get_key_value()?),
                 b"password" => filter.insert_flag(FilterFlags::PASSWORD, cur.get_key_value()?),
                 b"noplayers" => filter.insert_flag(FilterFlags::NOPLAYERS, cur.get_key_value()?),
                 b"clver" => {
-                    filter.clver = cur
-                        .get_key_value::<&str>()?
-                        .parse()
-                        .map_err(|_| Error::InvalidPacket)?
+                    filter.clver = Some(
+                        cur.get_key_value::<&str>()?
+                            .parse()
+                            .map_err(|_| Error::InvalidPacket)?,
+                    );
                 }
                 b"nat" => filter.insert_flag(FilterFlags::NAT, cur.get_key_value()?),
                 b"lan" => filter.insert_flag(FilterFlags::LAN, cur.get_key_value()?),
@@ -214,18 +217,20 @@ impl fmt::Display for &Filter<'_> {
 
         display_flag!("dedicated", FilterFlags::DEDICATED);
         display_flag!("secure", FilterFlags::SECURE);
-        if !self.gamedir.is_empty() {
-            write!(fmt, "\\gamedir\\{}", Str(self.gamedir))?;
+        if let Some(s) = self.gamedir {
+            write!(fmt, "\\gamedir\\{}", Str(s))?;
         }
         display_flag!("secure", FilterFlags::SECURE);
-        if !self.map.is_empty() {
-            write!(fmt, "\\map\\{}", Str(self.map))?;
+        if let Some(s) = self.map {
+            write!(fmt, "\\map\\{}", Str(s))?;
         }
         display_flag!("empty", FilterFlags::NOT_EMPTY);
         display_flag!("full", FilterFlags::FULL);
         display_flag!("password", FilterFlags::PASSWORD);
         display_flag!("noplayers", FilterFlags::NOPLAYERS);
-        write!(fmt, "\\clver\\{}", self.clver)?;
+        if let Some(v) = self.clver {
+            write!(fmt, "\\clver\\{}", v)?;
+        }
         display_flag!("nat", FilterFlags::NAT);
         display_flag!("lan", FilterFlags::LAN);
         display_flag!("bots", FilterFlags::BOTS);
@@ -253,7 +258,7 @@ mod tests {
                     .. Filter::default()
                 };
                 $(assert_eq!(
-                    Filter::from_bytes($src),
+                    Filter::try_from($src as &[u8]),
                     Ok(Filter {
                         $($field: $value,)*
                         ..predefined
@@ -266,17 +271,17 @@ mod tests {
     tests! {
         parse_gamedir {
             b"\\gamedir\\valve" => {
-                gamedir: &b"valve"[..],
+                gamedir: Some(&b"valve"[..]),
             }
         }
         parse_map {
             b"\\map\\crossfire" => {
-                map: &b"crossfire"[..],
+                map: Some(&b"crossfire"[..]),
             }
         }
         parse_clver {
             b"\\clver\\0.20" => {
-                clver: Version::new(0, 20),
+                clver: Some(Version::new(0, 20)),
             }
         }
         parse_dedicated(flags_mask: FilterFlags::DEDICATED) {
@@ -349,9 +354,9 @@ mod tests {
               \\password\\1\
               \\secure\\1\
             " => {
-                gamedir: &b"valve"[..],
-                map: &b"crossfire"[..],
-                clver: Version::new(0, 20),
+                gamedir: Some(&b"valve"[..]),
+                map: Some(&b"crossfire"[..]),
+                clver: Some(Version::new(0, 20)),
                 flags: FilterFlags::all(),
                 flags_mask: FilterFlags::all(),
             }
@@ -383,7 +388,7 @@ mod tests {
     macro_rules! matches {
         ($servers:expr, $filter:expr$(, $expected:expr)*) => (
             let servers = &$servers;
-            let filter = Filter::from_bytes($filter).unwrap();
+            let filter = Filter::try_from($filter as &[u8]).unwrap();
             let iter = servers
                 .iter()
                 .enumerate()

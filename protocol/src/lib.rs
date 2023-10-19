@@ -5,18 +5,22 @@ mod cursor;
 mod server_info;
 
 pub mod admin;
+pub mod color;
 pub mod filter;
 pub mod game;
 pub mod master;
 pub mod server;
 pub mod types;
-pub mod color;
 
 pub use server_info::ServerInfo;
 
 use thiserror::Error;
 
-pub const VERSION: u8 = 49;
+use crate::filter::Version;
+
+pub const PROTOCOL_VERSION: u8 = 49;
+
+pub const CLIENT_VERSION: Version = Version::new(0, 20);
 
 #[derive(Error, Debug, PartialEq, Eq)]
 pub enum Error {

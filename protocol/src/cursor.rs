@@ -8,7 +8,7 @@ use std::slice;
 use std::str;
 
 use super::types::Str;
-use super::{Error, color};
+use super::{color, Error};
 
 pub trait GetKeyValue<'a>: Sized {
     fn get_key_value(cur: &mut Cursor<'a>) -> Result<Self, Error>;

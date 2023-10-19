@@ -9,14 +9,14 @@ use std::fmt;
 use std::io;
 use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
 use std::process;
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use thiserror::Error;
 use xash3d_protocol::types::Str;
-use xash3d_protocol::{color, filter, game, master, server, Error as ProtocolError};
+use xash3d_protocol::{color, game, master, server, Error as ProtocolError};
 
 use crate::cli::Cli;
 
@@ -135,6 +135,7 @@ struct InfoResult<'a> {
     master_timeout: u32,
     server_timeout: u32,
     masters: &'a [Box<str>],
+    filter: &'a str,
     servers: &'a [&'a ServerResult],
 }
 
@@ -142,6 +143,7 @@ struct InfoResult<'a> {
 struct ListResult<'a> {
     master_timeout: u32,
     masters: &'a [Box<str>],
+    filter: &'a str,
     servers: &'a [&'a str],
 }
 
@@ -199,7 +201,12 @@ fn cmp_address(a: &str, b: &str) -> cmp::Ordering {
     }
 }
 
-fn query_servers(host: &str, timeout: Duration, tx: &mpsc::Sender<Message>) -> Result<(), Error> {
+fn query_servers(
+    host: &str,
+    cli: &Cli,
+    timeout: Duration,
+    tx: &mpsc::Sender<Message>,
+) -> Result<(), Error> {
     let sock = UdpSocket::bind("0.0.0.0:0")?;
     sock.connect(host)?;
 
@@ -207,12 +214,7 @@ fn query_servers(host: &str, timeout: Duration, tx: &mpsc::Sender<Message>) -> R
     let p = game::QueryServers {
         region: server::Region::RestOfTheWorld,
         last: SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0),
-        filter: filter::Filter {
-            gamedir: b"valve",
-            clver: filter::Version::new(0, 20),
-            // TODO: filter
-            ..Default::default()
-        },
+        filter: cli.filter.as_str(),
     };
     let n = p.encode(&mut buf)?;
     sock.send(&buf[..n])?;
@@ -282,7 +284,7 @@ fn get_server_info(
     Ok(ServerResult::protocol(addr))
 }
 
-fn query_server_info(cli: &Cli, servers: &[String]) -> Result<(), Error> {
+fn query_server_info(cli: &Arc<Cli>, servers: &[String]) -> Result<(), Error> {
     let (tx, rx) = mpsc::channel();
     let mut workers = 0;
 
@@ -291,8 +293,9 @@ fn query_server_info(cli: &Cli, servers: &[String]) -> Result<(), Error> {
             let master = i.to_owned();
             let tx = tx.clone();
             let timeout = Duration::from_secs(cli.master_timeout as u64);
+            let cli = cli.clone();
             thread::spawn(move || {
-                if let Err(e) = query_servers(&master, timeout, &tx) {
+                if let Err(e) = query_servers(&master, &cli, timeout, &tx) {
                     eprintln!("master({}) error: {}", master, e);
                 }
                 tx.send(Message::End).unwrap();
@@ -341,6 +344,7 @@ fn query_server_info(cli: &Cli, servers: &[String]) -> Result<(), Error> {
             master_timeout: cli.master_timeout,
             server_timeout: cli.server_timeout,
             masters: &cli.masters,
+            filter: &cli.filter,
             servers: &servers,
         };
 
@@ -408,7 +412,7 @@ fn query_server_info(cli: &Cli, servers: &[String]) -> Result<(), Error> {
     Ok(())
 }
 
-fn list_servers(cli: &Cli) -> Result<(), Error> {
+fn list_servers(cli: &Arc<Cli>) -> Result<(), Error> {
     let (tx, rx) = mpsc::channel();
     let mut workers = 0;
 
@@ -416,8 +420,9 @@ fn list_servers(cli: &Cli) -> Result<(), Error> {
         let master = i.to_owned();
         let tx = tx.clone();
         let timeout = Duration::from_secs(cli.master_timeout as u64);
+        let cli = cli.clone();
         thread::spawn(move || {
-            if let Err(e) = query_servers(&master, timeout, &tx) {
+            if let Err(e) = query_servers(&master, &cli, timeout, &tx) {
                 eprintln!("master({}) error: {}", master, e);
             }
             tx.send(Message::End).unwrap();
@@ -448,6 +453,7 @@ fn list_servers(cli: &Cli) -> Result<(), Error> {
         let result = ListResult {
             master_timeout: cli.master_timeout,
             masters: &cli.masters,
+            filter: &cli.filter,
             servers: &servers,
         };
 
@@ -468,6 +474,7 @@ fn list_servers(cli: &Cli) -> Result<(), Error> {
 }
 
 fn execute(cli: Cli) -> Result<(), Error> {
+    let cli = Arc::new(cli);
     match cli.args.get(0).map(|s| s.as_str()).unwrap_or_default() {
         "all" | "" => query_server_info(&cli, &[])?,
         "info" => query_server_info(&cli, &cli.args[1..])?,

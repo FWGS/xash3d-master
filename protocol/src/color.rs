@@ -59,7 +59,10 @@ impl<'a> Iterator for ColorIter<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         if !self.inner.is_empty() {
-            let i = self.inner[1..].find('^').map(|i| i + 1).unwrap_or(self.inner.len());
+            let i = self.inner[1..]
+                .find('^')
+                .map(|i| i + 1)
+                .unwrap_or(self.inner.len());
             let (head, tail) = self.inner.split_at(i);
             let (color, text) = trim_start_color(head);
             self.inner = tail;

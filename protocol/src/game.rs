@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // SPDX-FileCopyrightText: 2023 Denis Drakhnia <numas13@gmail.com>
 
+use std::fmt;
 use std::net::SocketAddrV4;
 
 use crate::cursor::{Cursor, CursorMut};
@@ -9,18 +10,23 @@ use crate::server::Region;
 use crate::Error;
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct QueryServers<'a> {
+pub struct QueryServers<T> {
     pub region: Region,
     pub last: SocketAddrV4,
-    pub filter: Filter<'a>,
+    pub filter: T,
 }
 
-impl<'a> QueryServers<'a> {
+impl QueryServers<()> {
     pub const HEADER: &'static [u8] = b"1";
+}
 
+impl<'a, T: 'a> QueryServers<T>
+where
+    T: TryFrom<&'a [u8], Error = Error>,
+{
     pub fn decode(src: &'a [u8]) -> Result<Self, Error> {
         let mut cur = Cursor::new(src);
-        cur.expect(Self::HEADER)?;
+        cur.expect(QueryServers::HEADER)?;
         let region = cur.get_u8()?.try_into().map_err(|_| Error::InvalidPacket)?;
         let last = cur.get_cstr_as_str()?;
         let filter = cur.get_cstr()?;
@@ -28,13 +34,18 @@ impl<'a> QueryServers<'a> {
         Ok(Self {
             region,
             last: last.parse().map_err(|_| Error::InvalidPacket)?,
-            filter: Filter::from_bytes(&filter)?,
+            filter: T::try_from(*filter)?,
         })
     }
+}
 
+impl<'a, T: 'a> QueryServers<T>
+where
+    for<'b> &'b T: fmt::Display,
+{
     pub fn encode(&self, buf: &mut [u8]) -> Result<usize, Error> {
         Ok(CursorMut::new(buf)
-            .put_bytes(Self::HEADER)?
+            .put_bytes(QueryServers::HEADER)?
             .put_u8(self.region as u8)?
             .put_as_str(self.last)?
             .put_u8(0)?
@@ -76,7 +87,7 @@ impl GetServerInfo {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Packet<'a> {
-    QueryServers(QueryServers<'a>),
+    QueryServers(QueryServers<Filter<'a>>),
     GetServerInfo(GetServerInfo),
 }
 
@@ -106,9 +117,9 @@ mod tests {
             region: Region::RestOfTheWorld,
             last: SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0),
             filter: Filter {
-                gamedir: &b"valve"[..],
-                map: &b"crossfire"[..],
-                clver: Version::new(0, 20),
+                gamedir: Some(&b"valve"[..]),
+                map: Some(&b"crossfire"[..]),
+                clver: Some(Version::new(0, 20)),
                 flags: FilterFlags::all(),
                 flags_mask: FilterFlags::all(),
             },

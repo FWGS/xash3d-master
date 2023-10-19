@@ -229,7 +229,7 @@ impl MasterServer {
             match p {
                 game::Packet::QueryServers(p) => {
                     trace!("{}: recv {:?}", from, p);
-                    if p.filter.clver < self.clver {
+                    if p.filter.clver.map_or(false, |v| v < self.clver) {
                         let iter = std::iter::once(self.update_addr);
                         self.send_server_list(from, iter)?;
                     } else {

@@ -5,6 +5,8 @@ use std::process;
 
 use getopts::Options;
 
+use xash3d_protocol as proto;
+
 const BIN_NAME: &str = env!("CARGO_BIN_NAME");
 const PKG_NAME: &str = env!("CARGO_PKG_NAME");
 const PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -22,6 +24,7 @@ pub struct Cli {
     pub json: bool,
     pub debug: bool,
     pub force_color: bool,
+    pub filter: String,
 }
 
 impl Default for Cli {
@@ -34,10 +37,12 @@ impl Default for Cli {
             args: Default::default(),
             master_timeout: 2,
             server_timeout: 2,
-            protocol: vec![xash3d_protocol::VERSION, xash3d_protocol::VERSION - 1],
+            protocol: vec![proto::PROTOCOL_VERSION, proto::PROTOCOL_VERSION - 1],
             json: false,
             debug: false,
             force_color: false,
+            // if changed do not forget to update cli parsing
+            filter: format!("\\gamedir\\valve\\clver\\{}", proto::CLIENT_VERSION),
         }
     }
 }
@@ -94,6 +99,8 @@ pub fn parse() -> Cli {
     opts.optflag("j", "json", "output JSON");
     opts.optflag("d", "debug", "output debug");
     opts.optflag("F", "force-color", "force colored output");
+    let help = format!("query filter [default: {:?}]", cli.filter);
+    opts.optopt("f", "filter", &help, "FILTER");
 
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => m,
@@ -124,7 +131,7 @@ pub fn parse() -> Cli {
         }
     }
 
-    match matches.opt_get("master") {
+    match matches.opt_get("master-timeout") {
         Ok(Some(t)) => cli.master_timeout = t,
         Ok(None) => {}
         Err(_) => {
@@ -159,6 +166,18 @@ pub fn parse() -> Cli {
         if error {
             process::exit(1);
         }
+    }
+
+    if let Some(s) = matches.opt_str("filter") {
+        let mut filter = String::with_capacity(cli.filter.len() + s.len());
+        if !s.contains("\\gamedir") {
+            filter.push_str("\\gamedir\\valve");
+        }
+        if !s.contains("\\clver") {
+            filter.push_str("\\clver\\0.20");
+        }
+        filter.push_str(&s);
+        cli.filter = filter;
     }
 
     cli.json = matches.opt_present("json");

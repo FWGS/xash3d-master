@@ -6,3 +6,9 @@ members = [
 	"admin",
 	"query",
 ]
+
+[profile.release]
+codegen-units = 1
+lto = true
+# TODO: cargo 1.59
+# strip = "debuginfo"

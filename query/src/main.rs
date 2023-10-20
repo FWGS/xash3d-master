@@ -558,6 +558,11 @@ fn execute(cli: Cli) -> Result<(), Error> {
 fn main() {
     let cli = cli::parse();
 
+    // suppress broken pipe error
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
+
     if let Err(e) = execute(cli) {
         eprintln!("error: {}", e);
         process::exit(1);

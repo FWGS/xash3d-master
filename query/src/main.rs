@@ -30,32 +30,29 @@ enum Error {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "status")]
+#[serde(rename_all = "lowercase")]
 enum ServerResultKind {
-    #[serde(rename = "ok")]
     Ok {
         #[serde(flatten)]
         info: ServerInfo,
     },
-    #[serde(rename = "error")]
     Error { message: String },
-    #[serde(rename = "invalid")]
     Invalid { message: String, response: String },
-    #[serde(rename = "timeout")]
     Timeout,
-    #[serde(rename = "protocol")]
     Protocol,
 }
 
 #[derive(Clone, Debug, Serialize)]
 struct ServerResult {
     address: SocketAddrV4,
-    ping: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ping: Option<f32>,
     #[serde(flatten)]
     kind: ServerResultKind,
 }
 
 impl ServerResult {
-    fn new(address: SocketAddrV4, ping: f32, kind: ServerResultKind) -> Self {
+    fn new(address: SocketAddrV4, ping: Option<f32>, kind: ServerResultKind) -> Self {
         Self {
             address,
             ping,
@@ -64,15 +61,15 @@ impl ServerResult {
     }
 
     fn ok(address: SocketAddrV4, ping: f32, info: ServerInfo) -> Self {
-        Self::new(address, ping, ServerResultKind::Ok { info })
+        Self::new(address, Some(ping), ServerResultKind::Ok { info })
     }
 
     fn timeout(address: SocketAddrV4) -> Self {
-        Self::new(address, 0.0, ServerResultKind::Timeout)
+        Self::new(address, None, ServerResultKind::Timeout)
     }
 
     fn protocol(address: SocketAddrV4, ping: f32) -> Self {
-        Self::new(address, ping, ServerResultKind::Protocol)
+        Self::new(address, Some(ping), ServerResultKind::Protocol)
     }
 
     fn error<T>(address: SocketAddrV4, message: T) -> Self
@@ -81,7 +78,7 @@ impl ServerResult {
     {
         Self::new(
             address,
-            0.0,
+            None,
             ServerResultKind::Error {
                 message: message.to_string(),
             },
@@ -94,7 +91,7 @@ impl ServerResult {
     {
         Self::new(
             address,
-            ping,
+            Some(ping),
             ServerResultKind::Invalid {
                 message: message.to_string(),
                 response: Str(response).to_string(),
@@ -458,7 +455,11 @@ fn query_server_info(cli: &Cli, servers: &[String]) -> Result<(), Error> {
         }
     } else {
         for i in servers {
-            println!("server: {} [{:.3} ms]", i.address, i.ping);
+            print!("server: {}", i.address);
+            if let Some(ping) = i.ping {
+                print!(" [{:.3} ms]", ping);
+            }
+            println!();
 
             macro_rules! p {
                 ($($key:ident: $value:expr),+ $(,)?) => {

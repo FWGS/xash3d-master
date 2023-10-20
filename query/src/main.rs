@@ -9,7 +9,6 @@ use std::fmt;
 use std::io;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
 use std::process;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde::{Serialize, Serializer};
@@ -432,7 +431,7 @@ impl<'a> Scan<'a> {
     }
 }
 
-fn query_server_info(cli: &Arc<Cli>, servers: &[String]) -> Result<(), Error> {
+fn query_server_info(cli: &Cli, servers: &[String]) -> Result<(), Error> {
     let scan = Scan::new(cli)?;
     let servers = get_socket_addrs(servers.iter().map(|i| i.as_str()))?;
     let servers = scan.server_info(&servers)?;
@@ -514,7 +513,7 @@ fn query_server_info(cli: &Arc<Cli>, servers: &[String]) -> Result<(), Error> {
     Ok(())
 }
 
-fn list_servers(cli: &Arc<Cli>) -> Result<(), Error> {
+fn list_servers(cli: &Cli) -> Result<(), Error> {
     let scan = Scan::new(cli)?;
     let mut servers: Vec<_> = scan.servers()?.into_iter().collect();
     servers.sort();
@@ -544,7 +543,6 @@ fn list_servers(cli: &Arc<Cli>) -> Result<(), Error> {
 }
 
 fn execute(cli: Cli) -> Result<(), Error> {
-    let cli = Arc::new(cli);
     match cli.args.get(0).map(|s| s.as_str()).unwrap_or_default() {
         "all" | "" => query_server_info(&cli, &[])?,
         "info" => query_server_info(&cli, &cli.args[1..])?,

@@ -76,6 +76,10 @@ impl<'a> QueryServersResponse<&'a [u8]> {
             SocketAddrV4::new(ip, port)
         })
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
 }
 
 impl<I> QueryServersResponse<I>

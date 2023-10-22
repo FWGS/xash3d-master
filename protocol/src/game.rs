@@ -109,6 +109,7 @@ impl<'a> Packet<'a> {
 mod tests {
     use super::*;
     use crate::filter::{FilterFlags, Version};
+    use crate::types::Str;
     use std::net::Ipv4Addr;
 
     #[test]
@@ -117,8 +118,8 @@ mod tests {
             region: Region::RestOfTheWorld,
             last: SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0),
             filter: Filter {
-                gamedir: Some(&b"valve"[..]),
-                map: Some(&b"crossfire"[..]),
+                gamedir: Some(Str(&b"valve"[..])),
+                map: Some(Str(&b"crossfire"[..])),
                 clver: Some(Version::new(0, 20)),
                 flags: FilterFlags::all(),
                 flags_mask: FilterFlags::all(),

@@ -136,9 +136,9 @@ impl PutKeyValue for Version {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Filter<'a> {
     /// Servers running the specified modification (ex. cstrike)
-    pub gamedir: Option<&'a [u8]>,
+    pub gamedir: Option<Str<&'a [u8]>>,
     /// Servers running the specified map (ex. cs_italy)
-    pub map: Option<&'a [u8]>,
+    pub map: Option<Str<&'a [u8]>>,
     /// Client version.
     pub clver: Option<Version>,
 
@@ -154,8 +154,8 @@ impl Filter<'_> {
 
     pub fn matches(&self, _addr: SocketAddrV4, info: &ServerInfo) -> bool {
         !((info.flags & self.flags_mask) != self.flags
-            || self.gamedir.map_or(false, |s| s != &*info.gamedir)
-            || self.map.map_or(false, |s| s != &*info.map))
+            || self.gamedir.map_or(false, |s| *s != &*info.gamedir)
+            || self.map.map_or(false, |s| *s != &*info.map))
     }
 }
 
@@ -218,11 +218,11 @@ impl fmt::Display for &Filter<'_> {
         display_flag!("dedicated", FilterFlags::DEDICATED);
         display_flag!("secure", FilterFlags::SECURE);
         if let Some(s) = self.gamedir {
-            write!(fmt, "\\gamedir\\{}", Str(s))?;
+            write!(fmt, "\\gamedir\\{}", s)?;
         }
         display_flag!("secure", FilterFlags::SECURE);
         if let Some(s) = self.map {
-            write!(fmt, "\\map\\{}", Str(s))?;
+            write!(fmt, "\\map\\{}", s)?;
         }
         display_flag!("empty", FilterFlags::NOT_EMPTY);
         display_flag!("full", FilterFlags::FULL);
@@ -271,12 +271,12 @@ mod tests {
     tests! {
         parse_gamedir {
             b"\\gamedir\\valve" => {
-                gamedir: Some(&b"valve"[..]),
+                gamedir: Some(Str(&b"valve"[..])),
             }
         }
         parse_map {
             b"\\map\\crossfire" => {
-                map: Some(&b"crossfire"[..]),
+                map: Some(Str(&b"crossfire"[..])),
             }
         }
         parse_clver {
@@ -354,8 +354,8 @@ mod tests {
               \\password\\1\
               \\secure\\1\
             " => {
-                gamedir: Some(&b"valve"[..]),
-                map: Some(&b"crossfire"[..]),
+                gamedir: Some(Str(&b"valve"[..])),
+                map: Some(Str(&b"crossfire"[..])),
                 clver: Some(Version::new(0, 20)),
                 flags: FilterFlags::all(),
                 flags_mask: FilterFlags::all(),

@@ -231,7 +231,7 @@ impl MasterServer {
                     trace!("{}: recv {:?}", from, p);
                     if p.filter.clver.map_or(false, |v| v < self.clver) {
                         let iter = std::iter::once(self.update_addr);
-                        self.send_server_list(from, iter)?;
+                        self.send_server_list(from, p.filter.key, iter)?;
                     } else {
                         let now = self.now();
                         let iter = self
@@ -240,7 +240,7 @@ impl MasterServer {
                             .filter(|i| i.1.is_valid(now, self.timeout.server))
                             .filter(|i| i.1.matches(*i.0, p.region, &p.filter))
                             .map(|i| *i.0);
-                        self.send_server_list(from, iter)?;
+                        self.send_server_list(from, p.filter.key, iter)?;
                     }
                 }
                 game::Packet::GetServerInfo(p) => {
@@ -399,12 +399,12 @@ impl MasterServer {
         }
     }
 
-    fn send_server_list<A, I>(&self, to: A, iter: I) -> Result<(), Error>
+    fn send_server_list<A, I>(&self, to: A, key: Option<u32>, iter: I) -> Result<(), Error>
     where
         A: ToSocketAddrs,
         I: Iterator<Item = SocketAddrV4>,
     {
-        let mut list = master::QueryServersResponse::new(iter);
+        let mut list = master::QueryServersResponse::new(iter, key);
         loop {
             let mut buf = [0; MAX_PACKET_SIZE];
             let (n, is_end) = list.encode(&mut buf)?;

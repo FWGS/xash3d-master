@@ -36,8 +36,13 @@ enum ServerResultKind {
         #[serde(flatten)]
         info: ServerInfo,
     },
-    Error { message: String },
-    Invalid { message: String, response: String },
+    Error {
+        message: String,
+    },
+    Invalid {
+        message: String,
+        response: String,
+    },
     Timeout,
     Protocol,
 }
@@ -298,7 +303,9 @@ impl<'a> Scan<'a> {
 
             if self.is_master(&from) {
                 if let Ok(packet) = master::QueryServersResponse::decode(&buf[..n]) {
-                    set.extend(packet.iter());
+                    if self.check_key(&from, packet.key) {
+                        set.extend(packet.iter());
+                    }
                 } else {
                     eprintln!("warn: invalid packet from master {}", from);
                 }
@@ -367,19 +374,22 @@ impl<'a> Scan<'a> {
 
             if self.is_master(&from) {
                 if let Ok(packet) = master::QueryServersResponse::decode(raw) {
-                    for addr in packet.iter().filter(|i| set.insert(*i)) {
-                        let mut buf = [0; 512];
-                        let n = game::GetServerInfo::new(self.cli.protocol[0]).encode(&mut buf)?;
+                    if self.check_key(&from, packet.key) {
+                        for addr in packet.iter().filter(|i| set.insert(*i)) {
+                            let mut buf = [0; 512];
+                            let n =
+                                game::GetServerInfo::new(self.cli.protocol[0]).encode(&mut buf)?;
 
-                        match self.sock.send_to(&buf[..n], addr) {
-                            Ok(_) => {
-                                let query = ServerQuery::new(0);
-                                server_end = query.start + server_timeout;
-                                active.insert(addr, query);
-                            }
-                            Err(e) => {
-                                let res = ServerResult::error(addr, e);
-                                out.insert(addr, res);
+                            match self.sock.send_to(&buf[..n], addr) {
+                                Ok(_) => {
+                                    let query = ServerQuery::new(0);
+                                    server_end = query.start + server_timeout;
+                                    active.insert(addr, query);
+                                }
+                                Err(e) => {
+                                    let res = ServerResult::error(addr, e);
+                                    out.insert(addr, res);
+                                }
                             }
                         }
                     }
@@ -425,6 +435,18 @@ impl<'a> Scan<'a> {
         }
 
         Ok(out)
+    }
+
+    fn check_key(&self, from: &SocketAddrV4, key: Option<u32>) -> bool {
+        let res = match (self.cli.key, key) {
+            (Some(a), Some(b)) => a == b,
+            (None, None) => true,
+            _ => false,
+        };
+        if !res {
+            eprintln!("error: invalid key from master({})", from);
+        }
+        res
     }
 }
 

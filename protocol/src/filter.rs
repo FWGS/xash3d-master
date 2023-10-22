@@ -141,6 +141,7 @@ pub struct Filter<'a> {
     pub map: Option<Str<&'a [u8]>>,
     /// Client version.
     pub clver: Option<Version>,
+    pub key: Option<u32>,
 
     pub flags: FilterFlags,
     pub flags_mask: FilterFlags,
@@ -192,6 +193,13 @@ impl<'a> TryFrom<&'a [u8]> for Filter<'a> {
                 b"nat" => filter.insert_flag(FilterFlags::NAT, cur.get_key_value()?),
                 b"lan" => filter.insert_flag(FilterFlags::LAN, cur.get_key_value()?),
                 b"bots" => filter.insert_flag(FilterFlags::BOTS, cur.get_key_value()?),
+                b"key" => {
+                    filter.key = {
+                        let s = cur.get_key_value::<&str>()?;
+                        let x = u32::from_str_radix(s, 16).map_err(|_| Error::InvalidPacket)?;
+                        Some(x)
+                    }
+                }
                 _ => {
                     // skip unknown fields
                     let value = Str(cur.get_key_value_raw()?);
@@ -234,6 +242,9 @@ impl fmt::Display for &Filter<'_> {
         display_flag!("nat", FilterFlags::NAT);
         display_flag!("lan", FilterFlags::LAN);
         display_flag!("bots", FilterFlags::BOTS);
+        if let Some(x) = self.key {
+            write!(fmt, "\\key\\{:x}", x)?;
+        }
 
         Ok(())
     }

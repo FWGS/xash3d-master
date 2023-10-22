@@ -25,6 +25,7 @@ pub struct Cli {
     pub debug: bool,
     pub force_color: bool,
     pub filter: String,
+    pub key: Option<u32>,
 }
 
 impl Default for Cli {
@@ -43,6 +44,7 @@ impl Default for Cli {
             force_color: false,
             // if changed do not forget to update cli parsing
             filter: format!("\\gamedir\\valve\\clver\\{}", proto::CLIENT_VERSION),
+            key: None,
         }
     }
 }
@@ -99,6 +101,7 @@ pub fn parse() -> Cli {
     opts.optflag("j", "json", "output JSON");
     opts.optflag("d", "debug", "output debug");
     opts.optflag("F", "force-color", "force colored output");
+    opts.optflag("k", "key", "send challenge key to master");
     let help = format!("query filter [default: {:?}]", cli.filter);
     opts.optopt("f", "filter", &help, "FILTER");
 
@@ -178,6 +181,12 @@ pub fn parse() -> Cli {
         }
         filter.push_str(&s);
         cli.filter = filter;
+    }
+
+    if matches.opt_present("key") {
+        let key = fastrand::u32(..);
+        cli.key = Some(key);
+        cli.filter.push_str(&format!("\\key\\{:x}", key));
     }
 
     cli.json = matches.opt_present("json");

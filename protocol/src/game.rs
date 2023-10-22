@@ -120,6 +120,7 @@ mod tests {
             filter: Filter {
                 gamedir: Some(Str(&b"valve"[..])),
                 map: Some(Str(&b"crossfire"[..])),
+                key: Some(0xdeadbeef),
                 clver: Some(Version::new(0, 20)),
                 flags: FilterFlags::all(),
                 flags_mask: FilterFlags::all(),

@@ -46,6 +46,7 @@ impl ChallengeResponse {
 #[derive(Clone, Debug, PartialEq)]
 pub struct QueryServersResponse<I> {
     inner: I,
+    pub key: Option<u32>,
 }
 
 impl QueryServersResponse<()> {
@@ -60,12 +61,20 @@ impl<'a> QueryServersResponse<&'a [u8]> {
             return Err(Error::InvalidPacket);
         }
         let s = cur.get_bytes(cur.remaining())?;
+
+        // extra header for key sent in QueryServers packet
+        let (s, key) = if s.len() >= 6 && s[0] == 0x7f {
+            (&s[6..], Some(u32::from_le_bytes([s[1], s[2], s[3], s[4]])))
+        } else {
+            (s, None)
+        };
+
         let inner = if s.ends_with(&[0; 6]) {
             &s[..s.len() - 6]
         } else {
             s
         };
-        Ok(Self { inner })
+        Ok(Self { inner, key })
     }
 
     pub fn iter(&self) -> impl 'a + Iterator<Item = SocketAddrV4> {
@@ -86,13 +95,18 @@ impl<I> QueryServersResponse<I>
 where
     I: Iterator<Item = SocketAddrV4>,
 {
-    pub fn new(iter: I) -> Self {
-        Self { inner: iter }
+    pub fn new(iter: I, key: Option<u32>) -> Self {
+        Self { inner: iter, key }
     }
 
     pub fn encode(&mut self, buf: &mut [u8]) -> Result<(usize, bool), Error> {
         let mut cur = CursorMut::new(buf);
         cur.put_bytes(QueryServersResponse::HEADER)?;
+        if let Some(key) = self.key {
+            cur.put_u8(0x7f)?;
+            cur.put_u32_le(key)?;
+            cur.put_u8(8)?;
+        }
         let mut is_end = false;
         while cur.remaining() >= 12 {
             match self.inner.next() {
@@ -191,7 +205,7 @@ mod tests {
             "1.2.3.4:27003".parse().unwrap(),
             "1.2.3.4:27004".parse().unwrap(),
         ];
-        let mut p = QueryServersResponse::new(servers.iter().cloned());
+        let mut p = QueryServersResponse::new(servers.iter().cloned(), Some(0xdeadbeef));
         let mut buf = [0; 512];
         let (n, _) = p.encode(&mut buf).unwrap();
         let e = QueryServersResponse::decode(&buf[..n]).unwrap();

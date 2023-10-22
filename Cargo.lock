@@ -509,6 +509,7 @@ dependencies = [
 name = "xash3d-query"
 version = "0.1.0"
 dependencies = [
+ "fastrand",
  "getopts",
  "libc",
  "serde",

@@ -63,7 +63,7 @@ impl<'a> QueryServersResponse<&'a [u8]> {
         let s = cur.get_bytes(cur.remaining())?;
 
         // extra header for key sent in QueryServers packet
-        let (s, key) = if s.len() >= 6 && s[0] == 0x7f {
+        let (s, key) = if s.len() >= 6 && s[0] == 0x7f && s[5] == 8 {
             (&s[6..], Some(u32::from_le_bytes([s[1], s[2], s[3], s[4]])))
         } else {
             (s, None)

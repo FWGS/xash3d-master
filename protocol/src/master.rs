@@ -124,6 +124,37 @@ where
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct ClientAnnounce {
+    pub addr: SocketAddrV4,
+}
+
+impl ClientAnnounce {
+    pub const HEADER: &'static [u8] = b"\xff\xff\xff\xffc ";
+
+    pub fn new(addr: SocketAddrV4) -> Self {
+        Self { addr }
+    }
+
+    pub fn decode(src: &[u8]) -> Result<Self, Error> {
+        let mut cur = Cursor::new(src);
+        cur.expect(Self::HEADER)?;
+        let addr = cur
+            .get_str(cur.remaining())?
+            .parse()
+            .map_err(|_| Error::InvalidPacket)?;
+        cur.expect_empty()?;
+        Ok(Self { addr })
+    }
+
+    pub fn encode(&self, buf: &mut [u8]) -> Result<usize, Error> {
+        Ok(CursorMut::new(buf)
+            .put_bytes(Self::HEADER)?
+            .put_as_str(self.addr)?
+            .pos())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct AdminChallengeResponse {
     pub master_challenge: u32,
     pub hash_challenge: u32,
@@ -210,6 +241,14 @@ mod tests {
         let (n, _) = p.encode(&mut buf).unwrap();
         let e = QueryServersResponse::decode(&buf[..n]).unwrap();
         assert_eq!(e.iter().collect::<Vec<_>>(), servers);
+    }
+
+    #[test]
+    fn client_announce() {
+        let p = ClientAnnounce::new("1.2.3.4:12345".parse().unwrap());
+        let mut buf = [0; 512];
+        let n = p.encode(&mut buf).unwrap();
+        assert_eq!(ClientAnnounce::decode(&buf[..n]), Ok(p));
     }
 
     #[test]

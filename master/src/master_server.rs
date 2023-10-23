@@ -11,7 +11,7 @@ use blake2b_simd::Params;
 use fastrand::Rng;
 use log::{error, info, trace, warn};
 use thiserror::Error;
-use xash3d_protocol::filter::{Filter, Version};
+use xash3d_protocol::filter::{Filter, FilterFlags, Version};
 use xash3d_protocol::server::Region;
 use xash3d_protocol::{admin, game, master, server, Error as ProtocolError, ServerInfo};
 
@@ -240,7 +240,12 @@ impl MasterServer {
                             .filter(|i| i.1.is_valid(now, self.timeout.server))
                             .filter(|i| i.1.matches(*i.0, p.region, &p.filter))
                             .map(|i| *i.0);
-                        self.send_server_list(from, p.filter.key, iter)?;
+
+                        self.send_server_list(from, p.filter.key, iter.clone())?;
+
+                        if p.filter.flags.contains(FilterFlags::NAT) {
+                            self.send_client_to_nat_servers(from, iter)?;
+                        }
                     }
                 }
                 game::Packet::GetServerInfo(p) => {
@@ -412,6 +417,19 @@ impl MasterServer {
             if is_end {
                 break;
             }
+        }
+        Ok(())
+    }
+
+    fn send_client_to_nat_servers<I>(&self, to: SocketAddrV4, iter: I) -> Result<(), Error>
+    where
+        I: Iterator<Item = SocketAddrV4>,
+    {
+        let mut buf = [0; 64];
+        let n = master::ClientAnnounce::new(to).encode(&mut buf)?;
+        let buf = &buf[..n];
+        for i in iter {
+            self.sock.send_to(buf, i)?;
         }
         Ok(())
     }

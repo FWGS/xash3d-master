@@ -102,6 +102,7 @@ pub fn parse() -> Cli {
     opts.optflag("d", "debug", "output debug");
     opts.optflag("F", "force-color", "force colored output");
     opts.optflag("k", "key", "send challenge key to master");
+    opts.optflag("n", "nat", "query servers behind NAT");
     let help = format!("query filter [default: {:?}]", cli.filter);
     opts.optopt("f", "filter", &help, "FILTER");
 
@@ -173,14 +174,19 @@ pub fn parse() -> Cli {
 
     if let Some(s) = matches.opt_str("filter") {
         let mut filter = String::with_capacity(cli.filter.len() + s.len());
-        if !s.contains("\\gamedir") {
+        if !s.contains("\\gamedir\\") {
             filter.push_str("\\gamedir\\valve");
         }
-        if !s.contains("\\clver") {
+        if !s.contains("\\clver\\") {
             filter.push_str("\\clver\\0.20");
         }
         filter.push_str(&s);
         cli.filter = filter;
+    }
+
+    if !cli.filter.contains("\\nat\\") {
+        let s = if matches.opt_present("nat") { "1" } else { "0" };
+        cli.filter.push_str(&format!("\\nat\\{}", s));
     }
 
     if matches.opt_present("key") {

@@ -33,7 +33,7 @@ impl Default for Cli {
         Cli {
             masters: vec![
                 format!("{}:{}", DEFAULT_HOST, DEFAULT_PORT).into_boxed_str(),
-                //format!("{}:{}", DEFAULT_HOST, DEFAULT_PORT + 1).into_boxed_str(),
+                format!("{}:{}", DEFAULT_HOST, DEFAULT_PORT + 1).into_boxed_str(),
             ],
             args: Default::default(),
             master_timeout: 2,
@@ -42,7 +42,6 @@ impl Default for Cli {
             json: false,
             debug: false,
             force_color: false,
-            // if changed do not forget to update cli parsing
             filter: format!("\\gamedir\\valve\\clver\\{}", proto::CLIENT_VERSION),
             key: None,
         }
@@ -102,7 +101,6 @@ pub fn parse() -> Cli {
     opts.optflag("d", "debug", "output debug");
     opts.optflag("F", "force-color", "force colored output");
     opts.optflag("k", "key", "send challenge key to master");
-    opts.optflag("n", "nat", "query servers behind NAT");
     let help = format!("query filter [default: {:?}]", cli.filter);
     opts.optopt("f", "filter", &help, "FILTER");
 
@@ -173,20 +171,7 @@ pub fn parse() -> Cli {
     }
 
     if let Some(s) = matches.opt_str("filter") {
-        let mut filter = String::with_capacity(cli.filter.len() + s.len());
-        if !s.contains("\\gamedir\\") {
-            filter.push_str("\\gamedir\\valve");
-        }
-        if !s.contains("\\clver\\") {
-            filter.push_str("\\clver\\0.20");
-        }
-        filter.push_str(&s);
-        cli.filter = filter;
-    }
-
-    if !cli.filter.contains("\\nat\\") {
-        let s = if matches.opt_present("nat") { "1" } else { "0" };
-        cli.filter.push_str(&format!("\\nat\\{}", s));
+        cli.filter = s;
     }
 
     if matches.opt_present("key") {

@@ -40,8 +40,15 @@ pub fn is_color_code(s: &str) -> bool {
 
 #[inline]
 pub fn trim_start_color(s: &str) -> (&str, &str) {
-    let n = if is_color_code(s) { 2 } else { 0 };
-    s.split_at(n)
+    let mut n = 0;
+    while is_color_code(&s[n..]) {
+        n += 2;
+    }
+    if n > 0 {
+        (&s[n - 2..n], &s[n..])
+    } else {
+        s.split_at(0)
+    }
 }
 
 pub struct ColorIter<'a> {
@@ -58,18 +65,18 @@ impl<'a> Iterator for ColorIter<'a> {
     type Item = (&'a str, &'a str);
 
     fn next(&mut self) -> Option<Self::Item> {
-        if !self.inner.is_empty() {
-            let i = self.inner[1..]
-                .find('^')
-                .map(|i| i + 1)
-                .unwrap_or(self.inner.len());
-            let (head, tail) = self.inner.split_at(i);
-            let (color, text) = trim_start_color(head);
-            self.inner = tail;
-            Some((color, text))
-        } else {
-            None
+        if self.inner.is_empty() {
+            return None;
         }
+        let (color, tail) = trim_start_color(self.inner);
+        let offset = tail
+            .char_indices()
+            .map(|(i, _)| i)
+            .find(|&i| is_color_code(&tail[i..]))
+            .unwrap_or(tail.len());
+        let (head, tail) = tail.split_at(offset);
+        self.inner = tail;
+        Some((color, head))
     }
 }
 
@@ -96,6 +103,7 @@ mod tests {
         assert_eq!(trim_start_color("foo^2bar"), ("", "foo^2bar"));
         assert_eq!(trim_start_color("^foo^2bar"), ("", "^foo^2bar"));
         assert_eq!(trim_start_color("^1foo^2bar"), ("^1", "foo^2bar"));
+        assert_eq!(trim_start_color("^1^2^3foo^2bar"), ("^3", "foo^2bar"));
     }
 
     #[test]
@@ -106,5 +114,10 @@ mod tests {
         assert_eq!(trim_color("^1foo^bar^3"), "foo^bar");
         assert_eq!(trim_color("^1foo^2bar^"), "foobar^");
         assert_eq!(trim_color("^foo^bar^"), "^foo^bar^");
+        assert_eq!(trim_color("\u{fe0f}^1foo^bar^"), "\u{fe0f}foo^bar^");
+        assert_eq!(
+            trim_color("^1^2^3foo\u{fe0f}^2^\u{fe0f}^bar^"),
+            "foo\u{fe0f}^\u{fe0f}^bar^"
+        );
     }
 }

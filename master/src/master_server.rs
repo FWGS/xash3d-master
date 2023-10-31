@@ -9,10 +9,11 @@ use std::time::Instant;
 
 use blake2b_simd::Params;
 use fastrand::Rng;
-use log::{error, info, trace, warn};
+use log::{debug, error, info, trace, warn};
 use thiserror::Error;
 use xash3d_protocol::filter::{Filter, FilterFlags, Version};
 use xash3d_protocol::server::Region;
+use xash3d_protocol::types::Str;
 use xash3d_protocol::{admin, game, master, server, Error as ProtocolError, ServerInfo};
 
 use crate::config::{self, Config};
@@ -223,9 +224,7 @@ impl MasterServer {
                     trace!("{}: recv {:?}", from, p);
                 }
             }
-        }
-
-        if let Ok(p) = game::Packet::decode(src) {
+        } else if let Ok(p) = game::Packet::decode(src) {
             match p {
                 game::Packet::QueryServers(p) => {
                     trace!("{}: recv {:?}", from, p);
@@ -265,9 +264,7 @@ impl MasterServer {
                     self.sock.send_to(&buf[..n], from)?;
                 }
             }
-        }
-
-        if let Ok(p) = admin::Packet::decode(self.hash.len, src) {
+        } else if let Ok(p) = admin::Packet::decode(self.hash.len, src) {
             let now = self.now();
 
             if let Some(e) = self.admin_limit.get(from.ip()) {
@@ -336,6 +333,8 @@ impl MasterServer {
                     }
                 }
             }
+        } else {
+            debug!("invalid packet: \"{}\"", Str(src));
         }
 
         Ok(())

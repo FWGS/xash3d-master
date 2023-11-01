@@ -8,6 +8,7 @@ use super::types::Str;
 #[derive(Clone, Debug)]
 pub struct ServerInfo {
     pub version: Version,
+    pub protocol: u8,
     pub gamedir: Box<[u8]>,
     pub map: Box<[u8]>,
     pub flags: FilterFlags,
@@ -18,6 +19,7 @@ impl ServerInfo {
     pub fn new(info: &ServerAdd<Str<&[u8]>>) -> Self {
         Self {
             version: info.version,
+            protocol: info.protocol,
             gamedir: info.gamedir.to_vec().into_boxed_slice(),
             map: info.map.to_vec().into_boxed_slice(),
             flags: FilterFlags::from(info),

@@ -124,6 +124,7 @@ mod tests {
                 gamedir: Some(Str(&b"valve"[..])),
                 map: Some(Str(&b"crossfire"[..])),
                 key: Some(0xdeadbeef),
+                protocol: Some(49),
                 clver: Some(Version::new(0, 20)),
                 flags: FilterFlags::all(),
                 flags_mask: FilterFlags::all(),
@@ -141,6 +142,7 @@ mod tests {
             last: SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0),
             filter: Filter {
                 gamedir: None,
+                protocol: Some(48),
                 map: None,
                 key: None,
                 clver: Some(Version::new(0, 20)),

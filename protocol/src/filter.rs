@@ -9,6 +9,7 @@
 //! | --------- | ---- | ------------------------------ | -------- |
 //! | map       | str  | Map name                       | `crossfire`, `de_dust` |
 //! | gamedir   | str  | Game directory                 | `valve`, `cstrike` |
+//! | protocol  | u8   | Game directory                 | `48`, `49` |
 //! | dedicated | bool | Server running dedicated       | `0`, `1` |
 //! | lan       | bool | Server is LAN                  | `0`, `1` |
 //! | nat       | bool | Server behind NAT              | `0`, `1` |
@@ -162,6 +163,8 @@ pub struct Filter<'a> {
     pub map: Option<Str<&'a [u8]>>,
     /// Client version.
     pub clver: Option<Version>,
+    /// Protocol version
+    pub protocol: Option<u8>,
     pub key: Option<u32>,
 
     pub flags: FilterFlags,
@@ -177,7 +180,8 @@ impl Filter<'_> {
     pub fn matches(&self, _addr: SocketAddrV4, info: &ServerInfo) -> bool {
         !((info.flags & self.flags_mask) != self.flags
             || self.gamedir.map_or(false, |s| *s != &*info.gamedir)
-            || self.map.map_or(false, |s| *s != &*info.map))
+            || self.map.map_or(false, |s| *s != &*info.map)
+            || self.protocol.map_or(false, |s| s != info.protocol))
     }
 }
 
@@ -200,6 +204,7 @@ impl<'a> TryFrom<&'a [u8]> for Filter<'a> {
                 b"secure" => filter.insert_flag(FilterFlags::SECURE, cur.get_key_value()?),
                 b"gamedir" => filter.gamedir = Some(cur.get_key_value()?),
                 b"map" => filter.map = Some(cur.get_key_value()?),
+                b"protocol" => filter.protocol = Some(cur.get_key_value()?),
                 b"empty" => filter.insert_flag(FilterFlags::EMPTY, cur.get_key_value()?),
                 b"full" => filter.insert_flag(FilterFlags::FULL, cur.get_key_value()?),
                 b"password" => filter.insert_flag(FilterFlags::PASSWORD, cur.get_key_value()?),
@@ -266,7 +271,9 @@ impl fmt::Display for &Filter<'_> {
         if let Some(x) = self.key {
             write!(fmt, "\\key\\{:x}", x)?;
         }
-
+        if let Some(x) = self.protocol {
+            write!(fmt, "\\protocol\\{}", x)?;
+        }
         Ok(())
     }
 }
@@ -317,6 +324,11 @@ mod tests {
             }
             b"\\clver\\0.19.3" => {
                 clver: Some(Version::with_patch(0, 19, 3)),
+            }
+        }
+        parse_protocol {
+            b"\\protocol\\48" => {
+                protocol: Some(48)
             }
         }
         parse_dedicated(flags_mask: FilterFlags::DEDICATED) {
@@ -388,9 +400,11 @@ mod tests {
               \\noplayers\\1\
               \\password\\1\
               \\secure\\1\
+              \\protocol\\49\
             " => {
                 gamedir: Some(Str(&b"valve"[..])),
                 map: Some(Str(&b"crossfire"[..])),
+                protocol: Some(49),
                 clver: Some(Version::new(0, 20)),
                 flags: FilterFlags::all(),
                 flags_mask: FilterFlags::all(),
@@ -567,5 +581,17 @@ mod tests {
         matches!(servers, b"\\map\\crossfire", 0);
         matches!(servers, b"\\map\\de_dust", 2);
         matches!(servers, b"\\map\\cs_office", 3);
+    }
+
+    #[test]
+    fn match_protocol() {
+        let s = servers! {
+            "0.0.0.0:0" => b"\\protocol\\47"
+            "0.0.0.0:0" => b"\\protocol\\48"
+            "0.0.0.0:0" => b"\\protocol\\49"
+        };
+        matches!(s, b"", 0, 1, 2);
+        matches!(s, b"\\protocol\\48", 1);
+        matches!(s, b"\\protocol\\49", 2);
     }
 }

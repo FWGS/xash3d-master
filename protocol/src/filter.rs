@@ -50,8 +50,8 @@ bitflags! {
         const SECURE        = 1 << 1;
         /// Servers that are not password protected
         const PASSWORD      = 1 << 2;
-        /// Servers that are not empty
-        const NOT_EMPTY     = 1 << 3;
+        /// Servers that are empty
+        const EMPTY         = 1 << 3;
         /// Servers that are not full
         const FULL          = 1 << 4;
         /// Servers that are empty
@@ -72,7 +72,7 @@ impl<T> From<&ServerAdd<T>> for FilterFlags {
         flags.set(Self::DEDICATED, info.server_type == ServerType::Dedicated);
         flags.set(Self::SECURE, info.flags.contains(ServerFlags::SECURE));
         flags.set(Self::PASSWORD, info.flags.contains(ServerFlags::PASSWORD));
-        flags.set(Self::NOT_EMPTY, info.players > 0);
+        flags.set(Self::EMPTY, info.players == 0);
         flags.set(Self::FULL, info.players >= info.max);
         flags.set(Self::NOPLAYERS, info.players == 0);
         flags.set(Self::NAT, info.flags.contains(ServerFlags::NAT));
@@ -196,7 +196,7 @@ impl<'a> TryFrom<&'a [u8]> for Filter<'a> {
                 b"secure" => filter.insert_flag(FilterFlags::SECURE, cur.get_key_value()?),
                 b"gamedir" => filter.gamedir = Some(cur.get_key_value()?),
                 b"map" => filter.map = Some(cur.get_key_value()?),
-                b"empty" => filter.insert_flag(FilterFlags::NOT_EMPTY, cur.get_key_value()?),
+                b"empty" => filter.insert_flag(FilterFlags::EMPTY, cur.get_key_value()?),
                 b"full" => filter.insert_flag(FilterFlags::FULL, cur.get_key_value()?),
                 b"password" => filter.insert_flag(FilterFlags::PASSWORD, cur.get_key_value()?),
                 b"noplayers" => filter.insert_flag(FilterFlags::NOPLAYERS, cur.get_key_value()?),
@@ -249,7 +249,7 @@ impl fmt::Display for &Filter<'_> {
         if let Some(s) = self.map {
             write!(fmt, "\\map\\{}", s)?;
         }
-        display_flag!("empty", FilterFlags::NOT_EMPTY);
+        display_flag!("empty", FilterFlags::EMPTY);
         display_flag!("full", FilterFlags::FULL);
         display_flag!("password", FilterFlags::PASSWORD);
         display_flag!("noplayers", FilterFlags::NOPLAYERS);
@@ -330,10 +330,10 @@ mod tests {
                 flags: FilterFlags::PASSWORD,
             }
         }
-        parse_empty(flags_mask: FilterFlags::NOT_EMPTY) {
+        parse_empty(flags_mask: FilterFlags::EMPTY) {
             b"\\empty\\0" => {}
             b"\\empty\\1" => {
-                flags: FilterFlags::NOT_EMPTY,
+                flags: FilterFlags::EMPTY,
             }
         }
         parse_full(flags_mask: FilterFlags::FULL) {
@@ -459,8 +459,8 @@ mod tests {
             "0.0.0.0:0" => b"\\players\\8\\max\\8"
         };
         matches!(servers, b"", 0, 1, 2);
-        matches!(servers, b"\\empty\\0", 0);
-        matches!(servers, b"\\empty\\1", 1, 2);
+        matches!(servers, b"\\empty\\0", 1, 2);
+        matches!(servers, b"\\empty\\1", 0);
     }
 
     #[test]

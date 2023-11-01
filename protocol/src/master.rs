@@ -9,13 +9,13 @@ use super::Error;
 #[derive(Clone, Debug, PartialEq)]
 pub struct ChallengeResponse {
     pub master_challenge: u32,
-    pub server_challenge: u32,
+    pub server_challenge: Option<u32>,
 }
 
 impl ChallengeResponse {
     pub const HEADER: &'static [u8] = b"\xff\xff\xff\xffs\n";
 
-    pub fn new(master_challenge: u32, server_challenge: u32) -> Self {
+    pub fn new(master_challenge: u32, server_challenge: Option<u32>) -> Self {
         Self {
             master_challenge,
             server_challenge,
@@ -26,7 +26,11 @@ impl ChallengeResponse {
         let mut cur = Cursor::new(src);
         cur.expect(Self::HEADER)?;
         let master_challenge = cur.get_u32_le()?;
-        let server_challenge = cur.get_u32_le()?;
+        let server_challenge = if cur.remaining() == 4 {
+            Some(cur.get_u32_le()?)
+        } else {
+            None
+        };
         cur.expect_empty()?;
         Ok(Self {
             master_challenge,
@@ -35,11 +39,13 @@ impl ChallengeResponse {
     }
 
     pub fn encode<const N: usize>(&self, buf: &mut [u8; N]) -> Result<usize, Error> {
-        Ok(CursorMut::new(buf)
-            .put_bytes(Self::HEADER)?
-            .put_u32_le(self.master_challenge)?
-            .put_u32_le(self.server_challenge)?
-            .pos())
+        let mut cur = CursorMut::new(buf);
+        cur.put_bytes(Self::HEADER)?;
+        cur.put_u32_le(self.master_challenge)?;
+        if let Some(server_challenge) = self.server_challenge {
+            cur.put_u32_le(server_challenge)?;
+        }
+        Ok(cur.pos())
     }
 }
 
@@ -222,7 +228,21 @@ mod tests {
 
     #[test]
     fn challenge_response() {
-        let p = ChallengeResponse::new(0x12345678, 0x87654321);
+        let p = ChallengeResponse::new(0x12345678, Some(0x87654321));
+        let mut buf = [0; 512];
+        let n = p.encode(&mut buf).unwrap();
+        assert_eq!(ChallengeResponse::decode(&buf[..n]), Ok(p));
+    }
+
+    #[test]
+    fn challenge_response_old() {
+        let s = b"\xff\xff\xff\xffs\n\x78\x56\x34\x12";
+        assert_eq!(
+            ChallengeResponse::decode(s),
+            Ok(ChallengeResponse::new(0x12345678, None))
+        );
+
+        let p = ChallengeResponse::new(0x12345678, None);
         let mut buf = [0; 512];
         let n = p.encode(&mut buf).unwrap();
         assert_eq!(ChallengeResponse::decode(&buf[..n]), Ok(p));

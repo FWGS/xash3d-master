@@ -252,10 +252,10 @@ impl MasterServer {
                     let p = server::GetServerInfoResponse {
                         map: self.update_map.as_ref(),
                         host: self.update_title.as_ref(),
-                        protocol: 49,
+                        protocol: 48, // XXX: how to detect what version client will accept?
                         dm: true,
                         maxcl: 32,
-                        gamedir: "valve",
+                        gamedir: "valve", // XXX: probably must be specific for client...
                         ..Default::default()
                     };
                     trace!("{}: send {:?}", from, p);
@@ -334,7 +334,7 @@ impl MasterServer {
                 }
             }
         } else {
-            debug!("invalid packet: \"{}\"", Str(src));
+            debug!("{}: invalid packet: \"{}\"", from, Str(src));
         }
 
         Ok(())

@@ -13,29 +13,35 @@ use super::Error;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Challenge {
-    pub server_challenge: u32,
+    pub server_challenge: Option<u32>,
 }
 
 impl Challenge {
     pub const HEADER: &'static [u8] = b"q\xff";
 
-    pub fn new(server_challenge: u32) -> Self {
+    pub fn new(server_challenge: Option<u32>) -> Self {
         Self { server_challenge }
     }
 
     pub fn decode(src: &[u8]) -> Result<Self, Error> {
         let mut cur = Cursor::new(src);
         cur.expect(Self::HEADER)?;
-        let server_challenge = cur.get_u32_le()?;
+        let server_challenge = if cur.remaining() == 4 {
+            Some(cur.get_u32_le()?)
+        } else {
+            None
+        };
         cur.expect_empty()?;
         Ok(Self { server_challenge })
     }
 
     pub fn encode<const N: usize>(&self, buf: &mut [u8; N]) -> Result<usize, Error> {
-        Ok(CursorMut::new(buf)
-            .put_bytes(Self::HEADER)?
-            .put_u32_le(self.server_challenge)?
-            .pos())
+        let mut cur = CursorMut::new(buf);
+        cur.put_bytes(Self::HEADER)?;
+        if let Some(server_challenge) = self.server_challenge {
+            cur.put_u32_le(server_challenge)?;
+        }
+        Ok(cur.pos())
     }
 }
 
@@ -264,7 +270,15 @@ where
                 b"map" => ret.map = cur.get_key_value()?,
                 b"type" => ret.server_type = cur.get_key_value()?,
                 b"os" => ret.os = cur.get_key_value()?,
-                b"version" => ret.version = cur.get_key_value()?,
+                b"version" => {
+                    ret.version = cur
+                        .get_key_value()
+                        .map_err(|e| {
+                            debug!("invalid server version");
+                            e
+                        })
+                        .unwrap_or_default()
+                }
                 b"region" => ret.region = cur.get_key_value()?,
                 b"product" => ret.product = cur.get_key_value()?,
                 b"bots" => ret.flags.set(ServerFlags::BOTS, cur.get_key_value()?),
@@ -460,10 +474,21 @@ mod tests {
 
     #[test]
     fn challenge() {
-        let p = Challenge::new(0x12345678);
+        let p = Challenge::new(Some(0x12345678));
         let mut buf = [0; 128];
         let n = p.encode(&mut buf).unwrap();
         assert_eq!(Challenge::decode(&buf[..n]), Ok(p));
+    }
+
+    #[test]
+    fn challenge_old() {
+        let s = b"q\xff";
+        assert_eq!(Challenge::decode(s), Ok(Challenge::new(None)));
+
+        let p = Challenge::new(None);
+        let mut buf = [0; 128];
+        let n = p.encode(&mut buf).unwrap();
+        assert_eq!(&buf[..n], b"q\xff");
     }
 
     #[test]

@@ -87,23 +87,36 @@ impl<T> From<&ServerAdd<T>> for FilterFlags {
 pub struct Version {
     pub major: u8,
     pub minor: u8,
+    pub patch: u8,
 }
 
 impl Version {
     pub const fn new(major: u8, minor: u8) -> Self {
-        Self { major, minor }
+        Self::with_patch(major, minor, 0)
+    }
+
+    pub const fn with_patch(major: u8, minor: u8, patch: u8) -> Self {
+        Self {
+            major,
+            minor,
+            patch,
+        }
     }
 }
 
 impl fmt::Debug for Version {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        write!(fmt, "{}.{}", self.major, self.minor)
+        write!(fmt, "{}.{}", self.major, self.minor)?;
+        if self.patch != 0 {
+            write!(fmt, ".{}", self.patch)?;
+        }
+        Ok(())
     }
 }
 
 impl fmt::Display for Version {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        write!(fmt, "{}.{}", self.major, self.minor)
+        <Self as fmt::Debug>::fmt(self, fmt)
     }
 }
 
@@ -111,8 +124,12 @@ impl FromStr for Version {
     type Err = ParseIntError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let (major, minor) = s.split_once('.').unwrap_or((s, "0"));
-        Ok(Self::new(major.parse()?, minor.parse()?))
+        let (major, tail) = s.split_once('.').unwrap_or((s, "0"));
+        let (minor, patch) = tail.split_once('.').unwrap_or((tail, "0"));
+        let major = major.parse()?;
+        let minor = minor.parse()?;
+        let patch = patch.parse()?;
+        Ok(Self::with_patch(major, minor, patch))
     }
 }
 

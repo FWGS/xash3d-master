@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // SPDX-FileCopyrightText: 2023 Denis Drakhnia <numas13@gmail.com>
 
-//! Server query filter
+//! Server query filter.
 //!
 //! # Supported filters:
 //!
@@ -43,6 +43,7 @@ use crate::types::Str;
 use crate::{Error, ServerInfo};
 
 bitflags! {
+    /// Additional filter flags.
     #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
     pub struct FilterFlags: u16 {
         /// Servers running dedicated
@@ -84,18 +85,24 @@ impl<T> From<&ServerAdd<T>> for FilterFlags {
     }
 }
 
+/// Client or server version.
 #[derive(Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Version {
+    /// MAJOR version.
     pub major: u8,
+    /// MINOR version.
     pub minor: u8,
+    /// PATCH version.
     pub patch: u8,
 }
 
 impl Version {
+    /// Creates a new `Version`.
     pub const fn new(major: u8, minor: u8) -> Self {
         Self::with_patch(major, minor, 0)
     }
 
+    /// Creates a new `Version` with the specified `patch` version.
     pub const fn with_patch(major: u8, minor: u8, patch: u8) -> Self {
         Self {
             major,
@@ -155,6 +162,7 @@ impl PutKeyValue for Version {
     }
 }
 
+/// Server filter.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Filter<'a> {
     /// Servers running the specified modification (ex. cstrike)
@@ -165,18 +173,22 @@ pub struct Filter<'a> {
     pub clver: Option<Version>,
     /// Protocol version
     pub protocol: Option<u8>,
+    /// A number that master must sent back to game client.
     pub key: Option<u32>,
-
+    /// Additional filter flags.
     pub flags: FilterFlags,
+    /// Filter flags mask.
     pub flags_mask: FilterFlags,
 }
 
 impl Filter<'_> {
+    /// Insert filter flag.
     pub fn insert_flag(&mut self, flag: FilterFlags, value: bool) {
         self.flags.set(flag, value);
         self.flags_mask.insert(flag);
     }
 
+    /// Returns `true` if a server matches the filter.
     pub fn matches(&self, _addr: SocketAddrV4, info: &ServerInfo) -> bool {
         !((info.flags & self.flags_mask) != self.flags
             || self.gamedir.map_or(false, |s| *s != &*info.gamedir)

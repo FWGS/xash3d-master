@@ -1,20 +1,27 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // SPDX-FileCopyrightText: 2023 Denis Drakhnia <numas13@gmail.com>
 
+//! Master server packets.
+
 use std::net::{Ipv4Addr, SocketAddrV4};
 
 use super::cursor::{Cursor, CursorMut};
 use super::Error;
 
+/// Master server challenge response packet.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ChallengeResponse {
+    /// A number that a game server must send back.
     pub master_challenge: u32,
+    /// A number that a master server received in challenge packet.
     pub server_challenge: Option<u32>,
 }
 
 impl ChallengeResponse {
+    /// Packet header.
     pub const HEADER: &'static [u8] = b"\xff\xff\xff\xffs\n";
 
+    /// Creates a new `ChallengeResponse`.
     pub fn new(master_challenge: u32, server_challenge: Option<u32>) -> Self {
         Self {
             master_challenge,
@@ -22,6 +29,7 @@ impl ChallengeResponse {
         }
     }
 
+    /// Decode packet from `src`.
     pub fn decode(src: &[u8]) -> Result<Self, Error> {
         let mut cur = Cursor::new(src);
         cur.expect(Self::HEADER)?;
@@ -38,6 +46,7 @@ impl ChallengeResponse {
         })
     }
 
+    /// Encode packet to `buf`.
     pub fn encode<const N: usize>(&self, buf: &mut [u8; N]) -> Result<usize, Error> {
         let mut cur = CursorMut::new(buf);
         cur.put_bytes(Self::HEADER)?;
@@ -49,17 +58,21 @@ impl ChallengeResponse {
     }
 }
 
+/// Game server addresses list.
 #[derive(Clone, Debug, PartialEq)]
 pub struct QueryServersResponse<I> {
     inner: I,
+    /// A challenge number received in a filter string.
     pub key: Option<u32>,
 }
 
 impl QueryServersResponse<()> {
+    /// Packet header.
     pub const HEADER: &'static [u8] = b"\xff\xff\xff\xfff\n";
 }
 
 impl<'a> QueryServersResponse<&'a [u8]> {
+    /// Decode packet from `src`.
     pub fn decode(src: &'a [u8]) -> Result<Self, Error> {
         let mut cur = Cursor::new(src);
         cur.expect(QueryServersResponse::HEADER)?;
@@ -83,6 +96,7 @@ impl<'a> QueryServersResponse<&'a [u8]> {
         Ok(Self { inner, key })
     }
 
+    /// Iterator over game server addresses.
     pub fn iter(&self) -> impl 'a + Iterator<Item = SocketAddrV4> {
         let mut cur = Cursor::new(self.inner);
         (0..self.inner.len() / 6).map(move |_| {
@@ -92,6 +106,7 @@ impl<'a> QueryServersResponse<&'a [u8]> {
         })
     }
 
+    /// Returns `true` if game server addresses list is empty.
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
@@ -101,10 +116,17 @@ impl<I> QueryServersResponse<I>
 where
     I: Iterator<Item = SocketAddrV4>,
 {
+    /// Creates a new `QueryServersResponse`.
     pub fn new(iter: I, key: Option<u32>) -> Self {
         Self { inner: iter, key }
     }
 
+    /// Encode packet to `buf`.
+    ///
+    /// If `buf` has not enougth size to hold all addresses the method must be called
+    /// multiple times until the end flag equals `true`.
+    ///
+    /// Returns how many bytes was written in `buf` and the end flag.
     pub fn encode(&mut self, buf: &mut [u8]) -> Result<(usize, bool), Error> {
         let mut cur = CursorMut::new(buf);
         cur.put_bytes(QueryServersResponse::HEADER)?;
@@ -129,18 +151,23 @@ where
     }
 }
 
+/// Announce a game client to game server behind NAT.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ClientAnnounce {
+    /// Address of the client.
     pub addr: SocketAddrV4,
 }
 
 impl ClientAnnounce {
+    /// Packet header.
     pub const HEADER: &'static [u8] = b"\xff\xff\xff\xffc ";
 
+    /// Creates a new `ClientAnnounce`.
     pub fn new(addr: SocketAddrV4) -> Self {
         Self { addr }
     }
 
+    /// Decode packet from `src`.
     pub fn decode(src: &[u8]) -> Result<Self, Error> {
         let mut cur = Cursor::new(src);
         cur.expect(Self::HEADER)?;
@@ -152,6 +179,7 @@ impl ClientAnnounce {
         Ok(Self { addr })
     }
 
+    /// Encode packet to `buf`.
     pub fn encode(&self, buf: &mut [u8]) -> Result<usize, Error> {
         Ok(CursorMut::new(buf)
             .put_bytes(Self::HEADER)?
@@ -160,15 +188,20 @@ impl ClientAnnounce {
     }
 }
 
+/// Admin challenge response.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AdminChallengeResponse {
+    /// A number that admin must sent back to a master server.
     pub master_challenge: u32,
+    /// A number with which to mix a password hash.
     pub hash_challenge: u32,
 }
 
 impl AdminChallengeResponse {
+    /// Packet header.
     pub const HEADER: &'static [u8] = b"\xff\xff\xff\xffadminchallenge";
 
+    /// Creates a new `AdminChallengeResponse`.
     pub fn new(master_challenge: u32, hash_challenge: u32) -> Self {
         Self {
             master_challenge,
@@ -176,6 +209,7 @@ impl AdminChallengeResponse {
         }
     }
 
+    /// Decode packet from `src`.
     pub fn decode(src: &[u8]) -> Result<Self, Error> {
         let mut cur = Cursor::new(src);
         cur.expect(Self::HEADER)?;
@@ -188,6 +222,7 @@ impl AdminChallengeResponse {
         })
     }
 
+    /// Encode packet to `buf`.
     pub fn encode(&self, buf: &mut [u8]) -> Result<usize, Error> {
         Ok(CursorMut::new(buf)
             .put_bytes(Self::HEADER)?
@@ -197,14 +232,21 @@ impl AdminChallengeResponse {
     }
 }
 
+/// Master server packet.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Packet<'a> {
+    /// Master server challenge response packet.
     ChallengeResponse(ChallengeResponse),
+    /// Game server addresses list.
     QueryServersResponse(QueryServersResponse<&'a [u8]>),
+    /// Announce a game client to game server behind NAT.
+    ClientAnnounce(ClientAnnounce),
+    /// Admin challenge response.
     AdminChallengeResponse(AdminChallengeResponse),
 }
 
 impl<'a> Packet<'a> {
+    /// Decode packet from `src`.
     pub fn decode(src: &'a [u8]) -> Result<Self, Error> {
         if let Ok(p) = ChallengeResponse::decode(src) {
             return Ok(Self::ChallengeResponse(p));
@@ -212,6 +254,10 @@ impl<'a> Packet<'a> {
 
         if let Ok(p) = QueryServersResponse::decode(src) {
             return Ok(Self::QueryServersResponse(p));
+        }
+
+        if let Ok(p) = ClientAnnounce::decode(src) {
+            return Ok(Self::ClientAnnounce(p));
         }
 
         if let Ok(p) = AdminChallengeResponse::decode(src) {

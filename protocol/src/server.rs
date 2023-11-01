@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // SPDX-FileCopyrightText: 2023 Denis Drakhnia <numas13@gmail.com>
 
+//! Game server packets.
+
 use std::fmt;
 
 use bitflags::bitflags;
@@ -11,18 +13,23 @@ use super::filter::Version;
 use super::types::Str;
 use super::Error;
 
+/// Sended to a master server before `ServerAdd` packet.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Challenge {
+    /// A number that the server must return in response.
     pub server_challenge: Option<u32>,
 }
 
 impl Challenge {
+    /// Packet header.
     pub const HEADER: &'static [u8] = b"q\xff";
 
+    /// Creates a new `Challenge`.
     pub fn new(server_challenge: Option<u32>) -> Self {
         Self { server_challenge }
     }
 
+    /// Decode packet from `src`.
     pub fn decode(src: &[u8]) -> Result<Self, Error> {
         let mut cur = Cursor::new(src);
         cur.expect(Self::HEADER)?;
@@ -35,6 +42,7 @@ impl Challenge {
         Ok(Self { server_challenge })
     }
 
+    /// Encode packet to `buf`.
     pub fn encode<const N: usize>(&self, buf: &mut [u8; N]) -> Result<usize, Error> {
         let mut cur = CursorMut::new(buf);
         cur.put_bytes(Self::HEADER)?;
@@ -45,12 +53,17 @@ impl Challenge {
     }
 }
 
+/// The operating system on which the game server runs.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Os {
+    /// GNU/Linux.
     Linux,
+    /// Microsoft Windows
     Windows,
+    /// Apple macOS, OS X, Mac OS X
     Mac,
+    /// Unknown
     Unknown,
 }
 
@@ -105,12 +118,17 @@ impl fmt::Display for Os {
     }
 }
 
+/// Game server type.
 #[derive(Copy, Clone, Debug, PartialEq)]
 #[repr(u8)]
 pub enum ServerType {
+    /// Dedicated server.
     Dedicated,
+    /// Game client.
     Local,
+    /// Spectator proxy.
     Proxy,
+    /// Unknown.
     Unknown,
 }
 
@@ -168,17 +186,27 @@ impl fmt::Display for ServerType {
     }
 }
 
+/// The region of the world in which the server is located.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Region {
+    /// US East coast.
     USEastCoast = 0x00,
+    /// US West coast.
     USWestCoast = 0x01,
+    /// South America.
     SouthAmerica = 0x02,
+    /// Europe.
     Europe = 0x03,
+    /// Asia.
     Asia = 0x04,
+    /// Australia.
     Australia = 0x05,
+    /// Middle East.
     MiddleEast = 0x06,
+    /// Africa.
     Africa = 0x07,
+    /// Rest of the world.
     RestOfTheWorld = 0xff,
 }
 
@@ -214,33 +242,59 @@ impl GetKeyValue<'_> for Region {
 }
 
 bitflags! {
+    /// Additional server flags.
     #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
     pub struct ServerFlags: u8 {
+        /// Server has bots.
         const BOTS      = 1 << 0;
+        /// Server is behind a password.
         const PASSWORD  = 1 << 1;
+        /// Server using anti-cheat.
         const SECURE    = 1 << 2;
+        /// Server is LAN.
         const LAN       = 1 << 3;
+        /// Server behind NAT.
         const NAT       = 1 << 4;
     }
 }
 
+/// Add/update game server information on the master server.
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct ServerAdd<T> {
+    /// Server is running the specified modification.
+    ///
+    /// ## Examples:
+    ///
+    /// * valve - Half-Life
+    /// * cstrike - Counter-Strike 1.6
+    /// * portal - Portal
+    /// * dod - Day of Defeat
+    /// * left4dead - Left 4 Dead
     pub gamedir: T,
+    /// Server is running `map`.
     pub map: T,
+    /// Server version.
     pub version: Version,
-    pub product: T,
+    /// Master server challenge number.
     pub challenge: u32,
+    /// Server type.
     pub server_type: ServerType,
+    /// Server is running on an operating system.
     pub os: Os,
+    /// Server is located in a `region`.
     pub region: Region,
+    /// Server protocol version.
     pub protocol: u8,
+    /// Current number of players on the server.
     pub players: u8,
+    /// Maximum number of players on the server.
     pub max: u8,
+    /// See `ServerFalgs`.
     pub flags: ServerFlags,
 }
 
 impl ServerAdd<()> {
+    /// Packet header.
     pub const HEADER: &'static [u8] = b"0\n";
 }
 
@@ -248,6 +302,7 @@ impl<'a, T> ServerAdd<T>
 where
     T: 'a + Default + GetKeyValue<'a>,
 {
+    /// Decode packet from `src`.
     pub fn decode(src: &'a [u8]) -> Result<Self, Error> {
         let mut cur = Cursor::new(src);
         cur.expect(ServerAdd::HEADER)?;
@@ -280,7 +335,6 @@ where
                         .unwrap_or_default()
                 }
                 b"region" => ret.region = cur.get_key_value()?,
-                b"product" => ret.product = cur.get_key_value()?,
                 b"bots" => ret.flags.set(ServerFlags::BOTS, cur.get_key_value()?),
                 b"password" => ret.flags.set(ServerFlags::PASSWORD, cur.get_key_value()?),
                 b"secure" => ret.flags.set(ServerFlags::SECURE, cur.get_key_value()?),
@@ -308,6 +362,7 @@ impl<T> ServerAdd<T>
 where
     T: PutKeyValue + Clone,
 {
+    /// Encode packet to `buf`.
     pub fn encode(&self, buf: &mut [u8]) -> Result<usize, Error> {
         Ok(CursorMut::new(buf)
             .put_bytes(ServerAdd::HEADER)?
@@ -321,7 +376,6 @@ where
             .put_key("os", self.os)?
             .put_key("version", self.version)?
             .put_key("region", self.region as u8)?
-            .put_key("product", self.product.clone())?
             .put_key("bots", self.flags.contains(ServerFlags::BOTS))?
             .put_key("password", self.flags.contains(ServerFlags::PASSWORD))?
             .put_key("secure", self.flags.contains(ServerFlags::SECURE))?
@@ -331,12 +385,15 @@ where
     }
 }
 
+/// Remove the game server from a list.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ServerRemove;
 
 impl ServerRemove {
+    /// Packet header.
     pub const HEADER: &'static [u8] = b"b\n";
 
+    /// Decode packet from `src`.
     pub fn decode(src: &[u8]) -> Result<Self, Error> {
         let mut cur = Cursor::new(src);
         cur.expect(Self::HEADER)?;
@@ -344,26 +401,47 @@ impl ServerRemove {
         Ok(Self)
     }
 
+    /// Encode packet to `buf`.
     pub fn encode<const N: usize>(&self, buf: &mut [u8; N]) -> Result<usize, Error> {
         Ok(CursorMut::new(buf).put_bytes(Self::HEADER)?.pos())
     }
 }
 
+/// Game server information to game clients.
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct GetServerInfoResponse<T> {
+    /// Server is running the specified modification.
+    ///
+    /// ## Examples:
+    ///
+    /// * valve - Half-Life
+    /// * cstrike - Counter-Strike 1.6
+    /// * portal - Portal
+    /// * dod - Day of Defeat
+    /// * left4dead - Left 4 Dead
     pub gamedir: T,
+    /// Server is running `map`.
     pub map: T,
+    /// Server title.
     pub host: T,
+    /// Server protocol version.
     pub protocol: u8,
+    /// Current number of players on the server.
     pub numcl: u8,
+    /// Maximum number of players on the server.
     pub maxcl: u8,
+    /// Server is running a deathmatch game mode.
     pub dm: bool,
+    /// Players are grouped into teams.
     pub team: bool,
+    /// Server is running in a co-op game mode.
     pub coop: bool,
+    /// Server is behind a password.
     pub password: bool,
 }
 
 impl GetServerInfoResponse<()> {
+    /// Packet header.
     pub const HEADER: &'static [u8] = b"\xff\xff\xff\xffinfo\n";
 }
 
@@ -371,6 +449,7 @@ impl<'a, T> GetServerInfoResponse<T>
 where
     T: 'a + Default + GetKeyValue<'a>,
 {
+    /// Decode packet from `src`.
     pub fn decode(src: &'a [u8]) -> Result<Self, Error> {
         let mut cur = Cursor::new(src);
         cur.expect(GetServerInfoResponse::HEADER)?;
@@ -421,6 +500,7 @@ where
 }
 
 impl<'a> GetServerInfoResponse<&'a str> {
+    /// Encode packet to `buf`.
     pub fn encode(&self, buf: &mut [u8]) -> Result<usize, Error> {
         Ok(CursorMut::new(buf)
             .put_bytes(GetServerInfoResponse::HEADER)?
@@ -438,15 +518,21 @@ impl<'a> GetServerInfoResponse<&'a str> {
     }
 }
 
+/// Game server packet.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Packet<'a> {
+    /// Sended to a master server before `ServerAdd` packet.
     Challenge(Challenge),
+    /// Add/update game server information on the master server.
     ServerAdd(ServerAdd<Str<&'a [u8]>>),
+    /// Remove the game server from a list.
     ServerRemove,
+    /// Game server information to game clients.
     GetServerInfoResponse(GetServerInfoResponse<Str<&'a [u8]>>),
 }
 
 impl<'a> Packet<'a> {
+    /// Decode packet from `src`.
     pub fn decode(src: &'a [u8]) -> Result<Self, Error> {
         if let Ok(p) = Challenge::decode(src) {
             return Ok(Self::Challenge(p));
@@ -497,7 +583,6 @@ mod tests {
             gamedir: "valve",
             map: "crossfire",
             version: Version::new(0, 20),
-            product: "foobar",
             challenge: 0x12345678,
             server_type: ServerType::Dedicated,
             os: Os::Linux,

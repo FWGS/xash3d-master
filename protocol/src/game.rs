@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // SPDX-FileCopyrightText: 2023 Denis Drakhnia <numas13@gmail.com>
 
+//! Game client packets.
+
 use std::fmt;
 use std::net::SocketAddrV4;
 
@@ -9,14 +11,19 @@ use crate::filter::Filter;
 use crate::server::Region;
 use crate::Error;
 
+/// Request a list of server addresses from master servers.
 #[derive(Clone, Debug, PartialEq)]
 pub struct QueryServers<T> {
+    /// Servers must be from the `region`.
     pub region: Region,
+    /// Last received server address __(not used)__.
     pub last: SocketAddrV4,
+    /// Select only servers that match the `filter`.
     pub filter: T,
 }
 
 impl QueryServers<()> {
+    /// Packet header.
     pub const HEADER: &'static [u8] = b"1";
 }
 
@@ -24,6 +31,7 @@ impl<'a, T: 'a> QueryServers<T>
 where
     T: TryFrom<&'a [u8], Error = Error>,
 {
+    /// Decode packet from `src`.
     pub fn decode(src: &'a [u8]) -> Result<Self, Error> {
         let mut cur = Cursor::new(src);
         cur.expect(QueryServers::HEADER)?;
@@ -46,6 +54,7 @@ impl<'a, T: 'a> QueryServers<T>
 where
     for<'b> &'b T: fmt::Display,
 {
+    /// Encode packet to `buf`.
     pub fn encode(&self, buf: &mut [u8]) -> Result<usize, Error> {
         Ok(CursorMut::new(buf)
             .put_bytes(QueryServers::HEADER)?
@@ -58,18 +67,23 @@ where
     }
 }
 
+/// Request an information from a game server.
 #[derive(Clone, Debug, PartialEq)]
 pub struct GetServerInfo {
+    /// Client protocol version.
     pub protocol: u8,
 }
 
 impl GetServerInfo {
+    /// Packet header.
     pub const HEADER: &'static [u8] = b"\xff\xff\xff\xffinfo ";
 
+    /// Creates a new `GetServerInfo`.
     pub fn new(protocol: u8) -> Self {
         Self { protocol }
     }
 
+    /// Decode packet from `src`.
     pub fn decode(src: &[u8]) -> Result<Self, Error> {
         let mut cur = Cursor::new(src);
         cur.expect(Self::HEADER)?;
@@ -80,6 +94,7 @@ impl GetServerInfo {
         Ok(Self { protocol })
     }
 
+    /// Encode packet to `buf`.
     pub fn encode(&self, buf: &mut [u8]) -> Result<usize, Error> {
         Ok(CursorMut::new(buf)
             .put_bytes(Self::HEADER)?
@@ -88,13 +103,17 @@ impl GetServerInfo {
     }
 }
 
+/// Game client packets.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Packet<'a> {
+    /// Request a list of server addresses from master servers.
     QueryServers(QueryServers<Filter<'a>>),
+    /// Request an information from a game server.
     GetServerInfo(GetServerInfo),
 }
 
 impl<'a> Packet<'a> {
+    /// Decode packet from `src`.
     pub fn decode(src: &'a [u8]) -> Result<Self, Error> {
         if let Ok(p) = QueryServers::decode(src) {
             return Ok(Self::QueryServers(p));

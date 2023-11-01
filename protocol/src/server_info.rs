@@ -5,17 +5,25 @@ use super::filter::{FilterFlags, Version};
 use super::server::{Region, ServerAdd};
 use super::types::Str;
 
+/// Game server information.
 #[derive(Clone, Debug)]
 pub struct ServerInfo {
+    /// Server version.
     pub version: Version,
+    /// Server protocol version.
     pub protocol: u8,
+    /// Server midification.
     pub gamedir: Box<[u8]>,
+    /// Server map.
     pub map: Box<[u8]>,
+    /// Server additional filter flags.
     pub flags: FilterFlags,
+    /// Server region.
     pub region: Region,
 }
 
 impl ServerInfo {
+    /// Creates a new `ServerInfo`.
     pub fn new(info: &ServerAdd<Str<&[u8]>>) -> Self {
         Self {
             version: info.version,

@@ -1,10 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // SPDX-FileCopyrightText: 2023 Denis Drakhnia <numas13@gmail.com>
 
+//! Wrappers for byte slices with pretty-printers.
+
 use std::fmt;
 use std::ops::Deref;
 
-/// Wrapper for slice of bytes with printing the bytes as a string
+/// Wrapper for slice of bytes with printing the bytes as a string.
+///
+/// # Examples
+///
+/// ```rust
+/// # use xash3d_protocol::types::Str;
+/// let s = format!("{}", Str(b"\xff\talex\n"));
+/// assert_eq!(s, "\\xff\\talex\\n");
+/// ```
 #[derive(Copy, Clone, PartialEq, Eq, Default)]
 pub struct Str<T>(pub T);
 
@@ -51,7 +61,15 @@ impl<T> Deref for Str<T> {
     }
 }
 
-/// Wrapper for slice of bytes without printing
+/// Wrapper for slice of bytes without printing.
+///
+/// # Examples
+///
+/// ```rust
+/// # use xash3d_protocol::types::Hide;
+/// let s = format!("{}", Hide([1, 2, 3, 4]));
+/// assert_eq!(s, "<hidden>");
+/// ```
 #[derive(Copy, Clone, PartialEq, Eq, Default)]
 pub struct Hide<T>(pub T);
 

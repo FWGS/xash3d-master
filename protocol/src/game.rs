@@ -29,12 +29,15 @@ where
         cur.expect(QueryServers::HEADER)?;
         let region = cur.get_u8()?.try_into().map_err(|_| Error::InvalidPacket)?;
         let last = cur.get_cstr_as_str()?;
-        let filter = cur.get_cstr()?;
-        cur.expect_empty()?;
+        let filter = match cur.get_bytes(cur.remaining())? {
+            // some clients may have bug and filter will be with zero at the end
+            [x @ .., 0] => x,
+            x => x,
+        };
         Ok(Self {
             region,
             last: last.parse().map_err(|_| Error::InvalidPacket)?,
-            filter: T::try_from(*filter)?,
+            filter: T::try_from(filter)?,
         })
     }
 }
@@ -129,6 +132,28 @@ mod tests {
         let mut buf = [0; 512];
         let n = p.encode(&mut buf).unwrap();
         assert_eq!(QueryServers::decode(&buf[..n]), Ok(p));
+    }
+
+    #[test]
+    fn query_servers_filter_bug() {
+        let p = QueryServers {
+            region: Region::RestOfTheWorld,
+            last: SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0),
+            filter: Filter {
+                gamedir: None,
+                map: None,
+                key: None,
+                clver: Some(Version::new(0, 20)),
+                flags: FilterFlags::empty(),
+                flags_mask: FilterFlags::NAT,
+            },
+        };
+
+        let s = b"1\xff0.0.0.0:0\x00\\protocol\\48\\clver\\0.20\\nat\\0\0";
+        assert_eq!(QueryServers::decode(s), Ok(p.clone()));
+
+        let s = b"1\xff0.0.0.0:0\x00\\protocol\\48\\clver\\0.20\\nat\\0";
+        assert_eq!(QueryServers::decode(s), Ok(p));
     }
 
     #[test]

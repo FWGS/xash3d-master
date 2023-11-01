@@ -146,7 +146,11 @@ impl PutKeyValue for Version {
     ) -> Result<&'b mut crate::cursor::CursorMut<'a>, Error> {
         cur.put_key_value(self.major)?
             .put_u8(b'.')?
-            .put_key_value(self.minor)
+            .put_key_value(self.minor)?;
+        if self.patch > 0 {
+            cur.put_u8(b'.')?.put_key_value(self.patch)?;
+        }
+        Ok(cur)
     }
 }
 
@@ -311,6 +315,9 @@ mod tests {
             b"\\clver\\0.20" => {
                 clver: Some(Version::new(0, 20)),
             }
+            b"\\clver\\0.19.3" => {
+                clver: Some(Version::with_patch(0, 19, 3)),
+            }
         }
         parse_dedicated(flags_mask: FilterFlags::DEDICATED) {
             b"\\dedicated\\0" => {}
@@ -389,6 +396,16 @@ mod tests {
                 flags_mask: FilterFlags::all(),
             }
         }
+    }
+
+    #[test]
+    fn version_to_key_value() {
+        let mut buf = [0; 64];
+        let n = CursorMut::new(&mut buf[..])
+            .put_key_value(Version::with_patch(0, 19, 3))
+            .unwrap()
+            .pos();
+        assert_eq!(&buf[..n], b"0.19.3");
     }
 
     macro_rules! servers {

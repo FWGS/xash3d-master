@@ -307,7 +307,11 @@ impl<'a> Scan<'a> {
                         set.extend(packet.iter());
                     }
                 } else {
-                    eprintln!("warn: invalid packet from master {}", from);
+                    eprintln!(
+                        "warn: invalid packet from master {}, raw \"{}\"",
+                        from,
+                        Str(&buf[..n])
+                    );
                 }
             }
         }

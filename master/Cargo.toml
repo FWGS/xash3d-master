@@ -19,6 +19,7 @@ fastrand = "2.0.1"
 serde = { version = "1.0.188", features = ["derive"] }
 toml = "0.5.11"
 blake2b_simd = "<0.6"
+signal-hook = { version = "0.3.17", default-features = false }
 xash3d-protocol = { path = "../protocol", version = "0.1.0" }
 
 [dependencies.chrono]

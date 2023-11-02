@@ -5,7 +5,8 @@ use std::collections::{HashMap, HashSet};
 use std::io;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, ToSocketAddrs, UdpSocket};
 use std::ops::Deref;
-use std::time::Instant;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use blake2b_simd::Params;
 use fastrand::Rng;
@@ -97,7 +98,7 @@ impl Counter {
     }
 }
 
-struct MasterServer {
+pub struct MasterServer {
     sock: UdpSocket,
     challenges: HashMap<SocketAddrV4, Entry<u32>>,
     challenges_counter: Counter,
@@ -137,38 +138,36 @@ where
     Ok(None)
 }
 
+fn resolve_update_addr(cfg: &Config, local_addr: SocketAddr) -> SocketAddrV4 {
+    if let Some(s) = cfg.client.update_addr.as_deref() {
+        let addr = if !s.contains(':') {
+            format!("{}:{}", s, local_addr.port())
+        } else {
+            s.to_owned()
+        };
+
+        match resolve_socket_addr(&addr) {
+            Ok(Some(x)) => return x,
+            Ok(None) => error!("Update address: failed to resolve IPv4 for \"{}\"", addr),
+            Err(e) => error!("Update address: {}", e),
+        }
+    }
+
+    match local_addr {
+        SocketAddr::V4(x) => x,
+        SocketAddr::V6(_) => todo!(),
+    }
+}
+
 impl MasterServer {
-    fn new(cfg: Config) -> Result<Self, Error> {
+    pub fn new(cfg: Config) -> Result<Self, Error> {
         let addr = SocketAddr::new(cfg.server.ip, cfg.server.port);
         info!("Listen address: {}", addr);
         let sock = UdpSocket::bind(addr).map_err(Error::BindSocket)?;
+        // make socket interruptable by singals
+        sock.set_read_timeout(Some(Duration::from_secs(u32::MAX as u64)))?;
 
-        let update_addr = {
-            let mut addr = None;
-
-            if let Some(update_addr) = cfg.client.update_addr {
-                addr = match resolve_socket_addr(&*update_addr) {
-                    Ok(None) => {
-                        error!(
-                            "update address: failed to resolve IPv4 for \"{}\"",
-                            update_addr
-                        );
-                        None
-                    }
-                    Err(e) => {
-                        error!("update address: {}", e);
-                        None
-                    }
-                    Ok(addr) => addr,
-                }
-            };
-
-            // fallback to local address
-            addr.unwrap_or_else(|| match sock.local_addr().unwrap() {
-                SocketAddr::V4(a) => a,
-                _ => todo!(),
-            })
-        };
+        let update_addr = resolve_update_addr(&cfg, addr);
 
         Ok(Self {
             sock,
@@ -193,10 +192,40 @@ impl MasterServer {
         })
     }
 
-    fn run(&mut self) -> Result<(), Error> {
+    pub fn update_config(&mut self, cfg: Config) -> Result<(), Error> {
+        let local_addr = self.sock.local_addr()?;
+        let addr = SocketAddr::new(cfg.server.ip, cfg.server.port);
+        if local_addr != addr {
+            info!("Listen address: {}", addr);
+            self.sock = UdpSocket::bind(addr).map_err(Error::BindSocket)?;
+            // make socket interruptable by singals
+            self.sock
+                .set_read_timeout(Some(Duration::from_secs(u32::MAX as u64)))?;
+            self.clear();
+        }
+
+        self.update_addr = resolve_update_addr(&cfg, addr);
+        self.timeout = cfg.server.timeout;
+        self.clver = cfg.client.version;
+        self.update_title = cfg.client.update_title;
+        self.update_map = cfg.client.update_map;
+        self.admin_list = cfg.admin_list;
+        self.hash = cfg.hash;
+
+        Ok(())
+    }
+
+    pub fn run(&mut self, sig_flag: &AtomicBool) -> Result<(), Error> {
         let mut buf = [0; MAX_PACKET_SIZE];
-        loop {
-            let (n, from) = self.sock.recv_from(&mut buf)?;
+        while !sig_flag.load(Ordering::Relaxed) {
+            let (n, from) = match self.sock.recv_from(&mut buf) {
+                Ok(x) => x,
+                Err(e) => match e.kind() {
+                    io::ErrorKind::Interrupted => break,
+                    io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock => continue,
+                    _ => Err(e)?,
+                },
+            };
 
             let from = match from {
                 SocketAddr::V4(a) => a,
@@ -210,6 +239,14 @@ impl MasterServer {
                 error!("{}: {}", from, e);
             }
         }
+        Ok(())
+    }
+
+    fn clear(&mut self) {
+        info!("Clear all servers and challenges");
+        self.challenges.clear();
+        self.servers.clear();
+        self.admin_challenges.clear();
     }
 
     fn handle_packet(&mut self, from: SocketAddrV4, src: &[u8]) -> Result<(), Error> {
@@ -504,8 +541,4 @@ impl MasterServer {
             }
         }
     }
-}
-
-pub fn run(cfg: Config) -> Result<(), Error> {
-    MasterServer::new(cfg)?.run()
 }

@@ -2,7 +2,7 @@
 
 [log]
 # Possible values: 0-5, off, error, warn, info, debug, trace
-level = "warn"
+level = "info"
 
 [server]
 ip = "0.0.0.0"
@@ -21,7 +21,7 @@ admin = 10
 version = "0.19"
 update_title = "https://github.com/FWGS/xash3d-fwgs"
 update_map = "Update please"
-update_addr = "mentality.rip:27010"
+update_addr = "mentality.rip"
 
 [hash]
 len = 64

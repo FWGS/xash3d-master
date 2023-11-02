@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // SPDX-FileCopyrightText: 2023 Denis Drakhnia <numas13@gmail.com>
 
-use log::{LevelFilter, Metadata, Record};
+use log::{Metadata, Record};
 
 struct Logger;
 
@@ -30,9 +30,8 @@ impl log::Log for Logger {
 
 static LOGGER: Logger = Logger;
 
-pub fn init(level_filter: LevelFilter) {
+pub fn init() {
     if let Err(e) = log::set_logger(&LOGGER) {
         eprintln!("Failed to initialize logger: {}", e);
     }
-    log::set_max_level(level_filter);
 }

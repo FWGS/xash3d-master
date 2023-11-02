@@ -3,7 +3,7 @@
 
 use std::fs;
 use std::io;
-use std::net::{IpAddr, Ipv4Addr, SocketAddrV4};
+use std::net::{IpAddr, Ipv4Addr};
 use std::path::Path;
 
 use log::LevelFilter;
@@ -16,6 +16,7 @@ pub const DEFAULT_CONFIG_PATH: &str = "config/main.toml";
 
 pub const DEFAULT_MASTER_SERVER_IP: IpAddr = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0));
 pub const DEFAULT_MASTER_SERVER_PORT: u16 = 27010;
+pub const DEFAULT_CHALLENGE_TIMEOUT: u32 = 10;
 pub const DEFAULT_TIMEOUT: u32 = 300;
 pub const DEFAULT_ADMIN_TIMEOUT: u32 = 10;
 
@@ -83,7 +84,7 @@ impl Default for ServerConfig {
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct TimeoutConfig {
-    #[serde(default = "default_timeout")]
+    #[serde(default = "default_challenge_timeout")]
     pub challenge: u32,
     #[serde(default = "default_timeout")]
     pub server: u32,
@@ -94,7 +95,7 @@ pub struct TimeoutConfig {
 impl Default for TimeoutConfig {
     fn default() -> Self {
         Self {
-            challenge: default_timeout(),
+            challenge: default_challenge_timeout(),
             server: default_timeout(),
             admin: default_admin_timeout(),
         }
@@ -112,7 +113,7 @@ pub struct ClientConfig {
     #[serde(default)]
     pub update_title: Box<str>,
     #[serde(default)]
-    pub update_addr: Option<SocketAddrV4>,
+    pub update_addr: Option<Box<str>>,
 }
 
 #[derive(Deserialize, Default, Debug)]
@@ -143,6 +144,10 @@ fn default_server_ip() -> IpAddr {
 
 fn default_server_port() -> u16 {
     DEFAULT_MASTER_SERVER_PORT
+}
+
+fn default_challenge_timeout() -> u32 {
+    DEFAULT_CHALLENGE_TIMEOUT
 }
 
 fn default_timeout() -> u32 {

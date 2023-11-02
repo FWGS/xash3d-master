@@ -124,18 +124,51 @@ struct MasterServer {
     blocklist: HashSet<Ipv4Addr>,
 }
 
+fn resolve_socket_addr<A>(addr: A) -> io::Result<Option<SocketAddrV4>>
+where
+    A: ToSocketAddrs,
+{
+    for i in addr.to_socket_addrs()? {
+        match i {
+            SocketAddr::V4(i) => return Ok(Some(i)),
+            SocketAddr::V6(_) => {}
+        }
+    }
+    Ok(None)
+}
+
 impl MasterServer {
     fn new(cfg: Config) -> Result<Self, Error> {
         let addr = SocketAddr::new(cfg.server.ip, cfg.server.port);
         info!("Listen address: {}", addr);
         let sock = UdpSocket::bind(addr).map_err(Error::BindSocket)?;
-        let update_addr =
-            cfg.client
-                .update_addr
-                .unwrap_or_else(|| match sock.local_addr().unwrap() {
-                    SocketAddr::V4(addr) => addr,
-                    _ => todo!(),
-                });
+
+        let update_addr = {
+            let mut addr = None;
+
+            if let Some(update_addr) = cfg.client.update_addr {
+                addr = match resolve_socket_addr(&*update_addr) {
+                    Ok(None) => {
+                        error!(
+                            "update address: failed to resolve IPv4 for \"{}\"",
+                            update_addr
+                        );
+                        None
+                    }
+                    Err(e) => {
+                        error!("update address: {}", e);
+                        None
+                    }
+                    Ok(addr) => addr,
+                }
+            };
+
+            // fallback to local address
+            addr.unwrap_or_else(|| match sock.local_addr().unwrap() {
+                SocketAddr::V4(a) => a,
+                _ => todo!(),
+            })
+        };
 
         Ok(Self {
             sock,

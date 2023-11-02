@@ -10,7 +10,7 @@ port = 27010
 
 [server.timeout]
 # Time in seconds while challenge is valid
-challenge = 300
+challenge = 10
 # Time in seconds while server is valid
 server = 300
 # TIme in seconds before next admin request is allowed after wrong password
@@ -18,10 +18,10 @@ admin = 10
 
 [client]
 # If client version is less then show update message
-version = "0.20"
+version = "0.19"
 update_title = "https://github.com/FWGS/xash3d-fwgs"
 update_map = "Update please"
-update_addr = "127.0.0.1:27010"
+update_addr = "mentality.rip:27010"
 
 [hash]
 len = 64

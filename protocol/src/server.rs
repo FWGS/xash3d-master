@@ -336,7 +336,7 @@ where
                         .unwrap_or_default()
                 }
                 b"region" => ret.region = cur.get_key_value()?,
-                b"bots" => ret.flags.set(ServerFlags::BOTS, cur.get_key_value()?),
+                b"bots" => ret.flags.set(ServerFlags::BOTS, cur.get_key_value::<u8>()? != 0),
                 b"password" => ret.flags.set(ServerFlags::PASSWORD, cur.get_key_value()?),
                 b"secure" => ret.flags.set(ServerFlags::SECURE, cur.get_key_value()?),
                 b"lan" => ret.flags.set(ServerFlags::LAN, cur.get_key_value()?),
@@ -623,5 +623,11 @@ mod tests {
         let mut buf = [0; 512];
         let n = p.encode(&mut buf).unwrap();
         assert_eq!(GetServerInfoResponse::decode(&buf[..n]), Ok(p));
+    }
+
+    #[test]
+    fn server_add_bots_is_a_number() {
+        let s = b"0\n\\protocol\\48\\challenge\\4161802725\\players\\0\\max\\32\\bots\\3\\gamedir\\valve\\map\\rats_bathroom\\type\\d\\password\\0\\os\\l\\secure\\0\\lan\\0\\version\\0.19.4\\region\\255\\product\\valve\\nat\\0";
+        ServerAdd::<&[u8]>::decode(s).unwrap();
     }
 }

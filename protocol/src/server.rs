@@ -309,7 +309,7 @@ where
 
         let mut ret = Self::default();
         let mut challenge = None;
-        loop {
+        while cur.as_slice().starts_with(&[b'\\']) {
             let key = match cur.get_key_raw() {
                 Ok(s) => s,
                 Err(Error::UnexpectedEnd) => break,
@@ -628,6 +628,12 @@ mod tests {
     #[test]
     fn server_add_bots_is_a_number() {
         let s = b"0\n\\protocol\\48\\challenge\\4161802725\\players\\0\\max\\32\\bots\\3\\gamedir\\valve\\map\\rats_bathroom\\type\\d\\password\\0\\os\\l\\secure\\0\\lan\\0\\version\\0.19.4\\region\\255\\product\\valve\\nat\\0";
+        ServerAdd::<&[u8]>::decode(s).unwrap();
+    }
+
+    #[test]
+    fn server_add_legacy() {
+        let s = b"0\n\\protocol\\48\\challenge\\1680337211\\players\\1\\max\\8\\bots\\0\\gamedir\\cstrike\\map\\cs_assault\\type\\d\\password\\0\\os\\l\\secure\\0\\lan\\0\\version\\0.17.1\\region\\255\\product\\cstrike\n";
         ServerAdd::<&[u8]>::decode(s).unwrap();
     }
 }

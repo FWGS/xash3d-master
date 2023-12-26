@@ -322,6 +322,7 @@ where
                 b"players" => ret.players = cur.get_key_value()?,
                 b"max" => ret.max = cur.get_key_value()?,
                 b"gamedir" => ret.gamedir = cur.get_key_value()?,
+                b"product" => { let _ = cur.get_key_value::<Str<&[u8]>>()?; }, // legacy key, ignore
                 b"map" => ret.map = cur.get_key_value()?,
                 b"type" => ret.server_type = cur.get_key_value()?,
                 b"os" => ret.os = cur.get_key_value()?,

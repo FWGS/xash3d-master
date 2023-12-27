@@ -31,7 +31,7 @@ fn send_command(cli: &cli::Cli) -> Result<(), Error> {
 
     let n = sock.recv(&mut buf)?;
     let (master_challenge, hash_challenge) = match master::Packet::decode(&buf[..n])? {
-        master::Packet::AdminChallengeResponse(p) => (p.master_challenge, p.hash_challenge),
+        Some(master::Packet::AdminChallengeResponse(p)) => (p.master_challenge, p.hash_challenge),
         _ => return Err(Error::UnexpectedPacket),
     };
 

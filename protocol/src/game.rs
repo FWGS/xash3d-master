@@ -35,7 +35,7 @@ where
     pub fn decode(src: &'a [u8]) -> Result<Self, Error> {
         let mut cur = Cursor::new(src);
         cur.expect(QueryServers::HEADER)?;
-        let region = cur.get_u8()?.try_into().map_err(|_| Error::InvalidPacket)?;
+        let region = cur.get_u8()?.try_into().map_err(|_| Error::InvalidRegion)?;
         let last = cur.get_cstr_as_str()?;
         let filter = match cur.get_bytes(cur.remaining())? {
             // some clients may have bug and filter will be with zero at the end
@@ -44,7 +44,7 @@ where
         };
         Ok(Self {
             region,
-            last: last.parse().map_err(|_| Error::InvalidPacket)?,
+            last: last.parse().map_err(|_| Error::InvalidQueryServersLast)?,
             filter: T::try_from(filter)?,
         })
     }
@@ -114,16 +114,15 @@ pub enum Packet<'a> {
 
 impl<'a> Packet<'a> {
     /// Decode packet from `src`.
-    pub fn decode(src: &'a [u8]) -> Result<Self, Error> {
-        if let Ok(p) = QueryServers::decode(src) {
-            return Ok(Self::QueryServers(p));
+    pub fn decode(src: &'a [u8]) -> Result<Option<Self>, Error> {
+        if src.starts_with(QueryServers::HEADER) {
+            QueryServers::decode(src).map(Self::QueryServers)
+        } else if src.starts_with(GetServerInfo::HEADER) {
+            GetServerInfo::decode(src).map(Self::GetServerInfo)
+        } else {
+            return Ok(None);
         }
-
-        if let Ok(p) = GetServerInfo::decode(src) {
-            return Ok(Self::GetServerInfo(p));
-        }
-
-        Err(Error::InvalidPacket)
+        .map(Some)
     }
 }
 
@@ -151,7 +150,7 @@ mod tests {
         };
         let mut buf = [0; 512];
         let n = p.encode(&mut buf).unwrap();
-        assert_eq!(QueryServers::decode(&buf[..n]), Ok(p));
+        assert_eq!(Packet::decode(&buf[..n]), Ok(Some(Packet::QueryServers(p))));
     }
 
     #[test]
@@ -171,10 +170,10 @@ mod tests {
         };
 
         let s = b"1\xff0.0.0.0:0\x00\\protocol\\48\\clver\\0.20\\nat\\0\0";
-        assert_eq!(QueryServers::decode(s), Ok(p.clone()));
+        assert_eq!(Packet::decode(s), Ok(Some(Packet::QueryServers(p.clone()))));
 
         let s = b"1\xff0.0.0.0:0\x00\\protocol\\48\\clver\\0.20\\nat\\0";
-        assert_eq!(QueryServers::decode(s), Ok(p));
+        assert_eq!(Packet::decode(s), Ok(Some(Packet::QueryServers(p))));
     }
 
     #[test]
@@ -182,6 +181,9 @@ mod tests {
         let p = GetServerInfo::new(49);
         let mut buf = [0; 512];
         let n = p.encode(&mut buf).unwrap();
-        assert_eq!(GetServerInfo::decode(&buf[..n]), Ok(p));
+        assert_eq!(
+            Packet::decode(&buf[..n]),
+            Ok(Some(Packet::GetServerInfo(p)))
+        );
     }
 }

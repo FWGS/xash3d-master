@@ -174,7 +174,7 @@ impl ClientAnnounce {
         let addr = cur
             .get_str(cur.remaining())?
             .parse()
-            .map_err(|_| Error::InvalidPacket)?;
+            .map_err(|_| Error::InvalidClientAnnounceIp)?;
         cur.expect_empty()?;
         Ok(Self { addr })
     }
@@ -247,24 +247,19 @@ pub enum Packet<'a> {
 
 impl<'a> Packet<'a> {
     /// Decode packet from `src`.
-    pub fn decode(src: &'a [u8]) -> Result<Self, Error> {
-        if let Ok(p) = ChallengeResponse::decode(src) {
-            return Ok(Self::ChallengeResponse(p));
+    pub fn decode(src: &'a [u8]) -> Result<Option<Self>, Error> {
+        if src.starts_with(ChallengeResponse::HEADER) {
+            ChallengeResponse::decode(src).map(Self::ChallengeResponse)
+        } else if src.starts_with(QueryServersResponse::HEADER) {
+            QueryServersResponse::decode(src).map(Self::QueryServersResponse)
+        } else if src.starts_with(ClientAnnounce::HEADER) {
+            ClientAnnounce::decode(src).map(Self::ClientAnnounce)
+        } else if src.starts_with(AdminChallengeResponse::HEADER) {
+            AdminChallengeResponse::decode(src).map(Self::AdminChallengeResponse)
+        } else {
+            return Ok(None);
         }
-
-        if let Ok(p) = QueryServersResponse::decode(src) {
-            return Ok(Self::QueryServersResponse(p));
-        }
-
-        if let Ok(p) = ClientAnnounce::decode(src) {
-            return Ok(Self::ClientAnnounce(p));
-        }
-
-        if let Ok(p) = AdminChallengeResponse::decode(src) {
-            return Ok(Self::AdminChallengeResponse(p));
-        }
-
-        Err(Error::InvalidPacket)
+        .map(Some)
     }
 }
 
@@ -277,7 +272,10 @@ mod tests {
         let p = ChallengeResponse::new(0x12345678, Some(0x87654321));
         let mut buf = [0; 512];
         let n = p.encode(&mut buf).unwrap();
-        assert_eq!(ChallengeResponse::decode(&buf[..n]), Ok(p));
+        assert_eq!(
+            Packet::decode(&buf[..n]),
+            Ok(Some(Packet::ChallengeResponse(p)))
+        );
     }
 
     #[test]
@@ -291,7 +289,10 @@ mod tests {
         let p = ChallengeResponse::new(0x12345678, None);
         let mut buf = [0; 512];
         let n = p.encode(&mut buf).unwrap();
-        assert_eq!(ChallengeResponse::decode(&buf[..n]), Ok(p));
+        assert_eq!(
+            Packet::decode(&buf[..n]),
+            Ok(Some(Packet::ChallengeResponse(p)))
+        );
     }
 
     #[test]
@@ -314,7 +315,10 @@ mod tests {
         let p = ClientAnnounce::new("1.2.3.4:12345".parse().unwrap());
         let mut buf = [0; 512];
         let n = p.encode(&mut buf).unwrap();
-        assert_eq!(ClientAnnounce::decode(&buf[..n]), Ok(p));
+        assert_eq!(
+            Packet::decode(&buf[..n]),
+            Ok(Some(Packet::ClientAnnounce(p)))
+        );
     }
 
     #[test]
@@ -322,6 +326,9 @@ mod tests {
         let p = AdminChallengeResponse::new(0x12345678, 0x87654321);
         let mut buf = [0; 64];
         let n = p.encode(&mut buf).unwrap();
-        assert_eq!(AdminChallengeResponse::decode(&buf[..n]), Ok(p));
+        assert_eq!(
+            Packet::decode(&buf[..n]),
+            Ok(Some(Packet::AdminChallengeResponse(p)))
+        );
     }
 }

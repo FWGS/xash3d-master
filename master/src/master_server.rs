@@ -44,6 +44,10 @@ pub enum Error {
     Io(#[from] io::Error),
     #[error("Admin challenge do not exist")]
     AdminChallengeNotFound,
+    #[error("Undefined packet")]
+    UndefinedPacket,
+    #[error("Unexpected packet")]
+    UnexpectedPacket,
 }
 
 /// HashMap entry to keep tracking creation time.
@@ -235,8 +239,9 @@ impl MasterServer {
                 }
             };
 
-            if let Err(e) = self.handle_packet(from, &buf[..n]) {
-                error!("{}: {}", from, e);
+            let src = &buf[..n];
+            if let Err(e) = self.handle_packet(from, src) {
+                debug!("{}: {}: \"{}\"", from, e, Str(src));
             }
         }
         Ok(())
@@ -249,165 +254,194 @@ impl MasterServer {
         self.admin_challenges.clear();
     }
 
+    fn handle_server_packet(&mut self, from: SocketAddrV4, p: server::Packet) -> Result<(), Error> {
+        trace!("{}: recv {:?}", from, p);
+
+        match p {
+            server::Packet::Challenge(p) => {
+                let master_challenge = self.add_challenge(from);
+                let mut buf = [0; MAX_PACKET_SIZE];
+                let p = master::ChallengeResponse::new(master_challenge, p.server_challenge);
+                trace!("{}: send {:?}", from, p);
+                let n = p.encode(&mut buf)?;
+                self.sock.send_to(&buf[..n], from)?;
+                self.remove_outdated_challenges();
+            }
+            server::Packet::ServerAdd(p) => {
+                let entry = match self.challenges.get(&from) {
+                    Some(e) => e,
+                    None => {
+                        trace!("{}: Challenge does not exists", from);
+                        return Ok(());
+                    }
+                };
+                if !entry.is_valid(self.now(), self.timeout.challenge) {
+                    return Ok(());
+                }
+                if p.challenge != entry.value {
+                    warn!(
+                        "{}: Expected challenge {} but received {}",
+                        from, entry.value, p.challenge
+                    );
+                    return Ok(());
+                }
+                if self.challenges.remove(&from).is_some() {
+                    self.add_server(from, ServerInfo::new(&p));
+                }
+                self.remove_outdated_servers();
+            }
+            server::Packet::ServerRemove => {
+                // ignore
+            }
+            _ => {
+                return Err(Error::UnexpectedPacket);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn handle_game_packet(&mut self, from: SocketAddrV4, p: game::Packet) -> Result<(), Error> {
+        trace!("{}: recv {:?}", from, p);
+
+        match p {
+            game::Packet::QueryServers(p) => {
+                if p.filter.clver.map_or(false, |v| v < self.clver) {
+                    let iter = std::iter::once(self.update_addr);
+                    self.send_server_list(from, p.filter.key, iter)?;
+                } else {
+                    let now = self.now();
+                    let iter = self
+                        .servers
+                        .iter()
+                        .filter(|i| i.1.is_valid(now, self.timeout.server))
+                        .filter(|i| i.1.matches(*i.0, p.region, &p.filter))
+                        .map(|i| *i.0);
+
+                    self.send_server_list(from, p.filter.key, iter.clone())?;
+
+                    if p.filter.flags.contains(FilterFlags::NAT) {
+                        self.send_client_to_nat_servers(from, iter)?;
+                    }
+                }
+            }
+            game::Packet::GetServerInfo(_) => {
+                let p = server::GetServerInfoResponse {
+                    map: self.update_map.as_ref(),
+                    host: self.update_title.as_ref(),
+                    protocol: 48, // XXX: how to detect what version client will accept?
+                    dm: true,
+                    maxcl: 32,
+                    gamedir: "valve", // XXX: probably must be specific for client...
+                    ..Default::default()
+                };
+                trace!("{}: send {:?}", from, p);
+                let mut buf = [0; MAX_PACKET_SIZE];
+                let n = p.encode(&mut buf)?;
+                self.sock.send_to(&buf[..n], from)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn handle_admin_packet(&mut self, from: SocketAddrV4, p: admin::Packet) -> Result<(), Error> {
+        trace!("{}: recv {:?}", from, p);
+
+        let now = self.now();
+
+        if let Some(e) = self.admin_limit.get(from.ip()) {
+            if e.is_valid(now, self.timeout.admin) {
+                trace!("{}: rate limit", from);
+                return Ok(());
+            }
+        }
+
+        match p {
+            admin::Packet::AdminChallenge => {
+                let (master_challenge, hash_challenge) = self.admin_challenge_add(from);
+
+                let p = master::AdminChallengeResponse::new(master_challenge, hash_challenge);
+                trace!("{}: send {:?}", from, p);
+                let mut buf = [0; 64];
+                let n = p.encode(&mut buf)?;
+                self.sock.send_to(&buf[..n], from)?;
+
+                self.admin_challenges_cleanup();
+            }
+            admin::Packet::AdminCommand(p) => {
+                let entry = *self
+                    .admin_challenges
+                    .get(from.ip())
+                    .ok_or(Error::AdminChallengeNotFound)?;
+
+                if entry.0 != p.master_challenge {
+                    trace!("{}: master challenge is not valid", from);
+                    return Ok(());
+                }
+
+                if !entry.is_valid(now, self.timeout.challenge) {
+                    trace!("{}: challenge is outdated", from);
+                    return Ok(());
+                }
+
+                let state = Params::new()
+                    .hash_length(self.hash.len)
+                    .key(self.hash.key.as_bytes())
+                    .personal(self.hash.personal.as_bytes())
+                    .to_state();
+
+                let admin = self.admin_list.iter().find(|i| {
+                    let hash = state
+                        .clone()
+                        .update(i.password.as_bytes())
+                        .update(&entry.1.to_le_bytes())
+                        .finalize();
+                    *p.hash == hash.as_bytes()
+                });
+
+                match admin {
+                    Some(admin) => {
+                        info!("{}: admin({}), command: {:?}", from, &admin.name, p.command);
+                        self.admin_command(p.command);
+                        self.admin_challenge_remove(from);
+                    }
+                    None => {
+                        warn!("{}: invalid admin hash, command: {:?}", from, p.command);
+                        self.admin_limit.insert(*from.ip(), Entry::new(now, ()));
+                        self.admin_limit_cleanup();
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     fn handle_packet(&mut self, from: SocketAddrV4, src: &[u8]) -> Result<(), Error> {
         if self.is_blocked(from.ip()) {
             return Ok(());
         }
 
-        if let Ok(p) = server::Packet::decode(src) {
-            match p {
-                server::Packet::Challenge(p) => {
-                    trace!("{}: recv {:?}", from, p);
-                    let master_challenge = self.add_challenge(from);
-                    let mut buf = [0; MAX_PACKET_SIZE];
-                    let p = master::ChallengeResponse::new(master_challenge, p.server_challenge);
-                    trace!("{}: send {:?}", from, p);
-                    let n = p.encode(&mut buf)?;
-                    self.sock.send_to(&buf[..n], from)?;
-                    self.remove_outdated_challenges();
-                }
-                server::Packet::ServerAdd(p) => {
-                    trace!("{}: recv {:?}", from, p);
-                    let entry = match self.challenges.get(&from) {
-                        Some(e) => e,
-                        None => {
-                            trace!("{}: Challenge does not exists", from);
-                            return Ok(());
-                        }
-                    };
-                    if !entry.is_valid(self.now(), self.timeout.challenge) {
-                        return Ok(());
-                    }
-                    if p.challenge != entry.value {
-                        warn!(
-                            "{}: Expected challenge {} but received {}",
-                            from, entry.value, p.challenge
-                        );
-                        return Ok(());
-                    }
-                    if self.challenges.remove(&from).is_some() {
-                        self.add_server(from, ServerInfo::new(&p));
-                    }
-                    self.remove_outdated_servers();
-                }
-                _ => {
-                    trace!("{}: recv {:?}", from, p);
-                }
-            }
-        } else if let Ok(p) = game::Packet::decode(src) {
-            match p {
-                game::Packet::QueryServers(p) => {
-                    trace!("{}: recv {:?}", from, p);
-                    if p.filter.clver.map_or(false, |v| v < self.clver) {
-                        let iter = std::iter::once(self.update_addr);
-                        self.send_server_list(from, p.filter.key, iter)?;
-                    } else {
-                        let now = self.now();
-                        let iter = self
-                            .servers
-                            .iter()
-                            .filter(|i| i.1.is_valid(now, self.timeout.server))
-                            .filter(|i| i.1.matches(*i.0, p.region, &p.filter))
-                            .map(|i| *i.0);
-
-                        self.send_server_list(from, p.filter.key, iter.clone())?;
-
-                        if p.filter.flags.contains(FilterFlags::NAT) {
-                            self.send_client_to_nat_servers(from, iter)?;
-                        }
-                    }
-                }
-                game::Packet::GetServerInfo(p) => {
-                    trace!("{}: recv {:?}", from, p);
-                    let p = server::GetServerInfoResponse {
-                        map: self.update_map.as_ref(),
-                        host: self.update_title.as_ref(),
-                        protocol: 48, // XXX: how to detect what version client will accept?
-                        dm: true,
-                        maxcl: 32,
-                        gamedir: "valve", // XXX: probably must be specific for client...
-                        ..Default::default()
-                    };
-                    trace!("{}: send {:?}", from, p);
-                    let mut buf = [0; MAX_PACKET_SIZE];
-                    let n = p.encode(&mut buf)?;
-                    self.sock.send_to(&buf[..n], from)?;
-                }
-            }
-        } else if let Ok(p) = admin::Packet::decode(self.hash.len, src) {
-            let now = self.now();
-
-            if let Some(e) = self.admin_limit.get(from.ip()) {
-                if e.is_valid(now, self.timeout.admin) {
-                    trace!("{}: rate limit", from);
-                    return Ok(());
-                }
-            }
-
-            match p {
-                admin::Packet::AdminChallenge(p) => {
-                    trace!("{}: recv {:?}", from, p);
-                    let (master_challenge, hash_challenge) = self.admin_challenge_add(from);
-
-                    let p = master::AdminChallengeResponse::new(master_challenge, hash_challenge);
-                    trace!("{}: send {:?}", from, p);
-                    let mut buf = [0; 64];
-                    let n = p.encode(&mut buf)?;
-                    self.sock.send_to(&buf[..n], from)?;
-
-                    self.admin_challenges_cleanup();
-                }
-                admin::Packet::AdminCommand(p) => {
-                    trace!("{}: recv {:?}", from, p);
-                    let entry = *self
-                        .admin_challenges
-                        .get(from.ip())
-                        .ok_or(Error::AdminChallengeNotFound)?;
-
-                    if entry.0 != p.master_challenge {
-                        trace!("{}: master challenge is not valid", from);
-                        return Ok(());
-                    }
-
-                    if !entry.is_valid(now, self.timeout.challenge) {
-                        trace!("{}: challenge is outdated", from);
-                        return Ok(());
-                    }
-
-                    let state = Params::new()
-                        .hash_length(self.hash.len)
-                        .key(self.hash.key.as_bytes())
-                        .personal(self.hash.personal.as_bytes())
-                        .to_state();
-
-                    let admin = self.admin_list.iter().find(|i| {
-                        let hash = state
-                            .clone()
-                            .update(i.password.as_bytes())
-                            .update(&entry.1.to_le_bytes())
-                            .finalize();
-                        *p.hash == hash.as_bytes()
-                    });
-
-                    match admin {
-                        Some(admin) => {
-                            info!("{}: admin({}), command: {:?}", from, &admin.name, p.command);
-                            self.admin_command(p.command);
-                            self.admin_challenge_remove(from);
-                        }
-                        None => {
-                            warn!("{}: invalid admin hash, command: {:?}", from, p.command);
-                            self.admin_limit.insert(*from.ip(), Entry::new(now, ()));
-                            self.admin_limit_cleanup();
-                        }
-                    }
-                }
-            }
-        } else {
-            debug!("{}: invalid packet: \"{}\"", from, Str(src));
+        match server::Packet::decode(src) {
+            Ok(Some(p)) => return self.handle_server_packet(from, p),
+            Ok(None) => {}
+            Err(e) => Err(e)?,
         }
 
-        Ok(())
+        match game::Packet::decode(src) {
+            Ok(Some(p)) => return self.handle_game_packet(from, p),
+            Ok(None) => {}
+            Err(e) => Err(e)?,
+        }
+
+        match admin::Packet::decode(self.hash.len, src) {
+            Ok(Some(p)) => return self.handle_admin_packet(from, p),
+            Ok(None) => {}
+            Err(e) => Err(e)?,
+        }
+
+        Err(Error::UndefinedPacket)
     }
 
     fn now(&self) -> u32 {

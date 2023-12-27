@@ -16,6 +16,7 @@ pub mod master;
 pub mod server;
 pub mod types;
 
+pub use cursor::Error as CursorError;
 pub use server_info::ServerInfo;
 
 use thiserror::Error;
@@ -33,13 +34,25 @@ pub enum Error {
     /// Failed to decode a packet.
     #[error("Invalid packet")]
     InvalidPacket,
-    /// Invalid string in a packet.
-    #[error("Invalid UTF-8 string")]
-    InvalidString,
-    /// Buffer size is no enougth to decode or encode a packet.
-    #[error("Unexpected end of buffer")]
-    UnexpectedEnd,
+    /// Invalid region.
+    #[error("Invalid region")]
+    InvalidRegion,
+    /// Invalid client announce IP.
+    #[error("Invalid client announce IP")]
+    InvalidClientAnnounceIp,
+    /// Invalid last IP.
+    #[error("Invalid last server IP")]
+    InvalidQueryServersLast,
     /// Server protocol version is not supported.
     #[error("Invalid protocol version")]
     InvalidProtocolVersion,
+    /// Cursor error.
+    #[error("{0}")]
+    CursorError(#[from] CursorError),
+    /// Invalid value for server add packet.
+    #[error("Invalid value for server add key `{0}`: {1}")]
+    InvalidServerValue(&'static str, #[source] CursorError),
+    /// Invalid value for query servers packet.
+    #[error("Invalid value for filter key `{0}`: {1}")]
+    InvalidFilterValue(&'static str, #[source] CursorError),
 }

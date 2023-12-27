@@ -6,6 +6,9 @@
 use std::fmt;
 use std::ops::Deref;
 
+use crate::cursor::{CursorMut, PutKeyValue};
+use crate::CursorError;
+
 /// Wrapper for slice of bytes with printing the bytes as a string.
 ///
 /// # Examples
@@ -21,6 +24,15 @@ pub struct Str<T>(pub T);
 impl<T> From<T> for Str<T> {
     fn from(value: T) -> Self {
         Self(value)
+    }
+}
+
+impl PutKeyValue for Str<&[u8]> {
+    fn put_key_value<'a, 'b>(
+        &self,
+        cur: &'b mut CursorMut<'a>,
+    ) -> Result<&'b mut CursorMut<'a>, CursorError> {
+        cur.put_bytes(self.0)
     }
 }
 

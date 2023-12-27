@@ -7,8 +7,42 @@ use std::mem;
 use std::slice;
 use std::str;
 
+use thiserror::Error;
+
+use super::color;
 use super::types::Str;
-use super::{color, Error};
+
+/// The error type for `Cursor` and `CursorMut`.
+#[derive(Error, Debug, PartialEq, Eq)]
+pub enum Error {
+    /// Invalid number.
+    #[error("Invalid number")]
+    InvalidNumber,
+    /// Invalid string.
+    #[error("Invalid string")]
+    InvalidString,
+    /// Invalid boolean.
+    #[error("Invalid boolean")]
+    InvalidBool,
+    /// Invalid table entry.
+    #[error("Invalid table key")]
+    InvalidTableKey,
+    /// Invalid table entry.
+    #[error("Invalid table entry")]
+    InvalidTableValue,
+    /// Table end found.
+    #[error("Table end")]
+    TableEnd,
+    /// Expected data not found.
+    #[error("Expected data not found")]
+    Expect,
+    /// An unexpected data found.
+    #[error("Unexpected data")]
+    ExpectEmpty,
+    /// Buffer size is no enougth to decode or encode a packet.
+    #[error("Unexpected end of buffer")]
+    UnexpectedEnd,
+}
 
 pub trait GetKeyValue<'a>: Sized {
     fn get_key_value(cur: &mut Cursor<'a>) -> Result<Self, Error>;
@@ -56,7 +90,7 @@ impl<'a> GetKeyValue<'a> for bool {
         match cur.get_key_value_raw()? {
             b"0" => Ok(false),
             b"1" => Ok(true),
-            _ => Err(Error::InvalidPacket),
+            _ => Err(Error::InvalidBool),
         }
     }
 }
@@ -68,7 +102,7 @@ macro_rules! impl_get_value {
                 let s = cur.get_key_value::<&str>()?;
                 // HACK: special case for one asshole
                 let (_, s) = color::trim_start_color(s);
-                s.parse().map_err(|_| Error::InvalidPacket)
+                s.parse().map_err(|_| Error::InvalidNumber)
             }
         })+
     };
@@ -216,13 +250,13 @@ impl<'a> Cursor<'a> {
             self.advance(s.len())?;
             Ok(())
         } else {
-            Err(Error::InvalidPacket)
+            Err(Error::Expect)
         }
     }
 
     pub fn expect_empty(&self) -> Result<(), Error> {
         if self.has_remaining() {
-            Err(Error::InvalidPacket)
+            Err(Error::ExpectEmpty)
         } else {
             Ok(())
         }
@@ -252,12 +286,13 @@ impl<'a> Cursor<'a> {
 
     pub fn get_key_value_raw(&mut self) -> Result<&'a [u8], Error> {
         let mut cur = *self;
-        if cur.get_u8()? == b'\\' {
-            let value = cur.take_while_or_all(|c| c != b'\\' && c != b'\n');
-            *self = cur;
-            Ok(value)
-        } else {
-            Err(Error::InvalidPacket)
+        match cur.get_u8()? {
+            b'\\' => {
+                let value = cur.take_while_or_all(|c| c != b'\\' && c != b'\n');
+                *self = cur;
+                Ok(value)
+            }
+            _ => Err(Error::InvalidTableValue),
         }
     }
 
@@ -265,14 +300,20 @@ impl<'a> Cursor<'a> {
         T::get_key_value(self)
     }
 
+    pub fn skip_key_value<T: GetKeyValue<'a>>(&mut self) -> Result<(), Error> {
+        T::get_key_value(self).map(|_| ())
+    }
+
     pub fn get_key_raw(&mut self) -> Result<&'a [u8], Error> {
         let mut cur = *self;
-        if cur.get_u8()? == b'\\' {
-            let value = cur.take_while(|c| c != b'\\' && c != b'\n')?;
-            *self = cur;
-            Ok(value)
-        } else {
-            Err(Error::InvalidPacket)
+        match cur.get_u8() {
+            Ok(b'\\') => {
+                let value = cur.take_while(|c| c != b'\\' && c != b'\n')?;
+                *self = cur;
+                Ok(value)
+            }
+            Ok(b'\n') | Err(Error::UnexpectedEnd) => Err(Error::TableEnd),
+            _ => Err(Error::InvalidTableKey),
         }
     }
 
@@ -286,6 +327,18 @@ pub trait PutKeyValue {
         &self,
         cur: &'b mut CursorMut<'a>,
     ) -> Result<&'b mut CursorMut<'a>, Error>;
+}
+
+impl<T> PutKeyValue for &T
+where
+    T: PutKeyValue,
+{
+    fn put_key_value<'a, 'b>(
+        &self,
+        cur: &'b mut CursorMut<'a>,
+    ) -> Result<&'b mut CursorMut<'a>, Error> {
+        (*self).put_key_value(cur)
+    }
 }
 
 impl PutKeyValue for &str {
@@ -532,7 +585,7 @@ mod tests {
         assert_eq!(cur.get_key(), Ok((&b"gamedir"[..], "valve")));
         assert_eq!(cur.get_key(), Ok((&b"password"[..], false)));
         assert_eq!(cur.get_key(), Ok((&b"host"[..], "test")));
-        assert_eq!(cur.get_key::<&[u8]>(), Err(Error::UnexpectedEnd));
+        assert_eq!(cur.get_key::<&[u8]>(), Err(Error::TableEnd));
 
         Ok(())
     }

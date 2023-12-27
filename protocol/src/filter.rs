@@ -31,7 +31,6 @@
 
 use std::fmt;
 use std::net::SocketAddrV4;
-use std::num::ParseIntError;
 use std::str::FromStr;
 
 use bitflags::bitflags;
@@ -40,7 +39,7 @@ use log::debug;
 use crate::cursor::{Cursor, GetKeyValue, PutKeyValue};
 use crate::server::{ServerAdd, ServerFlags, ServerType};
 use crate::types::Str;
-use crate::{Error, ServerInfo};
+use crate::{CursorError, Error, ServerInfo};
 
 bitflags! {
     /// Additional filter flags.
@@ -129,21 +128,21 @@ impl fmt::Display for Version {
 }
 
 impl FromStr for Version {
-    type Err = ParseIntError;
+    type Err = CursorError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let (major, tail) = s.split_once('.').unwrap_or((s, "0"));
         let (minor, patch) = tail.split_once('.').unwrap_or((tail, "0"));
-        let major = major.parse()?;
-        let minor = minor.parse()?;
-        let patch = patch.parse()?;
+        let major = major.parse().map_err(|_| CursorError::InvalidNumber)?;
+        let minor = minor.parse().map_err(|_| CursorError::InvalidNumber)?;
+        let patch = patch.parse().map_err(|_| CursorError::InvalidNumber)?;
         Ok(Self::with_patch(major, minor, patch))
     }
 }
 
 impl GetKeyValue<'_> for Version {
-    fn get_key_value(cur: &mut Cursor) -> Result<Self, Error> {
-        Self::from_str(cur.get_key_value()?).map_err(|_| Error::InvalidPacket)
+    fn get_key_value(cur: &mut Cursor) -> Result<Self, CursorError> {
+        cur.get_key_value().and_then(Self::from_str)
     }
 }
 
@@ -151,7 +150,7 @@ impl PutKeyValue for Version {
     fn put_key_value<'a, 'b>(
         &self,
         cur: &'b mut crate::cursor::CursorMut<'a>,
-    ) -> Result<&'b mut crate::cursor::CursorMut<'a>, Error> {
+    ) -> Result<&'b mut crate::cursor::CursorMut<'a>, CursorError> {
         cur.put_key_value(self.major)?
             .put_u8(b'.')?
             .put_key_value(self.minor)?;
@@ -201,42 +200,48 @@ impl<'a> TryFrom<&'a [u8]> for Filter<'a> {
     type Error = Error;
 
     fn try_from(src: &'a [u8]) -> Result<Self, Self::Error> {
+        trait Helper<'a> {
+            fn get<T: GetKeyValue<'a>>(&mut self, key: &'static str) -> Result<T, Error>;
+        }
+
+        impl<'a> Helper<'a> for Cursor<'a> {
+            fn get<T: GetKeyValue<'a>>(&mut self, key: &'static str) -> Result<T, Error> {
+                T::get_key_value(self).map_err(|e| Error::InvalidFilterValue(key, e))
+            }
+        }
+
         let mut cur = Cursor::new(src);
         let mut filter = Self::default();
 
         loop {
             let key = match cur.get_key_raw().map(Str) {
                 Ok(s) => s,
-                Err(Error::UnexpectedEnd) => break,
-                Err(e) => return Err(e),
+                Err(CursorError::TableEnd) => break,
+                Err(e) => Err(e)?,
             };
 
             match *key {
-                b"dedicated" => filter.insert_flag(FilterFlags::DEDICATED, cur.get_key_value()?),
-                b"secure" => filter.insert_flag(FilterFlags::SECURE, cur.get_key_value()?),
-                b"gamedir" => filter.gamedir = Some(cur.get_key_value()?),
-                b"map" => filter.map = Some(cur.get_key_value()?),
-                b"protocol" => filter.protocol = Some(cur.get_key_value()?),
-                b"empty" => filter.insert_flag(FilterFlags::EMPTY, cur.get_key_value()?),
-                b"full" => filter.insert_flag(FilterFlags::FULL, cur.get_key_value()?),
-                b"password" => filter.insert_flag(FilterFlags::PASSWORD, cur.get_key_value()?),
-                b"noplayers" => filter.insert_flag(FilterFlags::NOPLAYERS, cur.get_key_value()?),
-                b"clver" => {
-                    filter.clver = Some(
-                        cur.get_key_value::<&str>()?
-                            .parse()
-                            .map_err(|_| Error::InvalidPacket)?,
-                    );
-                }
-                b"nat" => filter.insert_flag(FilterFlags::NAT, cur.get_key_value()?),
-                b"lan" => filter.insert_flag(FilterFlags::LAN, cur.get_key_value()?),
-                b"bots" => filter.insert_flag(FilterFlags::BOTS, cur.get_key_value()?),
+                b"dedicated" => filter.insert_flag(FilterFlags::DEDICATED, cur.get("dedicated")?),
+                b"secure" => filter.insert_flag(FilterFlags::SECURE, cur.get("secure")?),
+                b"gamedir" => filter.gamedir = Some(cur.get("gamedir")?),
+                b"map" => filter.map = Some(cur.get("map")?),
+                b"protocol" => filter.protocol = Some(cur.get("protocol")?),
+                b"empty" => filter.insert_flag(FilterFlags::EMPTY, cur.get("empty")?),
+                b"full" => filter.insert_flag(FilterFlags::FULL, cur.get("full")?),
+                b"password" => filter.insert_flag(FilterFlags::PASSWORD, cur.get("password")?),
+                b"noplayers" => filter.insert_flag(FilterFlags::NOPLAYERS, cur.get("noplayers")?),
+                b"clver" => filter.clver = Some(cur.get("clver")?),
+                b"nat" => filter.insert_flag(FilterFlags::NAT, cur.get("nat")?),
+                b"lan" => filter.insert_flag(FilterFlags::LAN, cur.get("lan")?),
+                b"bots" => filter.insert_flag(FilterFlags::BOTS, cur.get("bots")?),
                 b"key" => {
-                    filter.key = {
-                        let s = cur.get_key_value::<&str>()?;
-                        let x = u32::from_str_radix(s, 16).map_err(|_| Error::InvalidPacket)?;
-                        Some(x)
-                    }
+                    filter.key = Some(
+                        cur.get_key_value::<&str>()
+                            .and_then(|s| {
+                                u32::from_str_radix(s, 16).map_err(|_| CursorError::InvalidNumber)
+                            })
+                            .map_err(|e| Error::InvalidFilterValue("key", e))?,
+                    )
                 }
                 _ => {
                     // skip unknown fields

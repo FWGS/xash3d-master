@@ -5,7 +5,7 @@
 
 use crate::cursor::{Cursor, CursorMut};
 use crate::types::Hide;
-use crate::Error;
+use crate::{CursorError, Error};
 
 /// Default hash length.
 pub const HASH_LEN: usize = 64;
@@ -27,7 +27,7 @@ impl AdminChallenge {
         if src == Self::HEADER {
             Ok(Self)
         } else {
-            Err(Error::InvalidPacket)
+            Err(CursorError::Expect)?
         }
     }
 
@@ -97,23 +97,22 @@ impl<'a> AdminCommand<'a> {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Packet<'a> {
     /// Admin challenge request.
-    AdminChallenge(AdminChallenge),
+    AdminChallenge,
     /// Admin command.
     AdminCommand(AdminCommand<'a>),
 }
 
 impl<'a> Packet<'a> {
     /// Decode packet from `src` with specified hash length.
-    pub fn decode(hash_len: usize, src: &'a [u8]) -> Result<Self, Error> {
-        if let Ok(p) = AdminChallenge::decode(src) {
-            return Ok(Self::AdminChallenge(p));
+    pub fn decode(hash_len: usize, src: &'a [u8]) -> Result<Option<Self>, Error> {
+        if src.starts_with(AdminChallenge::HEADER) {
+            AdminChallenge::decode(src).map(|_| Self::AdminChallenge)
+        } else if src.starts_with(AdminCommand::HEADER) {
+            AdminCommand::decode_with_hash_len(hash_len, src).map(Self::AdminCommand)
+        } else {
+            return Ok(None);
         }
-
-        if let Ok(p) = AdminCommand::decode_with_hash_len(hash_len, src) {
-            return Ok(Self::AdminCommand(p));
-        }
-
-        Err(Error::InvalidPacket)
+        .map(Some)
     }
 }
 
@@ -126,7 +125,10 @@ mod tests {
         let p = AdminChallenge;
         let mut buf = [0; 512];
         let n = p.encode(&mut buf).unwrap();
-        assert_eq!(AdminChallenge::decode(&buf[..n]), Ok(p));
+        assert_eq!(
+            Packet::decode(HASH_LEN, &buf[..n]),
+            Ok(Some(Packet::AdminChallenge))
+        );
     }
 
     #[test]
@@ -134,6 +136,9 @@ mod tests {
         let p = AdminCommand::new(0x12345678, &[1; HASH_LEN], "foo bar baz");
         let mut buf = [0; 512];
         let n = p.encode(&mut buf).unwrap();
-        assert_eq!(AdminCommand::decode(&buf[..n]), Ok(p));
+        assert_eq!(
+            Packet::decode(HASH_LEN, &buf[..n]),
+            Ok(Some(Packet::AdminCommand(p)))
+        );
     }
 }

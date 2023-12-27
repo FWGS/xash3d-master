@@ -11,7 +11,7 @@ use log::debug;
 use super::cursor::{Cursor, CursorMut, GetKeyValue, PutKeyValue};
 use super::filter::Version;
 use super::types::Str;
-use super::Error;
+use super::{CursorError, Error};
 
 /// Sended to a master server before `ServerAdd` packet.
 #[derive(Clone, Debug, PartialEq)]
@@ -74,7 +74,7 @@ impl Default for Os {
 }
 
 impl TryFrom<&[u8]> for Os {
-    type Error = Error;
+    type Error = CursorError;
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
         match value {
@@ -87,7 +87,7 @@ impl TryFrom<&[u8]> for Os {
 }
 
 impl GetKeyValue<'_> for Os {
-    fn get_key_value(cur: &mut Cursor) -> Result<Self, Error> {
+    fn get_key_value(cur: &mut Cursor) -> Result<Self, CursorError> {
         cur.get_key_value_raw()?.try_into()
     }
 }
@@ -96,7 +96,7 @@ impl PutKeyValue for Os {
     fn put_key_value<'a, 'b>(
         &self,
         cur: &'b mut CursorMut<'a>,
-    ) -> Result<&'b mut CursorMut<'a>, Error> {
+    ) -> Result<&'b mut CursorMut<'a>, CursorError> {
         match self {
             Self::Linux => cur.put_str("l"),
             Self::Windows => cur.put_str("w"),
@@ -139,7 +139,7 @@ impl Default for ServerType {
 }
 
 impl TryFrom<&[u8]> for ServerType {
-    type Error = Error;
+    type Error = CursorError;
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
         match value {
@@ -152,7 +152,7 @@ impl TryFrom<&[u8]> for ServerType {
 }
 
 impl GetKeyValue<'_> for ServerType {
-    fn get_key_value(cur: &mut Cursor) -> Result<Self, Error> {
+    fn get_key_value(cur: &mut Cursor) -> Result<Self, CursorError> {
         cur.get_key_value_raw()?.try_into()
     }
 }
@@ -161,7 +161,7 @@ impl PutKeyValue for ServerType {
     fn put_key_value<'a, 'b>(
         &self,
         cur: &'b mut CursorMut<'a>,
-    ) -> Result<&'b mut CursorMut<'a>, Error> {
+    ) -> Result<&'b mut CursorMut<'a>, CursorError> {
         match self {
             Self::Dedicated => cur.put_str("d"),
             Self::Local => cur.put_str("l"),
@@ -217,7 +217,7 @@ impl Default for Region {
 }
 
 impl TryFrom<u8> for Region {
-    type Error = Error;
+    type Error = CursorError;
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
@@ -230,13 +230,13 @@ impl TryFrom<u8> for Region {
             0x06 => Ok(Region::MiddleEast),
             0x07 => Ok(Region::Africa),
             0xff => Ok(Region::RestOfTheWorld),
-            _ => Err(Error::InvalidPacket),
+            _ => Err(CursorError::InvalidNumber),
         }
     }
 }
 
 impl GetKeyValue<'_> for Region {
-    fn get_key_value(cur: &mut Cursor) -> Result<Self, Error> {
+    fn get_key_value(cur: &mut Cursor) -> Result<Self, CursorError> {
         cur.get_key_value::<u8>()?.try_into()
     }
 }
@@ -304,28 +304,38 @@ where
 {
     /// Decode packet from `src`.
     pub fn decode(src: &'a [u8]) -> Result<Self, Error> {
+        trait Helper<'a> {
+            fn get<T: GetKeyValue<'a>>(&mut self, key: &'static str) -> Result<T, Error>;
+        }
+
+        impl<'a> Helper<'a> for Cursor<'a> {
+            fn get<T: GetKeyValue<'a>>(&mut self, key: &'static str) -> Result<T, Error> {
+                T::get_key_value(self).map_err(|e| Error::InvalidServerValue(key, e))
+            }
+        }
+
         let mut cur = Cursor::new(src);
         cur.expect(ServerAdd::HEADER)?;
 
         let mut ret = Self::default();
         let mut challenge = None;
-        while cur.as_slice().starts_with(&[b'\\']) {
+        loop {
             let key = match cur.get_key_raw() {
                 Ok(s) => s,
-                Err(Error::UnexpectedEnd) => break,
-                Err(e) => return Err(e),
+                Err(CursorError::TableEnd) => break,
+                Err(e) => Err(e)?,
             };
 
             match key {
-                b"protocol" => ret.protocol = cur.get_key_value()?,
-                b"challenge" => challenge = Some(cur.get_key_value()?),
-                b"players" => ret.players = cur.get_key_value()?,
-                b"max" => ret.max = cur.get_key_value()?,
-                b"gamedir" => ret.gamedir = cur.get_key_value()?,
-                b"product" => { let _ = cur.get_key_value::<Str<&[u8]>>()?; }, // legacy key, ignore
-                b"map" => ret.map = cur.get_key_value()?,
-                b"type" => ret.server_type = cur.get_key_value()?,
-                b"os" => ret.os = cur.get_key_value()?,
+                b"protocol" => ret.protocol = cur.get("protocol")?,
+                b"challenge" => challenge = Some(cur.get("challenge")?),
+                b"players" => ret.players = cur.get("players")?,
+                b"max" => ret.max = cur.get("max")?,
+                b"gamedir" => ret.gamedir = cur.get("gamedir")?,
+                b"product" => cur.skip_key_value::<&[u8]>()?, // legacy key, ignore
+                b"map" => ret.map = cur.get("map")?,
+                b"type" => ret.server_type = cur.get("type")?,
+                b"os" => ret.os = cur.get("os")?,
                 b"version" => {
                     ret.version = cur
                         .get_key_value()
@@ -335,12 +345,14 @@ where
                         })
                         .unwrap_or_default()
                 }
-                b"region" => ret.region = cur.get_key_value()?,
-                b"bots" => ret.flags.set(ServerFlags::BOTS, cur.get_key_value::<u8>()? != 0),
-                b"password" => ret.flags.set(ServerFlags::PASSWORD, cur.get_key_value()?),
-                b"secure" => ret.flags.set(ServerFlags::SECURE, cur.get_key_value()?),
-                b"lan" => ret.flags.set(ServerFlags::LAN, cur.get_key_value()?),
-                b"nat" => ret.flags.set(ServerFlags::NAT, cur.get_key_value()?),
+                b"region" => ret.region = cur.get("region")?,
+                b"bots" => ret
+                    .flags
+                    .set(ServerFlags::BOTS, cur.get::<u8>("bots")? != 0),
+                b"password" => ret.flags.set(ServerFlags::PASSWORD, cur.get("password")?),
+                b"secure" => ret.flags.set(ServerFlags::SECURE, cur.get("secure")?),
+                b"lan" => ret.flags.set(ServerFlags::LAN, cur.get("lan")?),
+                b"nat" => ret.flags.set(ServerFlags::NAT, cur.get("nat")?),
                 _ => {
                     // skip unknown fields
                     let value = cur.get_key_value::<Str<&[u8]>>()?;
@@ -354,14 +366,14 @@ where
                 ret.challenge = c;
                 Ok(ret)
             }
-            None => Err(Error::InvalidPacket),
+            None => Err(Error::InvalidServerValue("challenge", CursorError::Expect)),
         }
     }
 }
 
 impl<T> ServerAdd<T>
 where
-    T: PutKeyValue + Clone,
+    T: PutKeyValue,
 {
     /// Encode packet to `buf`.
     pub fn encode(&self, buf: &mut [u8]) -> Result<usize, Error> {
@@ -371,8 +383,8 @@ where
             .put_key("challenge", self.challenge)?
             .put_key("players", self.players)?
             .put_key("max", self.max)?
-            .put_key("gamedir", self.gamedir.clone())?
-            .put_key("map", self.map.clone())?
+            .put_key("gamedir", &self.gamedir)?
+            .put_key("map", &self.map)?
             .put_key("type", self.server_type)?
             .put_key("os", self.os)?
             .put_key("version", self.version)?
@@ -469,8 +481,8 @@ where
         loop {
             let key = match cur.get_key_raw() {
                 Ok(s) => s,
-                Err(Error::UnexpectedEnd) => break,
-                Err(e) => return Err(e),
+                Err(CursorError::TableEnd) => break,
+                Err(e) => Err(e)?,
             };
 
             match key {
@@ -500,21 +512,24 @@ where
     }
 }
 
-impl<'a> GetServerInfoResponse<&'a str> {
+impl<T> GetServerInfoResponse<T>
+where
+    T: PutKeyValue,
+{
     /// Encode packet to `buf`.
     pub fn encode(&self, buf: &mut [u8]) -> Result<usize, Error> {
         Ok(CursorMut::new(buf)
             .put_bytes(GetServerInfoResponse::HEADER)?
             .put_key("p", self.protocol)?
-            .put_key("map", self.map)?
+            .put_key("map", &self.map)?
             .put_key("dm", self.dm)?
             .put_key("team", self.team)?
             .put_key("coop", self.coop)?
             .put_key("numcl", self.numcl)?
             .put_key("maxcl", self.maxcl)?
-            .put_key("gamedir", self.gamedir)?
+            .put_key("gamedir", &self.gamedir)?
             .put_key("password", self.password)?
-            .put_key("host", self.host)?
+            .put_key("host", &self.host)?
             .pos())
     }
 }
@@ -534,24 +549,19 @@ pub enum Packet<'a> {
 
 impl<'a> Packet<'a> {
     /// Decode packet from `src`.
-    pub fn decode(src: &'a [u8]) -> Result<Self, Error> {
-        if let Ok(p) = Challenge::decode(src) {
-            return Ok(Self::Challenge(p));
+    pub fn decode(src: &'a [u8]) -> Result<Option<Self>, Error> {
+        if src.starts_with(Challenge::HEADER) {
+            Challenge::decode(src).map(Self::Challenge)
+        } else if src.starts_with(ServerAdd::HEADER) {
+            ServerAdd::decode(src).map(Self::ServerAdd)
+        } else if src.starts_with(ServerRemove::HEADER) {
+            ServerRemove::decode(src).map(|_| Self::ServerRemove)
+        } else if src.starts_with(GetServerInfoResponse::HEADER) {
+            GetServerInfoResponse::decode(src).map(Self::GetServerInfoResponse)
+        } else {
+            return Ok(None);
         }
-
-        if let Ok(p) = ServerAdd::decode(src) {
-            return Ok(Self::ServerAdd(p));
-        }
-
-        if ServerRemove::decode(src).is_ok() {
-            return Ok(Self::ServerRemove);
-        }
-
-        if let Ok(p) = GetServerInfoResponse::decode(src) {
-            return Ok(Self::GetServerInfoResponse(p));
-        }
-
-        Err(Error::InvalidPacket)
+        .map(Some)
     }
 }
 
@@ -564,13 +574,16 @@ mod tests {
         let p = Challenge::new(Some(0x12345678));
         let mut buf = [0; 128];
         let n = p.encode(&mut buf).unwrap();
-        assert_eq!(Challenge::decode(&buf[..n]), Ok(p));
+        assert_eq!(Packet::decode(&buf[..n]), Ok(Some(Packet::Challenge(p))));
     }
 
     #[test]
     fn challenge_old() {
         let s = b"q\xff";
-        assert_eq!(Challenge::decode(s), Ok(Challenge::new(None)));
+        assert_eq!(
+            Packet::decode(s),
+            Ok(Some(Packet::Challenge(Challenge::new(None))))
+        );
 
         let p = Challenge::new(None);
         let mut buf = [0; 128];
@@ -581,8 +594,8 @@ mod tests {
     #[test]
     fn server_add() {
         let p = ServerAdd {
-            gamedir: "valve",
-            map: "crossfire",
+            gamedir: Str(&b"valve"[..]),
+            map: Str(&b"crossfire"[..]),
             version: Version::new(0, 20),
             challenge: 0x12345678,
             server_type: ServerType::Dedicated,
@@ -595,7 +608,7 @@ mod tests {
         };
         let mut buf = [0; 512];
         let n = p.encode(&mut buf).unwrap();
-        assert_eq!(ServerAdd::decode(&buf[..n]), Ok(p));
+        assert_eq!(Packet::decode(&buf[..n]), Ok(Some(Packet::ServerAdd(p))));
     }
 
     #[test]
@@ -603,26 +616,29 @@ mod tests {
         let p = ServerRemove;
         let mut buf = [0; 64];
         let n = p.encode(&mut buf).unwrap();
-        assert_eq!(ServerRemove::decode(&buf[..n]), Ok(p));
+        assert_eq!(Packet::decode(&buf[..n]), Ok(Some(Packet::ServerRemove)));
     }
 
     #[test]
     fn get_server_info_response() {
         let p = GetServerInfoResponse {
             protocol: 49,
-            map: "crossfire",
+            map: Str("crossfire".as_bytes()),
             dm: true,
             team: true,
             coop: true,
             numcl: 4,
             maxcl: 32,
-            gamedir: "valve",
+            gamedir: Str("valve".as_bytes()),
             password: true,
-            host: "Test",
+            host: Str("Test".as_bytes()),
         };
         let mut buf = [0; 512];
         let n = p.encode(&mut buf).unwrap();
-        assert_eq!(GetServerInfoResponse::decode(&buf[..n]), Ok(p));
+        assert_eq!(
+            Packet::decode(&buf[..n]),
+            Ok(Some(Packet::GetServerInfoResponse(p)))
+        );
     }
 
     #[test]

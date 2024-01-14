@@ -5,6 +5,9 @@
 
 //! Xash3D protocol between clients, servers and masters.
 
+#[macro_use]
+extern crate log;
+
 mod cursor;
 mod server_info;
 

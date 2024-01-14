@@ -6,7 +6,6 @@
 use std::fmt;
 
 use bitflags::bitflags;
-use log::debug;
 
 use super::cursor::{Cursor, CursorMut, GetKeyValue, PutKeyValue};
 use super::filter::Version;

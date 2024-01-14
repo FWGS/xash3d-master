@@ -34,7 +34,6 @@ use std::net::SocketAddrV4;
 use std::str::FromStr;
 
 use bitflags::bitflags;
-use log::debug;
 
 use crate::cursor::{Cursor, GetKeyValue, PutKeyValue};
 use crate::server::{ServerAdd, ServerFlags, ServerType};

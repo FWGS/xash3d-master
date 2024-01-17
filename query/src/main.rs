@@ -570,7 +570,7 @@ fn list_servers(cli: &Cli) -> Result<(), Error> {
 }
 
 fn execute(cli: Cli) -> Result<(), Error> {
-    match cli.args.get(0).map(|s| s.as_str()).unwrap_or_default() {
+    match cli.args.first().map(|s| s.as_str()).unwrap_or_default() {
         "all" | "" => query_server_info(&cli, &[])?,
         "info" => query_server_info(&cli, &cli.args[1..])?,
         "list" => list_servers(&cli)?,

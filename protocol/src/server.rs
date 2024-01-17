@@ -450,6 +450,8 @@ pub struct GetServerInfoResponse<T> {
     pub coop: bool,
     /// Server is behind a password.
     pub password: bool,
+    /// Server is dedicated.
+    pub dedicated: bool,
 }
 
 impl GetServerInfoResponse<()> {
@@ -495,6 +497,7 @@ where
                 b"gamedir" => ret.gamedir = cur.get_key_value()?,
                 b"password" => ret.password = cur.get_key_value()?,
                 b"host" => ret.host = cur.get_key_value()?,
+                b"dedicated" => ret.dedicated = cur.get_key_value()?,
                 _ => {
                     // skip unknown fields
                     let value = cur.get_key_value::<Str<&[u8]>>()?;
@@ -528,6 +531,7 @@ where
             .put_key("maxcl", self.maxcl)?
             .put_key("gamedir", &self.gamedir)?
             .put_key("password", self.password)?
+            .put_key("dedicated", self.dedicated)?
             .put_key("host", &self.host)?
             .pos())
     }
@@ -630,6 +634,7 @@ mod tests {
             maxcl: 32,
             gamedir: Str("valve".as_bytes()),
             password: true,
+            dedicated: true,
             host: Str("Test".as_bytes()),
         };
         let mut buf = [0; 512];

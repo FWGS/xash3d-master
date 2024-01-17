@@ -469,13 +469,17 @@ where
         cur.expect(GetServerInfoResponse::HEADER)?;
 
         if !cur.as_slice().starts_with(b"\\") {
-            let s = cur.get_str(cur.remaining())?;
-            let p = s.rfind(':').ok_or(Error::InvalidPacket)?;
-            let msg = &s[p + 1..];
-            match msg.trim() {
-                "wrong version" => return Err(Error::InvalidProtocolVersion),
-                _ => return Err(Error::InvalidPacket),
-            }
+            let s = cur.get_bytes(cur.remaining())?;
+            let p = s
+                .iter()
+                .rev()
+                .position(|c| *c == b':')
+                .ok_or(Error::InvalidPacket)?;
+            let msg = &s[s.len() - p..];
+            return match msg {
+                b" wrong version\n" => Err(Error::InvalidProtocolVersion),
+                _ => Err(Error::InvalidPacket),
+            };
         }
 
         let mut ret = Self::default();
@@ -643,6 +647,15 @@ mod tests {
             Packet::decode(&buf[..n]),
             Ok(Some(Packet::GetServerInfoResponse(p)))
         );
+    }
+
+    #[test]
+    fn get_server_info_response_wrong_version() {
+        let s = b"\xff\xff\xff\xffinfo\nfoobar: wrong version\n";
+        assert_eq!(Packet::decode(s), Err(Error::InvalidProtocolVersion));
+
+        let s = b"\xff\xff\xff\xffinfo\nfoobar\xff: wrong version\n";
+        assert_eq!(Packet::decode(s), Err(Error::InvalidProtocolVersion));
     }
 
     #[test]

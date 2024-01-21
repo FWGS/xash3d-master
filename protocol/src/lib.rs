@@ -17,7 +17,7 @@ pub mod filter;
 pub mod game;
 pub mod master;
 pub mod server;
-pub mod types;
+pub mod wrappers;
 
 pub use cursor::Error as CursorError;
 pub use server_info::ServerInfo;

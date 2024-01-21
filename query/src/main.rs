@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use serde::{Serialize, Serializer};
 use thiserror::Error;
-use xash3d_protocol::types::Str;
+use xash3d_protocol::wrappers::Str;
 use xash3d_protocol::{color, game, master, server, Error as ProtocolError};
 
 use crate::cli::Cli;

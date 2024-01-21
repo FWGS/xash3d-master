@@ -130,7 +130,7 @@ impl<'a> Packet<'a> {
 mod tests {
     use super::*;
     use crate::filter::{FilterFlags, Version};
-    use crate::types::Str;
+    use crate::wrappers::Str;
     use std::net::Ipv4Addr;
 
     #[test]

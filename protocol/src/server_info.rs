@@ -3,7 +3,7 @@
 
 use super::filter::{FilterFlags, Version};
 use super::server::{Region, ServerAdd};
-use super::types::Str;
+use super::wrappers::Str;
 
 /// Game server information.
 #[derive(Clone, Debug)]

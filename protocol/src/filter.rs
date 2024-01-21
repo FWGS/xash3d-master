@@ -37,7 +37,7 @@ use bitflags::bitflags;
 
 use crate::cursor::{Cursor, GetKeyValue, PutKeyValue};
 use crate::server::{ServerAdd, ServerFlags, ServerType};
-use crate::types::Str;
+use crate::wrappers::Str;
 use crate::{CursorError, Error, ServerInfo};
 
 bitflags! {
@@ -296,9 +296,9 @@ impl fmt::Display for &Filter<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::cursor::CursorMut;
-    use super::super::types::Str;
     use super::*;
+    use crate::cursor::CursorMut;
+    use crate::wrappers::Str;
 
     macro_rules! tests {
         ($($name:ident$(($($predefined_f:ident: $predefined_v:expr),+ $(,)?))? {

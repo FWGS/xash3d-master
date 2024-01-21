@@ -9,7 +9,7 @@ use bitflags::bitflags;
 
 use super::cursor::{Cursor, CursorMut, GetKeyValue, PutKeyValue};
 use super::filter::Version;
-use super::types::Str;
+use super::wrappers::Str;
 use super::{CursorError, Error};
 
 /// Sended to a master server before `ServerAdd` packet.

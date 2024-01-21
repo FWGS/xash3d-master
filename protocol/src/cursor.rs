@@ -10,7 +10,7 @@ use std::str;
 use thiserror::Error;
 
 use super::color;
-use super::types::Str;
+use super::wrappers::Str;
 
 /// The error type for `Cursor` and `CursorMut`.
 #[derive(Error, Debug, PartialEq, Eq)]

@@ -4,7 +4,7 @@
 //! Admin packets.
 
 use crate::cursor::{Cursor, CursorMut};
-use crate::types::Hide;
+use crate::wrappers::Hide;
 use crate::{CursorError, Error};
 
 /// Default hash length.

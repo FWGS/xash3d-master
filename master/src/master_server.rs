@@ -14,7 +14,7 @@ use log::{debug, error, info, trace, warn};
 use thiserror::Error;
 use xash3d_protocol::filter::{Filter, FilterFlags, Version};
 use xash3d_protocol::server::Region;
-use xash3d_protocol::types::Str;
+use xash3d_protocol::wrappers::Str;
 use xash3d_protocol::{admin, game, master, server, Error as ProtocolError, ServerInfo};
 
 use crate::config::{self, Config};

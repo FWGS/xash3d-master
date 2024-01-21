@@ -14,7 +14,7 @@ use crate::CursorError;
 /// # Examples
 ///
 /// ```rust
-/// # use xash3d_protocol::types::Str;
+/// # use xash3d_protocol::wrappers::Str;
 /// let s = format!("{}", Str(b"\xff\talex\n"));
 /// assert_eq!(s, "\\xff\\talex\\n");
 /// ```
@@ -78,7 +78,7 @@ impl<T> Deref for Str<T> {
 /// # Examples
 ///
 /// ```rust
-/// # use xash3d_protocol::types::Hide;
+/// # use xash3d_protocol::wrappers::Hide;
 /// let s = format!("{}", Hide([1, 2, 3, 4]));
 /// assert_eq!(s, "<hidden>");
 /// ```

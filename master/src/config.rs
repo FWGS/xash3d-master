@@ -17,8 +17,22 @@ pub const DEFAULT_CONFIG_PATH: &str = "config/main.toml";
 pub const DEFAULT_MASTER_SERVER_IP: IpAddr = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0));
 pub const DEFAULT_MASTER_SERVER_PORT: u16 = 27010;
 pub const DEFAULT_CHALLENGE_TIMEOUT: u32 = 10;
-pub const DEFAULT_TIMEOUT: u32 = 300;
+pub const DEFAULT_SERVER_TIMEOUT: u32 = 300;
 pub const DEFAULT_ADMIN_TIMEOUT: u32 = 10;
+
+pub const DEFAULT_HASH_LEN: usize = admin::HASH_LEN;
+
+macro_rules! impl_helpers {
+    ($($f:ident: $t:ty),+$(,)?) => (
+        $(const fn $f<const N: $t>() -> $t { N })+
+    );
+}
+
+impl_helpers! {
+    default_u16: u16,
+    default_u32: u32,
+    default_usize: usize,
+}
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -65,7 +79,7 @@ impl Default for LogConfig {
 pub struct ServerConfig {
     #[serde(default = "default_server_ip")]
     pub ip: IpAddr,
-    #[serde(default = "default_server_port")]
+    #[serde(default = "default_u16::<DEFAULT_MASTER_SERVER_PORT>")]
     pub port: u16,
     #[serde(default)]
     pub timeout: TimeoutConfig,
@@ -75,7 +89,7 @@ impl Default for ServerConfig {
     fn default() -> Self {
         Self {
             ip: default_server_ip(),
-            port: default_server_port(),
+            port: DEFAULT_MASTER_SERVER_PORT,
             timeout: Default::default(),
         }
     }
@@ -84,20 +98,20 @@ impl Default for ServerConfig {
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct TimeoutConfig {
-    #[serde(default = "default_challenge_timeout")]
+    #[serde(default = "default_u32::<DEFAULT_CHALLENGE_TIMEOUT>")]
     pub challenge: u32,
-    #[serde(default = "default_timeout")]
+    #[serde(default = "default_u32::<DEFAULT_SERVER_TIMEOUT>")]
     pub server: u32,
-    #[serde(default = "default_admin_timeout")]
+    #[serde(default = "default_u32::<DEFAULT_ADMIN_TIMEOUT>")]
     pub admin: u32,
 }
 
 impl Default for TimeoutConfig {
     fn default() -> Self {
         Self {
-            challenge: default_challenge_timeout(),
-            server: default_timeout(),
-            admin: default_admin_timeout(),
+            challenge: DEFAULT_CHALLENGE_TIMEOUT,
+            server: DEFAULT_SERVER_TIMEOUT,
+            admin: DEFAULT_ADMIN_TIMEOUT,
         }
     }
 }
@@ -119,7 +133,7 @@ pub struct ClientConfig {
 #[derive(Deserialize, Default, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct HashConfig {
-    #[serde(default = "default_hash_len")]
+    #[serde(default = "default_usize::<DEFAULT_HASH_LEN>")]
     pub len: usize,
     #[serde(default = "default_hash_key")]
     pub key: Box<str>,
@@ -140,26 +154,6 @@ fn default_log_level() -> LevelFilter {
 
 fn default_server_ip() -> IpAddr {
     DEFAULT_MASTER_SERVER_IP
-}
-
-fn default_server_port() -> u16 {
-    DEFAULT_MASTER_SERVER_PORT
-}
-
-fn default_challenge_timeout() -> u32 {
-    DEFAULT_CHALLENGE_TIMEOUT
-}
-
-fn default_timeout() -> u32 {
-    DEFAULT_TIMEOUT
-}
-
-fn default_admin_timeout() -> u32 {
-    DEFAULT_ADMIN_TIMEOUT
-}
-
-fn default_hash_len() -> usize {
-    admin::HASH_LEN
 }
 
 fn default_hash_key() -> Box<str> {

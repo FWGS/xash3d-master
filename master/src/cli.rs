@@ -29,7 +29,7 @@ pub struct Cli {
     pub log_level: Option<LevelFilter>,
     pub listen_ip: Option<IpAddr>,
     pub listen_port: Option<u16>,
-    pub config_path: Box<str>,
+    pub config_path: Option<Box<str>>,
 }
 
 fn print_usage(opts: Options) {
@@ -42,10 +42,7 @@ fn print_version() {
 }
 
 pub fn parse() -> Result<Cli, Error> {
-    let mut cli = Cli {
-        config_path: config::DEFAULT_CONFIG_PATH.to_string().into_boxed_str(),
-        ..Cli::default()
-    };
+    let mut cli = Cli::default();
 
     let args: Vec<_> = std::env::args().collect();
     let mut opts = Options::new();
@@ -61,8 +58,7 @@ pub fn parse() -> Result<Cli, Error> {
         config::DEFAULT_MASTER_SERVER_PORT
     );
     opts.optopt("p", "port", &port_help, "PORT");
-    let config_help = format!("config path [default: {}]", cli.config_path);
-    opts.optopt("c", "config", &config_help, "PATH");
+    opts.optopt("c", "config", "config path", "PATH");
 
     let matches = opts.parse(&args[1..])?;
 
@@ -95,7 +91,7 @@ pub fn parse() -> Result<Cli, Error> {
     }
 
     if let Some(s) = matches.opt_str("config") {
-        cli.config_path = s.into_boxed_str();
+        cli.config_path = Some(s.into_boxed_str());
     }
 
     Ok(cli)

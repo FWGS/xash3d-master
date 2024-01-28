@@ -12,8 +12,6 @@ use thiserror::Error;
 use xash3d_protocol::admin;
 use xash3d_protocol::filter::Version;
 
-pub const DEFAULT_CONFIG_PATH: &str = "config/main.toml";
-
 pub const DEFAULT_MASTER_SERVER_IP: IpAddr = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0));
 pub const DEFAULT_MASTER_SERVER_PORT: u16 = 27010;
 pub const DEFAULT_CHALLENGE_TIMEOUT: u32 = 10;
@@ -44,7 +42,7 @@ pub enum Error {
     Io(#[from] io::Error),
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Default, Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     #[serde(default)]
@@ -122,7 +120,7 @@ impl Default for TimeoutConfig {
     }
 }
 
-#[derive(Deserialize, Default, Debug)]
+#[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct ClientConfig {
     #[serde(default)]
@@ -136,7 +134,18 @@ pub struct ClientConfig {
     pub update_addr: Option<Box<str>>,
 }
 
-#[derive(Deserialize, Default, Debug)]
+impl Default for ClientConfig {
+    fn default() -> Self {
+        Self {
+            version: Version::new(0, 19),
+            update_map: String::from("Update please").into_boxed_str(),
+            update_title: String::from("https://github.com/FWGS/xash3d-fwgs").into_boxed_str(),
+            update_addr: None,
+        }
+    }
+}
+
+#[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct HashConfig {
     #[serde(default = "default_usize::<DEFAULT_HASH_LEN>")]
@@ -147,7 +156,17 @@ pub struct HashConfig {
     pub personal: Box<str>,
 }
 
-#[derive(Deserialize, Default, Debug)]
+impl Default for HashConfig {
+    fn default() -> Self {
+        Self {
+            len: DEFAULT_HASH_LEN,
+            key: default_hash_key(),
+            personal: default_hash_personal(),
+        }
+    }
+}
+
+#[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct AdminConfig {
     pub name: Box<str>,

@@ -19,7 +19,10 @@ use crate::config::Config;
 use crate::master_server::{Error, MasterServer};
 
 fn load_config(cli: &Cli) -> Result<Config, config::Error> {
-    let mut cfg = config::load(cli.config_path.as_ref())?;
+    let mut cfg = match cli.config_path {
+        Some(ref p) => config::load(p.as_ref())?,
+        None => Config::default(),
+    };
 
     if let Some(level) = cli.log_level {
         cfg.log.level = level;
@@ -45,7 +48,10 @@ fn run() -> Result<(), Error> {
     logger::init();
 
     let cfg = load_config(&cli).unwrap_or_else(|e| {
-        eprintln!("Failed to load config \"{}\": {}", cli.config_path, e);
+        match cli.config_path.as_deref() {
+            Some(p) => eprintln!("Failed to load config \"{}\": {}", p, e),
+            None => eprintln!("{}", e),
+        }
         process::exit(1);
     });
 
@@ -57,15 +63,17 @@ fn run() -> Result<(), Error> {
         master.run(&sig_flag)?;
 
         if sig_flag.swap(false, Ordering::Relaxed) {
-            info!("Reloading config from {}", cli.config_path);
+            if let Some(config_path) = cli.config_path.as_deref() {
+                info!("Reloading config from {}", config_path);
 
-            match load_config(&cli) {
-                Ok(cfg) => {
-                    if let Err(e) = master.update_config(cfg) {
-                        error!("{}", e);
+                match load_config(&cli) {
+                    Ok(cfg) => {
+                        if let Err(e) = master.update_config(cfg) {
+                            error!("{}", e);
+                        }
                     }
+                    Err(e) => error!("failed to load config: {}", e),
                 }
-                Err(e) => error!("failed to load config: {}", e),
             }
         }
     }

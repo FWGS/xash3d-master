@@ -13,6 +13,3 @@ Cargo.lock
 
 # MSVC Windows builds of rustc generate these, which store debugging information
 *.pdb
-
-# a1ba: do not add my config files by accident
-config/

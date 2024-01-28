@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // SPDX-FileCopyrightText: 2023 Denis Drakhnia <numas13@gmail.com>
 
+#![deny(unsafe_code)]
+
 mod cli;
 mod config;
 mod logger;

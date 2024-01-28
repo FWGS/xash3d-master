@@ -1,10 +1,15 @@
 [package]
 name = "xash3d-protocol"
+description = "Network protocol library for Xash3D engine"
 version = "0.1.0"
 license = "LGPL-3.0-only"
+keywords = ["xash3d"]
+categories = ["parsing"]
 authors = ["Denis Drakhnia <numas13@gmail.com>"]
 edition = "2021"
 rust-version = "1.56"
+homepage = "https://xash.su"
+repository = "https://git.mentality.rip/numas13/xash3d-master"
 
 [dependencies]
 thiserror = "1.0.49"

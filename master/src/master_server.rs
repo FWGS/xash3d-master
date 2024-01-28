@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // SPDX-FileCopyrightText: 2023 Denis Drakhnia <numas13@gmail.com>
 
-use std::collections::{HashMap, HashSet};
 use std::io;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, ToSocketAddrs, UdpSocket};
 use std::ops::Deref;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use blake2b_simd::Params;
 use fastrand::Rng;
 use log::{debug, error, info, trace, warn};
@@ -493,7 +493,8 @@ impl MasterServer {
     }
 
     fn add_server(&mut self, addr: SocketAddrV4, server: ServerInfo) {
-        match self.servers.insert(addr, Entry::new(self.now(), server)) {
+        let entry = Entry::new(self.now(), server);
+        match self.servers.insert(addr, entry) {
             Some(_) => trace!("{}: Updated GameServer", addr),
             None => trace!("{}: New GameServer", addr),
         }

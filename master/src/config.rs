@@ -20,6 +20,8 @@ pub const DEFAULT_CHALLENGE_TIMEOUT: u32 = 10;
 pub const DEFAULT_SERVER_TIMEOUT: u32 = 300;
 pub const DEFAULT_ADMIN_TIMEOUT: u32 = 10;
 
+pub const DEFAULT_MAX_SERVERS_PER_IP: u16 = 14;
+
 pub const DEFAULT_HASH_LEN: usize = admin::HASH_LEN;
 
 macro_rules! impl_helpers {
@@ -76,11 +78,14 @@ impl Default for LogConfig {
 
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
+#[serde(rename_all = "kebab-case")]
 pub struct ServerConfig {
     #[serde(default = "default_server_ip")]
     pub ip: IpAddr,
     #[serde(default = "default_u16::<DEFAULT_MASTER_SERVER_PORT>")]
     pub port: u16,
+    #[serde(default = "default_u16::<DEFAULT_MAX_SERVERS_PER_IP>")]
+    pub max_servers_per_ip: u16,
     #[serde(default)]
     pub timeout: TimeoutConfig,
 }
@@ -90,6 +95,7 @@ impl Default for ServerConfig {
         Self {
             ip: default_server_ip(),
             port: DEFAULT_MASTER_SERVER_PORT,
+            max_servers_per_ip: DEFAULT_MAX_SERVERS_PER_IP,
             timeout: Default::default(),
         }
     }

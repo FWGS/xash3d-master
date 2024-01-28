@@ -7,13 +7,15 @@ level = "info"
 [server]
 ip = "0.0.0.0"
 port = 27010
+# How many servers with the same ip can be registred
+max-servers-per-ip = 14
 
 [server.timeout]
 # Time in seconds while challenge is valid
 challenge = 10
 # Time in seconds while server is valid
 server = 300
-# TIme in seconds before next admin request is allowed after wrong password
+# Time in seconds before next admin request is allowed after wrong password
 admin = 10
 
 [client]

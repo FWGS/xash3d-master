@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // SPDX-FileCopyrightText: 2023 Denis Drakhnia <numas13@gmail.com>
 
+use std::collections::hash_map;
 use std::io;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, ToSocketAddrs, UdpSocket};
 use std::ops::Deref;
@@ -108,6 +109,7 @@ pub struct MasterServer {
     challenges_counter: Counter,
     servers: HashMap<SocketAddrV4, Entry<ServerInfo>>,
     servers_counter: Counter,
+    max_servers_per_ip: u16,
     rng: Rng,
 
     start_time: Instant,
@@ -180,6 +182,7 @@ impl MasterServer {
             challenges_counter: Counter::new(CHALLENGE_CLEANUP_MAX),
             servers: Default::default(),
             servers_counter: Counter::new(SERVER_CLEANUP_MAX),
+            max_servers_per_ip: cfg.server.max_servers_per_ip,
             rng: Rng::new(),
             timeout: cfg.server.timeout,
             clver: cfg.client.version,
@@ -492,11 +495,25 @@ impl MasterServer {
         }
     }
 
+    fn count_servers(&self, addr: &Ipv4Addr) -> u16 {
+        self.servers.keys().filter(|i| i.ip() == addr).count() as u16
+    }
+
     fn add_server(&mut self, addr: SocketAddrV4, server: ServerInfo) {
-        let entry = Entry::new(self.now(), server);
-        match self.servers.insert(addr, entry) {
-            Some(_) => trace!("{}: Updated GameServer", addr),
-            None => trace!("{}: New GameServer", addr),
+        let now = self.now();
+        match self.servers.entry(addr) {
+            hash_map::Entry::Occupied(mut e) => {
+                trace!("{}: Updated GameServer", addr);
+                e.insert(Entry::new(now, server));
+            }
+            hash_map::Entry::Vacant(_) => {
+                if self.count_servers(addr.ip()) >= self.max_servers_per_ip {
+                    trace!("{}: max servers per ip", addr);
+                    return;
+                }
+                trace!("{}: New GameServer", addr);
+                self.servers.insert(addr, Entry::new(now, server));
+            }
         }
     }
 

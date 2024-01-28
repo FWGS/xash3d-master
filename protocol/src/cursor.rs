@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 // SPDX-FileCopyrightText: 2023 Denis Drakhnia <numas13@gmail.com>
 
-use std::fmt;
 use std::io::{self, Write as _};
-use std::mem;
-use std::slice;
-use std::str;
+use std::{fmt, mem, str};
 
 use thiserror::Error;
 
@@ -385,8 +382,8 @@ impl_put_key_value! {
 }
 
 pub struct CursorMut<'a> {
-    buffer: &'a [u8],
-    buffer_mut: &'a mut [u8],
+    buffer: &'a mut [u8],
+    pos: usize,
 }
 
 macro_rules! impl_put {
@@ -400,42 +397,25 @@ macro_rules! impl_put {
 
 impl<'a> CursorMut<'a> {
     pub fn new(buffer: &'a mut [u8]) -> Self {
-        let (buffer, buffer_mut) = buffer.split_at_mut(0);
-        Self { buffer, buffer_mut }
-    }
-
-    pub fn buffer(&self) -> &'a [u8] {
-        self.buffer
-    }
-
-    pub fn buffer_mut<'b: 'a>(&'b mut self) -> &'a mut [u8] {
-        self.buffer_mut
-    }
-
-    pub fn end(self) -> (&'a [u8], &'a mut [u8]) {
-        (self.buffer, self.buffer_mut)
+        Self { buffer, pos: 0 }
     }
 
     pub fn pos(&mut self) -> usize {
-        self.buffer.len()
+        self.pos
     }
 
     #[inline(always)]
     pub fn remaining(&self) -> usize {
-        self.buffer_mut.len()
+        self.buffer.len() - self.pos
     }
 
     pub fn advance<F>(&mut self, count: usize, mut f: F) -> Result<&mut Self, Error>
     where
-        F: FnMut(&'a mut [u8]),
+        F: FnMut(&mut [u8]),
     {
         if count <= self.remaining() {
-            let buffer_mut = mem::take(&mut self.buffer_mut);
-            let (head, tail) = buffer_mut.split_at_mut(count);
-            f(head);
-            self.buffer =
-                unsafe { slice::from_raw_parts(self.buffer.as_ptr(), self.buffer.len() + count) };
-            self.buffer_mut = tail;
+            f(&mut self.buffer[self.pos..self.pos + count]);
+            self.pos += count;
             Ok(self)
         } else {
             Err(Error::UnexpectedEnd)
@@ -502,11 +482,10 @@ impl<'a> CursorMut<'a> {
     }
 
     pub fn put_as_str<T: fmt::Display>(&mut self, value: T) -> Result<&mut Self, Error> {
-        let mut cur = io::Cursor::new(mem::take(&mut self.buffer_mut));
+        let mut cur = io::Cursor::new(&mut self.buffer[self.pos..]);
         write!(&mut cur, "{}", value).map_err(|_| Error::UnexpectedEnd)?;
-        let n = cur.position() as usize;
-        self.buffer_mut = cur.into_inner();
-        self.advance(n, |_| {})
+        self.pos += cur.position() as usize;
+        Ok(self)
     }
 
     pub fn put_key_value<T: PutKeyValue>(&mut self, value: T) -> Result<&mut Self, Error> {
@@ -535,7 +514,7 @@ mod tests {
     #[test]
     fn cursor() -> Result<(), Error> {
         let mut buf = [0; 64];
-        let s = CursorMut::new(&mut buf)
+        let n = CursorMut::new(&mut buf)
             .put_bytes(b"12345678")?
             .put_array(b"4321")?
             .put_str("abc")?
@@ -543,7 +522,8 @@ mod tests {
             .put_u8(0x7f)?
             .put_i8(-128)?
             .put_u32_le(0x44332211)?
-            .buffer();
+            .pos();
+        let s = &buf[..n];
 
         let mut cur = Cursor::new(s);
         assert_eq!(cur.get_bytes(8), Ok(&b"12345678"[..]));
@@ -561,7 +541,7 @@ mod tests {
     #[test]
     fn key() -> Result<(), Error> {
         let mut buf = [0; 512];
-        let s = CursorMut::new(&mut buf)
+        let n = CursorMut::new(&mut buf)
             .put_key("p", 49)?
             .put_key("map", "crossfire")?
             .put_key("dm", true)?
@@ -572,7 +552,8 @@ mod tests {
             .put_key("gamedir", "valve")?
             .put_key("password", false)?
             .put_key("host", "test")?
-            .buffer();
+            .pos();
+        let s = &buf[..n];
 
         let mut cur = Cursor::new(s);
         assert_eq!(cur.get_key(), Ok((&b"p"[..], 49_u8)));

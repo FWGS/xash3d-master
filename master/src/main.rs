@@ -13,8 +13,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use log::{error, info};
-use signal_hook::consts::signal::*;
-use signal_hook::flag as signal_flag;
+#[cfg(not(windows))]
+use signal_hook::{consts::signal::*, flag as signal_flag};
 
 use crate::cli::Cli;
 use crate::config::Config;
@@ -59,6 +59,8 @@ fn run() -> Result<(), Error> {
 
     let mut master = MasterServer::new(cfg)?;
     let sig_flag = Arc::new(AtomicBool::new(false));
+    // XXX: Windows does not support SIGUSR1.
+    #[cfg(not(windows))]
     signal_flag::register(SIGUSR1, sig_flag.clone())?;
 
     loop {

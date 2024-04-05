@@ -35,5 +35,3 @@ version = "<0.4.27"
 optional = true
 default-features = false
 features = ["clock"]
-[target.wasm32-unknown-emscripten.dependencies]
-once_cell = { version = "<1.18", optional = true }

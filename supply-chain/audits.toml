@@ -21,6 +21,11 @@ who = "Denis Drakhnia <numas13@gmail.com>"
 criteria = "safe-to-deploy"
 version = "1.0.0"
 
+[[audits.chrono]]
+who = "Denis Drakhnia <numas13@gmail.com>"
+criteria = "safe-to-deploy"
+version = "0.4.26"
+
 [[audits.const-random]]
 who = "Denis Drakhnia <numas13@gmail.com>"
 criteria = "safe-to-deploy"

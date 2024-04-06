@@ -1,6 +1,11 @@
 
 # cargo-vet audits file
 
+[[audits.ahash]]
+who = "Denis Drakhnia <numas13@gmail.com>"
+criteria = "safe-to-deploy"
+version = "0.4.8"
+
 [[audits.android-tzdata]]
 who = "Denis Drakhnia <numas13@gmail.com>"
 criteria = "safe-to-deploy"

@@ -31,10 +31,6 @@ audit-as-crates-io = true
 [policy.xash3d-query]
 audit-as-crates-io = true
 
-[[exemptions.ahash]]
-version = "0.4.8"
-criteria = "safe-to-deploy"
-
 [[exemptions.chrono]]
 version = "0.4.26"
 criteria = "safe-to-deploy"

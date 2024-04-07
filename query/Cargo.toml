@@ -13,7 +13,7 @@ repository = "https://git.mentality.rip/numas13/xash3d-master"
 
 [features]
 default = ["color"]
-color = ["termion"]
+color = ["crossterm"]
 
 [dependencies]
 libc = "0.2.148"
@@ -22,5 +22,5 @@ getopts = "0.2.21"
 fastrand = "2.0.1"
 serde = { version = "1.0.188", features = ["derive"] }
 serde_json = "1.0.107"
-termion = { version = "2", optional = true }
+crossterm = { version = "0.25.0", default-features = false, optional = true }
 xash3d-protocol = { path = "../protocol", version = "0.1.0" }

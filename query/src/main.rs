@@ -176,29 +176,31 @@ impl<'a> Colored<'a> {
 impl fmt::Display for Colored<'_> {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         #[cfg(feature = "color")]
-        if self.forced || termion::is_tty(&io::stdout()) {
-            use termion::color::*;
+        use crossterm::{style::Stylize, tty::IsTty};
 
+        #[cfg(feature = "color")]
+        if self.forced || io::stdout().is_tty() {
             for (color, text) in color::ColorIter::new(self.inner) {
-                match color::Color::try_from(color) {
-                    Ok(color::Color::Black) => write!(fmt, "{}", Fg(Black))?,
-                    Ok(color::Color::Red) => write!(fmt, "{}", Fg(Red))?,
-                    Ok(color::Color::Green) => write!(fmt, "{}", Fg(Green))?,
-                    Ok(color::Color::Yellow) => write!(fmt, "{}", Fg(Yellow))?,
-                    Ok(color::Color::Blue) => write!(fmt, "{}", Fg(Blue))?,
-                    Ok(color::Color::Cyan) => write!(fmt, "{}", Fg(Cyan))?,
-                    Ok(color::Color::Magenta) => write!(fmt, "{}", Fg(Magenta))?,
-                    Ok(color::Color::White) => write!(fmt, "{}", Fg(White))?,
-                    _ => {}
-                }
-                write!(fmt, "{}", text)?;
+                let colored = match color::Color::try_from(color) {
+                    Ok(color::Color::Black) => text.black(),
+                    Ok(color::Color::Red) => text.red(),
+                    Ok(color::Color::Green) => text.green(),
+                    Ok(color::Color::Yellow) => text.yellow(),
+                    Ok(color::Color::Blue) => text.blue(),
+                    Ok(color::Color::Cyan) => text.cyan(),
+                    Ok(color::Color::Magenta) => text.magenta(),
+                    Ok(color::Color::White) => text.white(),
+                    _ => text.reset(),
+                };
+                write!(fmt, "{}", colored)?;
             }
-            return write!(fmt, "{}", Fg(Reset));
         }
 
+        #[cfg(not(feature = "color"))]
         for (_, text) in color::ColorIter::new(self.inner) {
             write!(fmt, "{}", text)?;
         }
+
         Ok(())
     }
 }
@@ -583,8 +585,9 @@ fn execute(cli: Cli) -> Result<(), Error> {
 fn main() {
     let cli = cli::parse();
 
-    // suppress broken pipe error
+    #[cfg(not(windows))]
     unsafe {
+        // suppress broken pipe error
         libc::signal(libc::SIGPIPE, libc::SIG_DFL);
     }
 

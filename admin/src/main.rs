@@ -3,11 +3,10 @@
 
 mod cli;
 
-use std::io::{self, Write};
+use std::io;
 use std::net::UdpSocket;
 
 use blake2b_simd::Params;
-use termion::input::TermRead;
 use thiserror::Error;
 use xash3d_protocol::{admin, master};
 
@@ -19,6 +18,56 @@ enum Error {
     Protocol(#[from] xash3d_protocol::Error),
     #[error(transparent)]
     Io(#[from] io::Error),
+}
+
+fn read_password() -> Result<Option<String>, Error> {
+    use crossterm::event::{read, Event, KeyCode, KeyEventKind, KeyModifiers};
+    use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
+
+    println!("Password:");
+
+    enable_raw_mode()?;
+
+    let mut buf = String::with_capacity(32);
+    loop {
+        let event = match read() {
+            Ok(event) => event,
+            Err(err) => {
+                disable_raw_mode()?;
+                return Err(err.into());
+            }
+        };
+
+        match event {
+            Event::Key(key) => {
+                if key.kind != KeyEventKind::Press {
+                    continue;
+                }
+
+                let is_ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+                match key.code {
+                    KeyCode::Esc => break,
+                    KeyCode::Enter => break,
+                    KeyCode::Char('c' | 'd') if is_ctrl => break,
+                    KeyCode::Char('w') if is_ctrl => buf.clear(),
+                    KeyCode::Char(c) => buf.push(c),
+                    KeyCode::Backspace => {
+                        buf.pop();
+                    }
+                    _ => {}
+                }
+            }
+            Event::Paste(s) => buf.push_str(&s),
+            _ => {}
+        }
+    }
+
+    disable_raw_mode()?;
+
+    Ok(match buf.len() {
+        0 => None,
+        _ => Some(buf),
+    })
 }
 
 fn send_command(cli: &cli::Cli) -> Result<(), Error> {
@@ -35,16 +84,8 @@ fn send_command(cli: &cli::Cli) -> Result<(), Error> {
         _ => return Err(Error::UnexpectedPacket),
     };
 
-    let stdout = io::stdout();
-    let stdin = io::stdin();
-    let mut stdout = stdout.lock();
-    let mut stdin = stdin.lock();
-
-    stdout.write_all(b"Password:\n")?;
-    stdout.flush()?;
-
-    let password = match stdin.read_passwd(&mut stdout)? {
-        Some(pass) => pass,
+    let password = match read_password()? {
+        Some(s) => s,
         None => return Ok(()),
     };
 

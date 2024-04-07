@@ -7,6 +7,7 @@ mod cli;
 mod config;
 mod logger;
 mod master_server;
+mod stats;
 
 use std::process;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -34,6 +35,12 @@ fn load_config(cli: &Cli) -> Result<Config, config::Error> {
     }
     if let Some(port) = cli.listen_port {
         cfg.server.port = port;
+    }
+    if let Some(format) = &cli.stats_format {
+        cfg.stat.format = format.clone();
+    }
+    if let Some(interval) = cli.stats_interval {
+        cfg.stat.interval = interval;
     }
 
     log::set_max_level(cfg.log.level);

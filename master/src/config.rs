@@ -56,6 +56,8 @@ pub struct Config {
     #[serde(rename = "admin")]
     #[serde(default)]
     pub admin_list: Box<[AdminConfig]>,
+    #[serde(default)]
+    pub stat: StatConfig,
 }
 
 #[derive(Deserialize, Debug)]
@@ -173,6 +175,23 @@ pub struct AdminConfig {
     pub password: Box<str>,
 }
 
+#[derive(Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct StatConfig {
+    pub interval: u32,
+    #[serde(default = "default_stats_format")]
+    pub format: Box<str>,
+}
+
+impl Default for StatConfig {
+    fn default() -> Self {
+        Self {
+            interval: 0,
+            format: default_stats_format(),
+        }
+    }
+}
+
 fn default_log_level() -> LevelFilter {
     LevelFilter::Warn
 }
@@ -187,6 +206,10 @@ fn default_hash_key() -> Box<str> {
 
 fn default_hash_personal() -> Box<str> {
     Box::from(admin::HASH_PERSONAL)
+}
+
+fn default_stats_format() -> Box<str> {
+    Box::from("stats: %s servers, %a add/s, %d del/s, %q query/s, %e error/s")
 }
 
 fn deserialize_log_level<'de, D>(de: D) -> Result<LevelFilter, D::Error>

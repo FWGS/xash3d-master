@@ -18,6 +18,26 @@
 ## Time in seconds before next admin request is allowed after wrong password
 #admin = 10
 
+#[stat]
+# Interval in seconds, set zero to disable
+#interval = 0
+# Format string description
+#
+# %s - servers count
+#
+# Requests per second
+# %a - add server
+# %d - remove server
+# %q - query servers
+# %e - errors
+#
+# Requests per interval time
+# %A - add server
+# %D - remove server
+# %Q - query servers
+# %E - errors
+#format = "stats: %s servers, %a add/s, %d del/s, %q query/s, %e error/s"
+
 #[client]
 ## If client version is less then show update message
 #version = "0.19"

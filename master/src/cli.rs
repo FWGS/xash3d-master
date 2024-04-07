@@ -20,6 +20,8 @@ pub enum Error {
     InvalidIp(String),
     #[error("Invalid port number \"{0}\"")]
     InvalidPort(String),
+    #[error("Invalid stats interval \"{0}\"")]
+    InvalidStatsInterval(String),
     #[error(transparent)]
     Options(#[from] getopts::Fail),
 }
@@ -30,6 +32,8 @@ pub struct Cli {
     pub listen_ip: Option<IpAddr>,
     pub listen_port: Option<u16>,
     pub config_path: Option<Box<str>>,
+    pub stats_format: Option<Box<str>>,
+    pub stats_interval: Option<u32>,
 }
 
 fn print_usage(opts: Options) {
@@ -59,6 +63,8 @@ pub fn parse() -> Result<Cli, Error> {
     );
     opts.optopt("p", "port", &port_help, "PORT");
     opts.optopt("c", "config", "config path", "PATH");
+    opts.optopt("s", "stats-format", "stats format string", "FMT");
+    opts.optopt("I", "stats-interval", "stats interval", "SECONDS");
 
     let matches = opts.parse(&args[1..])?;
 
@@ -92,6 +98,14 @@ pub fn parse() -> Result<Cli, Error> {
 
     if let Some(s) = matches.opt_str("config") {
         cli.config_path = Some(s.into_boxed_str());
+    }
+
+    if let Some(s) = matches.opt_str("stats-format") {
+        cli.stats_format = Some(s.into_boxed_str());
+    }
+
+    if let Some(s) = matches.opt_str("stats-interval") {
+        cli.stats_interval = Some(s.parse().map_err(|_| Error::InvalidStatsInterval(s))?);
     }
 
     Ok(cli)

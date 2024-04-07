@@ -19,6 +19,7 @@ use xash3d_protocol::wrappers::Str;
 use xash3d_protocol::{admin, game, master, server, Error as ProtocolError, ServerInfo};
 
 use crate::config::{self, Config};
+use crate::stats::Stats;
 
 /// The maximum size of UDP packets.
 const MAX_PACKET_SIZE: usize = 512;
@@ -129,6 +130,8 @@ pub struct MasterServer {
     hash: config::HashConfig,
 
     blocklist: HashSet<Ipv4Addr>,
+
+    stats: Stats,
 }
 
 fn resolve_socket_addr<A>(addr: A) -> io::Result<Option<SocketAddrV4>>
@@ -196,6 +199,7 @@ impl MasterServer {
             admin_limit_counter: Counter::new(ADMIN_LIMIT_CLEANUP_MAX),
             hash: cfg.hash,
             blocklist: Default::default(),
+            stats: Stats::new(cfg.stat),
         })
     }
 
@@ -218,6 +222,7 @@ impl MasterServer {
         self.update_map = cfg.client.update_map;
         self.admin_list = cfg.admin_list;
         self.hash = cfg.hash;
+        self.stats.update_config(cfg.stat);
 
         Ok(())
     }
@@ -245,6 +250,7 @@ impl MasterServer {
             let src = &buf[..n];
             if let Err(e) = self.handle_packet(from, src) {
                 debug!("{}: {}: \"{}\"", from, e, Str(src));
+                self.stats.on_error();
             }
         }
         Ok(())
@@ -255,6 +261,7 @@ impl MasterServer {
         self.challenges.clear();
         self.servers.clear();
         self.admin_challenges.clear();
+        self.stats.clear();
     }
 
     fn handle_server_packet(&mut self, from: SocketAddrV4, p: server::Packet) -> Result<(), Error> {
@@ -290,11 +297,13 @@ impl MasterServer {
                 }
                 if self.challenges.remove(&from).is_some() {
                     self.add_server(from, ServerInfo::new(&p));
+                    self.stats.on_server_add();
+                    self.stats.servers_count(self.servers.len());
                 }
                 self.remove_outdated_servers();
             }
             server::Packet::ServerRemove => {
-                // ignore
+                self.stats.on_server_del();
             }
             _ => {
                 return Err(Error::UnexpectedPacket);
@@ -326,6 +335,8 @@ impl MasterServer {
                     if p.filter.flags.contains(FilterFlags::NAT) {
                         self.send_client_to_nat_servers(from, iter)?;
                     }
+
+                    self.stats.on_query_servers();
                 }
             }
             game::Packet::GetServerInfo(_) => {
@@ -522,6 +533,7 @@ impl MasterServer {
             let now = self.now();
             self.servers
                 .retain(|_, v| v.is_valid(now, self.timeout.server));
+            self.stats.servers_count(self.servers.len());
         }
     }
 

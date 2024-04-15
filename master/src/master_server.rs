@@ -132,6 +132,10 @@ pub struct MasterServer {
     blocklist: HashSet<Ipv4Addr>,
 
     stats: Stats,
+
+    // temporary data
+    filtered_servers: Vec<SocketAddrV4>,
+    filtered_servers_nat: Vec<SocketAddrV4>,
 }
 
 fn resolve_socket_addr<A>(addr: A) -> io::Result<Option<SocketAddrV4>>
@@ -200,6 +204,9 @@ impl MasterServer {
             hash: cfg.hash,
             blocklist: Default::default(),
             stats: Stats::new(cfg.stat),
+
+            filtered_servers: Default::default(),
+            filtered_servers_nat: Default::default(),
         })
     }
 
@@ -319,21 +326,31 @@ impl MasterServer {
         match p {
             game::Packet::QueryServers(p) => {
                 if p.filter.clver.map_or(false, |v| v < self.clver) {
-                    let iter = std::iter::once(self.update_addr);
-                    self.send_server_list(from, p.filter.key, iter)?;
+                    self.send_server_list(from, p.filter.key, &[self.update_addr])?;
                 } else {
                     let now = self.now();
-                    let iter = self
-                        .servers
+
+                    self.filtered_servers.clear();
+                    self.filtered_servers_nat.clear();
+                    self.servers
                         .iter()
-                        .filter(|i| i.1.is_valid(now, self.timeout.server))
-                        .filter(|i| i.1.matches(*i.0, p.region, &p.filter))
-                        .map(|i| *i.0);
+                        .filter(|(addr, info)| {
+                            info.is_valid(now, self.timeout.server)
+                                && info.matches(**addr, p.region, &p.filter)
+                        })
+                        .for_each(|(addr, info)| {
+                            self.filtered_servers.push(*addr);
+                            if info.flags.contains(FilterFlags::NAT) {
+                                self.filtered_servers_nat.push(*addr);
+                            }
+                        });
 
-                    self.send_server_list(from, p.filter.key, iter.clone())?;
+                    self.send_server_list(from, p.filter.key, &self.filtered_servers)?;
 
-                    if p.filter.flags.contains(FilterFlags::NAT) {
-                        self.send_client_to_nat_servers(from, iter)?;
+                    if !p.filter.flags_mask.contains(FilterFlags::NAT)
+                        || p.filter.flags.contains(FilterFlags::NAT)
+                    {
+                        self.send_client_to_nat_servers(from, &self.filtered_servers_nat)?;
                     }
 
                     self.stats.on_query_servers();
@@ -537,12 +554,16 @@ impl MasterServer {
         }
     }
 
-    fn send_server_list<A, I>(&self, to: A, key: Option<u32>, iter: I) -> Result<(), Error>
+    fn send_server_list<A>(
+        &self,
+        to: A,
+        key: Option<u32>,
+        servers: &[SocketAddrV4],
+    ) -> Result<(), Error>
     where
         A: ToSocketAddrs,
-        I: Iterator<Item = SocketAddrV4>,
     {
-        let mut list = master::QueryServersResponse::new(iter, key);
+        let mut list = master::QueryServersResponse::new(servers.iter().copied(), key);
         loop {
             let mut buf = [0; MAX_PACKET_SIZE];
             let (n, is_end) = list.encode(&mut buf)?;
@@ -554,14 +575,15 @@ impl MasterServer {
         Ok(())
     }
 
-    fn send_client_to_nat_servers<I>(&self, to: SocketAddrV4, iter: I) -> Result<(), Error>
-    where
-        I: Iterator<Item = SocketAddrV4>,
-    {
+    fn send_client_to_nat_servers(
+        &self,
+        to: SocketAddrV4,
+        servers: &[SocketAddrV4],
+    ) -> Result<(), Error> {
         let mut buf = [0; 64];
         let n = master::ClientAnnounce::new(to).encode(&mut buf)?;
         let buf = &buf[..n];
-        for i in iter {
+        for i in servers {
             self.sock.send_to(buf, i)?;
         }
         Ok(())

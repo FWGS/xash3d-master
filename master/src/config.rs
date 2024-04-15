@@ -125,12 +125,12 @@ impl Default for TimeoutConfig {
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct ClientConfig {
-    #[serde(default)]
+    #[serde(default = "default_client_version")]
     #[serde(deserialize_with = "deserialize_version")]
     pub version: Version,
-    #[serde(default)]
+    #[serde(default = "default_client_update_map")]
     pub update_map: Box<str>,
-    #[serde(default)]
+    #[serde(default = "default_client_update_title")]
     pub update_title: Box<str>,
     #[serde(default)]
     pub update_addr: Option<Box<str>>,
@@ -139,9 +139,9 @@ pub struct ClientConfig {
 impl Default for ClientConfig {
     fn default() -> Self {
         Self {
-            version: Version::new(0, 19),
-            update_map: String::from("Update please").into_boxed_str(),
-            update_title: String::from("https://github.com/FWGS/xash3d-fwgs").into_boxed_str(),
+            version: default_client_version(),
+            update_map: default_client_update_map(),
+            update_title: default_client_update_title(),
             update_addr: None,
         }
     }
@@ -198,6 +198,18 @@ fn default_log_level() -> LevelFilter {
 
 fn default_server_ip() -> IpAddr {
     DEFAULT_MASTER_SERVER_IP
+}
+
+fn default_client_version() -> Version {
+    Version::new(0, 19)
+}
+
+fn default_client_update_map() -> Box<str> {
+    Box::from("Update please")
+}
+
+fn default_client_update_title() -> Box<str> {
+    Box::from("https://github.com/FWGS/xash3d-fwgs")
 }
 
 fn default_hash_key() -> Box<str> {

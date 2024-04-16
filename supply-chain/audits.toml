@@ -41,6 +41,11 @@ who = "Denis Drakhnia <numas13@gmail.com>"
 criteria = "safe-to-deploy"
 version = "0.1.5"
 
+[[audits.crossterm]]
+who = "Denis Drakhnia <numas13@gmail.com>"
+criteria = "safe-to-deploy"
+version = "0.25.0"
+
 [[audits.fastrand]]
 who = "Denis Drakhnia <numas13@gmail.com>"
 criteria = "safe-to-deploy"

@@ -61,6 +61,11 @@ who = "Denis Drakhnia <numas13@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "0.1.59 -> 0.1.60"
 
+[[audits.mio]]
+who = "Denis Drakhnia <numas13@gmail.com>"
+criteria = "safe-to-run"
+delta = "0.7.4 -> 0.8.11"
+
 [[audits.numtoa]]
 who = "Denis Drakhnia <numas13@gmail.com>"
 criteria = "safe-to-deploy"

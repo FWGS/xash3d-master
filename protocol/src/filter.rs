@@ -186,6 +186,15 @@ impl Filter<'_> {
         self.flags_mask.insert(flag);
     }
 
+    /// Test if all `other` flags are set in `flags_mask` and in `flags`.
+    pub fn contains_flags(&self, other: FilterFlags) -> Option<bool> {
+        if self.flags_mask.contains(other) {
+            Some(self.flags.contains(other))
+        } else {
+            None
+        }
+    }
+
     /// Returns `true` if a server matches the filter.
     pub fn matches(&self, _addr: SocketAddrV4, info: &ServerInfo) -> bool {
         !((info.flags & self.flags_mask) != self.flags

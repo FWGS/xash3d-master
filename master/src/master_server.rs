@@ -347,9 +347,9 @@ impl MasterServer {
 
                     self.send_server_list(from, p.filter.key, &self.filtered_servers)?;
 
-                    if !p.filter.flags_mask.contains(FilterFlags::NAT)
-                        || p.filter.flags.contains(FilterFlags::NAT)
-                    {
+                    // NOTE: If NAT is not set in a filter then by default the client is announced
+                    // to filtered servers behind NAT.
+                    if p.filter.contains_flags(FilterFlags::NAT).unwrap_or(true) {
                         self.send_client_to_nat_servers(from, &self.filtered_servers_nat)?;
                     }
 

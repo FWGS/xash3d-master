@@ -193,7 +193,7 @@ impl Default for StatConfig {
 }
 
 fn default_log_level() -> LevelFilter {
-    LevelFilter::Warn
+    LevelFilter::Info
 }
 
 fn default_server_ip() -> IpAddr {

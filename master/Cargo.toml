@@ -14,6 +14,7 @@ repository = "https://git.mentality.rip/numas13/xash3d-master"
 [features]
 default = ["logtime"]
 logtime = ["chrono"]
+stats = []
 
 [dependencies]
 thiserror = "1.0.49"

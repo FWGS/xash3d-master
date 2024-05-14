@@ -18,6 +18,8 @@
 ## Time in seconds before next admin request is allowed after wrong password
 #admin = 10
 
+# NOTE: require build with `stats` feature flag
+#
 #[stat]
 # Interval in seconds, set zero to disable
 #interval = 0

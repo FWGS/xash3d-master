@@ -63,6 +63,7 @@ pub fn parse() -> Result<Cli, Error> {
     );
     opts.optopt("p", "port", &port_help, "PORT");
     opts.optopt("c", "config", "config path", "PATH");
+    opts.optflag("", "dump-config", "print default config");
     opts.optopt("s", "stats-format", "stats format string", "FMT");
     opts.optopt("I", "stats-interval", "stats interval", "SECONDS");
 
@@ -75,6 +76,11 @@ pub fn parse() -> Result<Cli, Error> {
 
     if matches.opt_present("version") {
         print_version();
+        process::exit(0);
+    }
+
+    if matches.opt_present("dump-config") {
+        println!("{}", include_str!("../config/default.toml"));
         process::exit(0);
     }
 

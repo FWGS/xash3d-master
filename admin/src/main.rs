@@ -3,7 +3,7 @@
 
 mod cli;
 
-use std::io;
+use std::io::{self, Write};
 use std::net::UdpSocket;
 
 use blake2b_simd::Params;
@@ -24,7 +24,8 @@ fn read_password() -> Result<Option<String>, Error> {
     use crossterm::event::{read, Event, KeyCode, KeyEventKind, KeyModifiers};
     use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 
-    println!("Password:");
+    print!("Password: ");
+    io::stdout().flush().unwrap();
 
     enable_raw_mode()?;
 
@@ -63,6 +64,8 @@ fn read_password() -> Result<Option<String>, Error> {
     }
 
     disable_raw_mode()?;
+
+    println!();
 
     Ok(match buf.len() {
         0 => None,

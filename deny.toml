@@ -1,0 +1,41 @@
+[graph]
+# Collect metadata with `--all-features`.
+all-features = true
+
+[licenses]
+allow = [
+    "Apache-2.0 WITH LLVM-exception",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "CC0-1.0",
+    "LGPL-3.0",
+    "MIT",
+]
+exceptions = [
+    { allow = ["GPL-3.0"], crate = "xash3d-admin" },
+    { allow = ["GPL-3.0"], crate = "xash3d-master" },
+    { allow = ["GPL-3.0"], crate = "xash3d-query" },
+    { allow = ["Unicode-DFS-2016"], crate = "unicode-ident" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = [
+    "https://github.com/rust-lang/crates.io-index"
+]
+allow-git = []
+
+[bans]
+# Deny multiple versions of the same crate.
+multiple-versions = "deny"
+# Deny if a crate version requirement is `*`.
+wildcards = "deny"
+# Skip duplicate detection for crates.
+skip = [
+    { crate = "bitflags@1.3.2", reason = "dependency of crosstem@0.25.0 required for MSRV 1.56" },
+]
+# Skip duplicate detection for crate and transitive dependencies.
+skip-tree = [
+    { crate = "windows-sys@0.48", reason = "dependency of crosstem@0.25.0 required for MSRV 1.56" },
+]

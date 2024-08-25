@@ -4,7 +4,7 @@
 //! Game client packets.
 
 use std::fmt;
-use std::net::SocketAddrV4;
+use std::net::SocketAddr;
 
 use crate::cursor::{Cursor, CursorMut};
 use crate::filter::Filter;
@@ -17,7 +17,7 @@ pub struct QueryServers<T> {
     /// Servers must be from the `region`.
     pub region: Region,
     /// Last received server address __(not used)__.
-    pub last: SocketAddrV4,
+    pub last: SocketAddr,
     /// Select only servers that match the `filter`.
     pub filter: T,
 }
@@ -131,13 +131,13 @@ mod tests {
     use super::*;
     use crate::filter::{FilterFlags, Version};
     use crate::wrappers::Str;
-    use std::net::Ipv4Addr;
+    use std::net::{IpAddr, Ipv4Addr};
 
     #[test]
     fn query_servers() {
         let p = QueryServers {
             region: Region::RestOfTheWorld,
-            last: SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0),
+            last: SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0),
             filter: Filter {
                 gamedir: Some(Str(&b"valve"[..])),
                 map: Some(Str(&b"crossfire"[..])),
@@ -157,7 +157,7 @@ mod tests {
     fn query_servers_filter_bug() {
         let p = QueryServers {
             region: Region::RestOfTheWorld,
-            last: SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0),
+            last: SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0),
             filter: Filter {
                 gamedir: None,
                 protocol: Some(48),

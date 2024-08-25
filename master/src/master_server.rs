@@ -1,25 +1,87 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // SPDX-FileCopyrightText: 2023 Denis Drakhnia <numas13@gmail.com>
 
-use std::collections::hash_map;
-use std::io;
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, ToSocketAddrs, UdpSocket};
-use std::ops::Deref;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::{
+    cmp::Eq,
+    collections::hash_map,
+    fmt::Display,
+    hash::Hash,
+    io,
+    net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, ToSocketAddrs, UdpSocket},
+    ops::Deref,
+    str::FromStr,
+    sync::atomic::{AtomicBool, Ordering},
+    time::{Duration, Instant},
+};
 
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use blake2b_simd::Params;
 use fastrand::Rng;
 use log::{debug, error, info, trace, warn};
 use thiserror::Error;
-use xash3d_protocol::filter::{Filter, FilterFlags, Version};
-use xash3d_protocol::server::Region;
-use xash3d_protocol::wrappers::Str;
-use xash3d_protocol::{admin, game, master, server, Error as ProtocolError, ServerInfo};
+use xash3d_protocol::{
+    admin,
+    filter::{Filter, FilterFlags, Version},
+    game,
+    master::{self, ServerAddress},
+    server,
+    server::Region,
+    wrappers::Str,
+    Error as ProtocolError, ServerInfo,
+};
 
-use crate::config::{self, Config};
-use crate::stats::Stats;
+use crate::{
+    config::{self, Config},
+    stats::Stats,
+};
+
+pub trait AddrExt: Sized + Eq + Hash + Display + Copy + ToSocketAddrs + ServerAddress {
+    type Ip: Eq + Hash + Display + Copy + FromStr;
+
+    fn extract(addr: SocketAddr) -> Result<Self, SocketAddr>;
+    fn ip(&self) -> &Self::Ip;
+    fn wrap(self) -> SocketAddr;
+}
+
+impl AddrExt for SocketAddrV4 {
+    type Ip = Ipv4Addr;
+
+    fn extract(addr: SocketAddr) -> Result<Self, SocketAddr> {
+        if let SocketAddr::V4(addr) = addr {
+            Ok(addr)
+        } else {
+            Err(addr)
+        }
+    }
+
+    fn ip(&self) -> &Self::Ip {
+        SocketAddrV4::ip(self)
+    }
+
+    fn wrap(self) -> SocketAddr {
+        SocketAddr::V4(self)
+    }
+}
+
+impl AddrExt for SocketAddrV6 {
+    type Ip = Ipv6Addr;
+
+    fn extract(addr: SocketAddr) -> Result<Self, SocketAddr> {
+        if let SocketAddr::V6(addr) = addr {
+            Ok(addr)
+        } else {
+            Err(addr)
+        }
+    }
+
+    fn ip(&self) -> &Self::Ip {
+        SocketAddrV6::ip(self)
+    }
+
+    fn wrap(self) -> SocketAddr {
+        SocketAddr::V6(self)
+    }
+}
 
 /// The maximum size of UDP packets.
 const MAX_PACKET_SIZE: usize = 512;
@@ -70,8 +132,8 @@ impl<T> Entry<T> {
 }
 
 impl Entry<ServerInfo> {
-    fn matches(&self, addr: SocketAddrV4, region: Region, filter: &Filter) -> bool {
-        self.region == region && filter.matches(addr, &self.value)
+    fn matches<Addr: AddrExt>(&self, addr: Addr, region: Region, filter: &Filter) -> bool {
+        self.region == region && filter.matches(addr.wrap(), &self.value)
     }
 }
 
@@ -104,11 +166,11 @@ impl Counter {
     }
 }
 
-pub struct MasterServer {
+pub struct MasterServer<Addr: AddrExt> {
     sock: UdpSocket,
-    challenges: HashMap<SocketAddrV4, Entry<u32>>,
+    challenges: HashMap<Addr, Entry<u32>>,
     challenges_counter: Counter,
-    servers: HashMap<SocketAddrV4, Entry<ServerInfo>>,
+    servers: HashMap<Addr, Entry<ServerInfo>>,
     servers_counter: Counter,
     max_servers_per_ip: u16,
     rng: Rng,
@@ -119,39 +181,38 @@ pub struct MasterServer {
     clver: Version,
     update_title: Box<str>,
     update_map: Box<str>,
-    update_addr: SocketAddrV4,
+    update_addr: SocketAddr,
 
-    admin_challenges: HashMap<Ipv4Addr, Entry<(u32, u32)>>,
+    admin_challenges: HashMap<Addr::Ip, Entry<(u32, u32)>>,
     admin_challenges_counter: Counter,
     admin_list: Box<[config::AdminConfig]>,
     // rate limit if hash is invalid
-    admin_limit: HashMap<Ipv4Addr, Entry<()>>,
+    admin_limit: HashMap<Addr::Ip, Entry<()>>,
     admin_limit_counter: Counter,
     hash: config::HashConfig,
 
-    blocklist: HashSet<Ipv4Addr>,
+    blocklist: HashSet<Addr::Ip>,
 
     stats: Stats,
 
     // temporary data
-    filtered_servers: Vec<SocketAddrV4>,
-    filtered_servers_nat: Vec<SocketAddrV4>,
+    filtered_servers: Vec<Addr>,
+    filtered_servers_nat: Vec<Addr>,
 }
 
-fn resolve_socket_addr<A>(addr: A) -> io::Result<Option<SocketAddrV4>>
+fn resolve_socket_addr<A>(addr: A, is_ipv4: bool) -> io::Result<Option<SocketAddr>>
 where
     A: ToSocketAddrs,
 {
     for i in addr.to_socket_addrs()? {
-        match i {
-            SocketAddr::V4(i) => return Ok(Some(i)),
-            SocketAddr::V6(_) => {}
+        if i.is_ipv4() == is_ipv4 {
+            return Ok(Some(i));
         }
     }
     Ok(None)
 }
 
-fn resolve_update_addr(cfg: &Config, local_addr: SocketAddr) -> SocketAddrV4 {
+fn resolve_update_addr(cfg: &Config, local_addr: SocketAddr) -> SocketAddr {
     if let Some(s) = cfg.client.update_addr.as_deref() {
         let addr = if !s.contains(':') {
             format!("{}:{}", s, local_addr.port())
@@ -159,28 +220,57 @@ fn resolve_update_addr(cfg: &Config, local_addr: SocketAddr) -> SocketAddrV4 {
             s.to_owned()
         };
 
-        match resolve_socket_addr(&addr) {
+        match resolve_socket_addr(&addr, local_addr.is_ipv4()) {
             Ok(Some(x)) => return x,
-            Ok(None) => error!("Update address: failed to resolve IPv4 for \"{}\"", addr),
+            Ok(None) => error!("Update address: failed to resolve IP for \"{}\"", addr),
             Err(e) => error!("Update address: {}", e),
         }
     }
+    local_addr
+}
 
-    match local_addr {
-        SocketAddr::V4(x) => x,
-        SocketAddr::V6(_) => todo!(),
+pub enum Master {
+    V4(MasterServer<SocketAddrV4>),
+    V6(MasterServer<SocketAddrV6>),
+}
+
+impl Master {
+    pub fn new(cfg: Config) -> Result<Self, Error> {
+        match SocketAddr::new(cfg.server.ip, cfg.server.port) {
+            SocketAddr::V4(addr) => MasterServer::new(cfg, addr).map(Self::V4),
+            SocketAddr::V6(addr) => MasterServer::new(cfg, addr).map(Self::V6),
+        }
+    }
+
+    pub fn update_config(&mut self, cfg: Config) -> Result<(), Error> {
+        let cfg = match self {
+            Self::V4(inner) => inner.update_config(cfg)?,
+            Self::V6(inner) => inner.update_config(cfg)?,
+        };
+        if let Some(cfg) = cfg {
+            info!("Server IP version changed, full restart");
+            *self = Self::new(cfg)?;
+        }
+        Ok(())
+    }
+
+    pub fn run(&mut self, sig_flag: &AtomicBool) -> Result<(), Error> {
+        match self {
+            Self::V4(inner) => inner.run(sig_flag),
+            Self::V6(inner) => inner.run(sig_flag),
+        }
     }
 }
 
-impl MasterServer {
-    pub fn new(cfg: Config) -> Result<Self, Error> {
-        let addr = SocketAddr::new(cfg.server.ip, cfg.server.port);
+impl<Addr: AddrExt> MasterServer<Addr> {
+    pub fn new(cfg: Config, addr: Addr) -> Result<Self, Error> {
         info!("Listen address: {}", addr);
+
         let sock = UdpSocket::bind(addr).map_err(Error::BindSocket)?;
         // make socket interruptable by singals
         sock.set_read_timeout(Some(Duration::from_secs(u32::MAX as u64)))?;
 
-        let update_addr = resolve_update_addr(&cfg, addr);
+        let update_addr = resolve_update_addr(&cfg, addr.wrap());
 
         Ok(Self {
             sock,
@@ -210,10 +300,16 @@ impl MasterServer {
         })
     }
 
-    pub fn update_config(&mut self, cfg: Config) -> Result<(), Error> {
-        let local_addr = self.sock.local_addr()?;
+    fn local_addr(&self) -> io::Result<SocketAddr> {
+        self.sock.local_addr()
+    }
+
+    pub fn update_config(&mut self, cfg: Config) -> Result<Option<Config>, Error> {
+        let local_addr = self.local_addr()?;
         let addr = SocketAddr::new(cfg.server.ip, cfg.server.port);
-        if local_addr != addr {
+        if local_addr.is_ipv4() != addr.is_ipv4() {
+            return Ok(Some(cfg));
+        } else if local_addr != addr {
             info!("Listen address: {}", addr);
             self.sock = UdpSocket::bind(addr).map_err(Error::BindSocket)?;
             // make socket interruptable by singals
@@ -231,7 +327,7 @@ impl MasterServer {
         self.hash = cfg.hash;
         self.stats.update_config(cfg.stat);
 
-        Ok(())
+        Ok(None)
     }
 
     pub fn run(&mut self, sig_flag: &AtomicBool) -> Result<(), Error> {
@@ -246,12 +342,9 @@ impl MasterServer {
                 },
             };
 
-            let from = match from {
-                SocketAddr::V4(a) => a,
-                _ => {
-                    warn!("{}: Received message from IPv6, unimplemented", from);
-                    continue;
-                }
+            let from = match Addr::extract(from) {
+                Ok(from) => from,
+                Err(_) => continue,
             };
 
             let src = &buf[..n];
@@ -271,7 +364,7 @@ impl MasterServer {
         self.stats.clear();
     }
 
-    fn handle_server_packet(&mut self, from: SocketAddrV4, p: server::Packet) -> Result<(), Error> {
+    fn handle_server_packet(&mut self, from: Addr, p: server::Packet) -> Result<(), Error> {
         trace!("{}: recv {:?}", from, p);
 
         match p {
@@ -320,13 +413,20 @@ impl MasterServer {
         Ok(())
     }
 
-    fn handle_game_packet(&mut self, from: SocketAddrV4, p: game::Packet) -> Result<(), Error> {
+    fn handle_game_packet(&mut self, from: Addr, p: game::Packet) -> Result<(), Error> {
         trace!("{}: recv {:?}", from, p);
 
         match p {
             game::Packet::QueryServers(p) => {
                 if p.filter.clver.map_or(false, |v| v < self.clver) {
-                    self.send_server_list(from, p.filter.key, &[self.update_addr])?;
+                    match self.update_addr {
+                        SocketAddr::V4(addr) => {
+                            self.send_server_list(from, p.filter.key, &[addr])?;
+                        }
+                        SocketAddr::V6(addr) => {
+                            self.send_server_list(from, p.filter.key, &[addr])?;
+                        }
+                    }
                 } else {
                     let now = self.now();
 
@@ -376,7 +476,7 @@ impl MasterServer {
         Ok(())
     }
 
-    fn handle_admin_packet(&mut self, from: SocketAddrV4, p: admin::Packet) -> Result<(), Error> {
+    fn handle_admin_packet(&mut self, from: Addr, p: admin::Packet) -> Result<(), Error> {
         trace!("{}: recv {:?}", from, p);
 
         let now = self.now();
@@ -449,7 +549,7 @@ impl MasterServer {
         Ok(())
     }
 
-    fn handle_packet(&mut self, from: SocketAddrV4, src: &[u8]) -> Result<(), Error> {
+    fn handle_packet(&mut self, from: Addr, src: &[u8]) -> Result<(), Error> {
         if self.is_blocked(from.ip()) {
             return Ok(());
         }
@@ -479,7 +579,7 @@ impl MasterServer {
         self.start_time.elapsed().as_secs() as u32
     }
 
-    fn add_challenge(&mut self, addr: SocketAddrV4) -> u32 {
+    fn add_challenge(&mut self, addr: Addr) -> u32 {
         let x = self.rng.u32(..);
         let entry = Entry::new(self.now(), x);
         self.challenges.insert(addr, entry);
@@ -494,7 +594,7 @@ impl MasterServer {
         }
     }
 
-    fn admin_challenge_add(&mut self, addr: SocketAddrV4) -> (u32, u32) {
+    fn admin_challenge_add(&mut self, addr: Addr) -> (u32, u32) {
         let x = self.rng.u32(..);
         let y = self.rng.u32(..);
         let entry = Entry::new(self.now(), (x, y));
@@ -502,7 +602,7 @@ impl MasterServer {
         (x, y)
     }
 
-    fn admin_challenge_remove(&mut self, addr: SocketAddrV4) {
+    fn admin_challenge_remove(&mut self, addr: Addr) {
         self.admin_challenges.remove(addr.ip());
     }
 
@@ -523,11 +623,11 @@ impl MasterServer {
         }
     }
 
-    fn count_servers(&self, addr: &Ipv4Addr) -> u16 {
-        self.servers.keys().filter(|i| i.ip() == addr).count() as u16
+    fn count_servers(&self, ip: &Addr::Ip) -> u16 {
+        self.servers.keys().filter(|i| i.ip() == ip).count() as u16
     }
 
-    fn add_server(&mut self, addr: SocketAddrV4, server: ServerInfo) {
+    fn add_server(&mut self, addr: Addr, server: ServerInfo) {
         let now = self.now();
         match self.servers.entry(addr) {
             hash_map::Entry::Occupied(mut e) => {
@@ -554,34 +654,25 @@ impl MasterServer {
         }
     }
 
-    fn send_server_list<A>(
-        &self,
-        to: A,
-        key: Option<u32>,
-        servers: &[SocketAddrV4],
-    ) -> Result<(), Error>
+    fn send_server_list<A, S>(&self, to: A, key: Option<u32>, servers: &[S]) -> Result<(), Error>
     where
         A: ToSocketAddrs,
+        S: ServerAddress,
     {
-        let mut list = master::QueryServersResponse::new(servers.iter().copied(), key);
-        loop {
-            let mut buf = [0; MAX_PACKET_SIZE];
-            let (n, is_end) = list.encode(&mut buf)?;
+        let mut buf = [0; MAX_PACKET_SIZE];
+        let mut offset = 0;
+        let mut list = master::QueryServersResponse::new(key);
+        while offset < servers.len() {
+            let (n, c) = list.encode(&mut buf, &servers[offset..])?;
+            offset += c;
             self.sock.send_to(&buf[..n], &to)?;
-            if is_end {
-                break;
-            }
         }
         Ok(())
     }
 
-    fn send_client_to_nat_servers(
-        &self,
-        to: SocketAddrV4,
-        servers: &[SocketAddrV4],
-    ) -> Result<(), Error> {
+    fn send_client_to_nat_servers(&self, to: Addr, servers: &[Addr]) -> Result<(), Error> {
         let mut buf = [0; 64];
-        let n = master::ClientAnnounce::new(to).encode(&mut buf)?;
+        let n = master::ClientAnnounce::new(to.wrap()).encode(&mut buf)?;
         let buf = &buf[..n];
         for i in servers {
             self.sock.send_to(buf, i)?;
@@ -590,15 +681,19 @@ impl MasterServer {
     }
 
     #[inline]
-    fn is_blocked(&self, ip: &Ipv4Addr) -> bool {
+    fn is_blocked(&self, ip: &Addr::Ip) -> bool {
         self.blocklist.contains(ip)
     }
 
     fn admin_command(&mut self, cmd: &str) {
         let args: Vec<_> = cmd.split(' ').collect();
 
-        fn helper<F: FnMut(&str, Ipv4Addr)>(args: &[&str], mut op: F) {
-            let iter = args.iter().map(|i| (i, i.parse::<Ipv4Addr>()));
+        fn helper<Addr, F>(args: &[&str], mut op: F)
+        where
+            Addr: AddrExt,
+            F: FnMut(&str, Addr::Ip),
+        {
+            let iter = args.iter().map(|i| (i, i.parse::<Addr::Ip>()));
             for (i, ip) in iter {
                 match ip {
                     Ok(ip) => op(i, ip),
@@ -609,14 +704,14 @@ impl MasterServer {
 
         match args[0] {
             "ban" => {
-                helper(&args[1..], |_, ip| {
+                helper::<Addr, _>(&args[1..], |_, ip| {
                     if self.blocklist.insert(ip) {
                         info!("ban ip: {}", ip);
                     }
                 });
             }
             "unban" => {
-                helper(&args[1..], |_, ip| {
+                helper::<Addr, _>(&args[1..], |_, ip| {
                     if self.blocklist.remove(&ip) {
                         info!("unban ip: {}", ip);
                     }

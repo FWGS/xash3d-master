@@ -3,7 +3,7 @@
 
 //! Master server packets.
 
-use std::net::{Ipv4Addr, SocketAddrV4};
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 
 use super::cursor::{Cursor, CursorMut};
 use super::Error;
@@ -58,6 +58,54 @@ impl ChallengeResponse {
     }
 }
 
+/// Helper trait for dealing with server addresses.
+pub trait ServerAddress: Sized {
+    /// Size of IP and port in bytes.
+    fn size() -> usize;
+
+    /// Read address from a cursor.
+    fn get(cur: &mut Cursor) -> Result<Self, Error>;
+
+    /// Write address to a cursor.
+    fn put(&self, cur: &mut CursorMut) -> Result<(), Error>;
+}
+
+impl ServerAddress for SocketAddrV4 {
+    fn size() -> usize {
+        6
+    }
+
+    fn get(cur: &mut Cursor) -> Result<Self, Error> {
+        let ip = Ipv4Addr::from(cur.get_array()?);
+        let port = cur.get_u16_be()?;
+        Ok(SocketAddrV4::new(ip, port))
+    }
+
+    fn put(&self, cur: &mut CursorMut) -> Result<(), Error> {
+        cur.put_array(&self.ip().octets())?;
+        cur.put_u16_be(self.port())?;
+        Ok(())
+    }
+}
+
+impl ServerAddress for SocketAddrV6 {
+    fn size() -> usize {
+        18
+    }
+
+    fn get(cur: &mut Cursor) -> Result<Self, Error> {
+        let ip = Ipv6Addr::from(cur.get_array()?);
+        let port = cur.get_u16_be()?;
+        Ok(SocketAddrV6::new(ip, port, 0, 0))
+    }
+
+    fn put(&self, cur: &mut CursorMut) -> Result<(), Error> {
+        cur.put_array(&self.ip().octets())?;
+        cur.put_u16_be(self.port())?;
+        Ok(())
+    }
+}
+
 /// Game server addresses list.
 #[derive(Clone, Debug, PartialEq)]
 pub struct QueryServersResponse<I> {
@@ -76,33 +124,31 @@ impl<'a> QueryServersResponse<&'a [u8]> {
     pub fn decode(src: &'a [u8]) -> Result<Self, Error> {
         let mut cur = Cursor::new(src);
         cur.expect(QueryServersResponse::HEADER)?;
-        if cur.remaining() % 6 != 0 {
-            return Err(Error::InvalidPacket);
-        }
-        let s = cur.get_bytes(cur.remaining())?;
+        let s = cur.end();
 
         // extra header for key sent in QueryServers packet
-        let (s, key) = if s.len() >= 6 && s[0] == 0x7f && s[5] == 8 {
-            (&s[6..], Some(u32::from_le_bytes([s[1], s[2], s[3], s[4]])))
+        let (inner, key) = if s.len() >= 6 && s[0] == 0x7f && s[5] == 8 {
+            let key = u32::from_le_bytes([s[1], s[2], s[3], s[4]]);
+            (&s[6..], Some(key))
         } else {
             (s, None)
         };
 
-        let inner = if s.ends_with(&[0; 6]) {
-            &s[..s.len() - 6]
-        } else {
-            s
-        };
         Ok(Self { inner, key })
     }
 
     /// Iterator over game server addresses.
-    pub fn iter(&self) -> impl 'a + Iterator<Item = SocketAddrV4> {
+    pub fn iter<A>(&self) -> impl 'a + Iterator<Item = A>
+    where
+        A: ServerAddress,
+    {
         let mut cur = Cursor::new(self.inner);
-        (0..self.inner.len() / 6).map(move |_| {
-            let ip = Ipv4Addr::from(cur.get_array().unwrap());
-            let port = cur.get_u16_be().unwrap();
-            SocketAddrV4::new(ip, port)
+        std::iter::from_fn(move || {
+            if cur.remaining() == A::size() && cur.end().ends_with(&[0; 2]) {
+                // skip last address with port 0
+                return None;
+            }
+            A::get(&mut cur).ok()
         })
     }
 
@@ -112,13 +158,10 @@ impl<'a> QueryServersResponse<&'a [u8]> {
     }
 }
 
-impl<I> QueryServersResponse<I>
-where
-    I: Iterator<Item = SocketAddrV4>,
-{
+impl QueryServersResponse<()> {
     /// Creates a new `QueryServersResponse`.
-    pub fn new(iter: I, key: Option<u32>) -> Self {
-        Self { inner: iter, key }
+    pub fn new(key: Option<u32>) -> Self {
+        Self { inner: (), key }
     }
 
     /// Encode packet to `buf`.
@@ -127,7 +170,10 @@ where
     /// multiple times until the end flag equals `true`.
     ///
     /// Returns how many bytes was written in `buf` and the end flag.
-    pub fn encode(&mut self, buf: &mut [u8]) -> Result<(usize, bool), Error> {
+    pub fn encode<A>(&mut self, buf: &mut [u8], list: &[A]) -> Result<(usize, usize), Error>
+    where
+        A: ServerAddress,
+    {
         let mut cur = CursorMut::new(buf);
         cur.put_bytes(QueryServersResponse::HEADER)?;
         if let Some(key) = self.key {
@@ -135,19 +181,20 @@ where
             cur.put_u32_le(key)?;
             cur.put_u8(8)?;
         }
-        let mut is_end = false;
-        while cur.remaining() >= 12 {
-            match self.inner.next() {
-                Some(i) => {
-                    cur.put_array(&i.ip().octets())?.put_u16_be(i.port())?;
-                }
-                None => {
-                    is_end = true;
-                    break;
-                }
+        let mut count = 0;
+        let mut iter = list.iter();
+        while cur.remaining() >= A::size() * 2 {
+            if let Some(i) = iter.next() {
+                i.put(&mut cur)?;
+                count += 1;
+            } else {
+                break;
             }
         }
-        Ok((cur.put_array(&[0; 6])?.pos(), is_end))
+        for _ in 0..A::size() {
+            cur.put_u8(0)?;
+        }
+        Ok((cur.pos(), count))
     }
 }
 
@@ -155,7 +202,7 @@ where
 #[derive(Clone, Debug, PartialEq)]
 pub struct ClientAnnounce {
     /// Address of the client.
-    pub addr: SocketAddrV4,
+    pub addr: SocketAddr,
 }
 
 impl ClientAnnounce {
@@ -163,7 +210,7 @@ impl ClientAnnounce {
     pub const HEADER: &'static [u8] = b"\xff\xff\xff\xffc ";
 
     /// Creates a new `ClientAnnounce`.
-    pub fn new(addr: SocketAddrV4) -> Self {
+    pub fn new(addr: SocketAddr) -> Self {
         Self { addr }
     }
 
@@ -296,18 +343,39 @@ mod tests {
     }
 
     #[test]
-    fn query_servers_response() {
-        let servers: &[SocketAddrV4] = &[
+    fn query_servers_response_ipv4() {
+        type Addr = SocketAddrV4;
+        let servers: &[Addr] = &[
             "1.2.3.4:27001".parse().unwrap(),
             "1.2.3.4:27002".parse().unwrap(),
             "1.2.3.4:27003".parse().unwrap(),
             "1.2.3.4:27004".parse().unwrap(),
         ];
-        let mut p = QueryServersResponse::new(servers.iter().cloned(), Some(0xdeadbeef));
+        let mut p = QueryServersResponse::new(Some(0xdeadbeef));
         let mut buf = [0; 512];
-        let (n, _) = p.encode(&mut buf).unwrap();
+        let (n, c) = p.encode(&mut buf, servers).unwrap();
+        assert_eq!(c, servers.len());
+        assert_eq!(n, 12 + Addr::size() * (servers.len() + 1));
         let e = QueryServersResponse::decode(&buf[..n]).unwrap();
-        assert_eq!(e.iter().collect::<Vec<_>>(), servers);
+        assert_eq!(e.iter::<Addr>().collect::<Vec<_>>(), servers);
+    }
+
+    #[test]
+    fn query_servers_response_ipv6() {
+        type Addr = SocketAddrV6;
+        let servers: &[Addr] = &[
+            "[::1]:27001".parse().unwrap(),
+            "[::2]:27002".parse().unwrap(),
+            "[::3]:27003".parse().unwrap(),
+            "[::4]:27004".parse().unwrap(),
+        ];
+        let mut p = QueryServersResponse::new(Some(0xdeadbeef));
+        let mut buf = [0; 512];
+        let (n, c) = p.encode(&mut buf, servers).unwrap();
+        assert_eq!(c, servers.len());
+        assert_eq!(n, 12 + Addr::size() * (servers.len() + 1));
+        let e = QueryServersResponse::decode(&buf[..n]).unwrap();
+        assert_eq!(e.iter::<Addr>().collect::<Vec<_>>(), servers);
     }
 
     #[test]

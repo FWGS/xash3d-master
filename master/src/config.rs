@@ -1,18 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // SPDX-FileCopyrightText: 2023 Denis Drakhnia <numas13@gmail.com>
 
-use std::fs;
-use std::io;
-use std::net::{IpAddr, Ipv4Addr};
-use std::path::Path;
+use std::{
+    fs, io,
+    net::{IpAddr, Ipv4Addr},
+    path::Path,
+};
 
 use log::LevelFilter;
 use serde::{de::Error as _, Deserialize, Deserializer};
 use thiserror::Error;
-use xash3d_protocol::admin;
-use xash3d_protocol::filter::Version;
+use xash3d_protocol::{admin, filter::Version};
 
-pub const DEFAULT_MASTER_SERVER_IP: IpAddr = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0));
+pub const DEFAULT_MASTER_SERVER_IP: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
+
 pub const DEFAULT_MASTER_SERVER_PORT: u16 = 27010;
 pub const DEFAULT_CHALLENGE_TIMEOUT: u32 = 10;
 pub const DEFAULT_SERVER_TIMEOUT: u32 = 300;

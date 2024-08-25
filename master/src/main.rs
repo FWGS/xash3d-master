@@ -9,9 +9,13 @@ mod logger;
 mod master_server;
 mod stats;
 
-use std::process;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::{
+    process,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+};
 
 use log::{error, info};
 #[cfg(not(windows))]
@@ -19,7 +23,7 @@ use signal_hook::{consts::signal::*, flag as signal_flag};
 
 use crate::cli::Cli;
 use crate::config::Config;
-use crate::master_server::{Error, MasterServer};
+use crate::master_server::{Error, Master};
 
 fn load_config(cli: &Cli) -> Result<Config, config::Error> {
     let mut cfg = match cli.config_path {
@@ -64,7 +68,7 @@ fn run() -> Result<(), Error> {
         process::exit(1);
     });
 
-    let mut master = MasterServer::new(cfg)?;
+    let mut master = Master::new(cfg)?;
     let sig_flag = Arc::new(AtomicBool::new(false));
     // XXX: Windows does not support SIGUSR1.
     #[cfg(not(windows))]

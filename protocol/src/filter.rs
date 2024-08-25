@@ -30,7 +30,7 @@
 //! * Is not protected by a password
 
 use std::fmt;
-use std::net::SocketAddrV4;
+use std::net::SocketAddr;
 use std::str::FromStr;
 
 use bitflags::bitflags;
@@ -196,7 +196,8 @@ impl Filter<'_> {
     }
 
     /// Returns `true` if a server matches the filter.
-    pub fn matches(&self, _addr: SocketAddrV4, info: &ServerInfo) -> bool {
+    pub fn matches(&self, _addr: SocketAddr, info: &ServerInfo) -> bool {
+        // TODO: match addr
         !((info.flags & self.flags_mask) != self.flags
             || self.gamedir.map_or(false, |s| *s != &*info.gamedir)
             || self.map.map_or(false, |s| *s != &*info.map)
@@ -308,6 +309,7 @@ mod tests {
     use super::*;
     use crate::cursor::CursorMut;
     use crate::wrappers::Str;
+    use std::net::SocketAddr;
 
     macro_rules! tests {
         ($($name:ident$(($($predefined_f:ident: $predefined_v:expr),+ $(,)?))? {
@@ -450,7 +452,7 @@ mod tests {
     macro_rules! servers {
         ($($addr:expr => $info:expr $(=> $func:expr)?)+) => (
             [$({
-                let addr = $addr.parse::<SocketAddrV4>().unwrap();
+                let addr = $addr.parse::<SocketAddr>().unwrap();
                 let mut buf = [0; 512];
                 let n = CursorMut::new(&mut buf)
                     .put_bytes(ServerAdd::HEADER).unwrap()

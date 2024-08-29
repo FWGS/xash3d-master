@@ -1,7 +1,7 @@
 [package]
 name = "xash3d-admin"
 description = "Admin tool for Xash3D master server"
-version = "0.1.0"
+version = "0.2.0"
 license = "GPL-3.0-only"
 keywords = ["xash3d"]
 categories = ["command-line-utilities"]
@@ -16,4 +16,4 @@ thiserror = "1.0.49"
 getopts = "0.2.21"
 crossterm = "0.25.0"
 blake2b_simd = "=1.0.0"
-xash3d-protocol = { path = "../protocol", version = "0.1.0" }
+xash3d-protocol = { path = "../protocol", version = "0.2.0" }

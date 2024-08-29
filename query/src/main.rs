@@ -265,7 +265,7 @@ impl<'a> Scan<'a> {
         let mut buf = [0; 512];
         let packet = game::QueryServers {
             region: server::Region::RestOfTheWorld,
-            last: SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0),
+            last: SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0)),
             filter: self.cli.filter.as_str(),
         };
         let n = packet.encode(&mut buf)?;
@@ -306,7 +306,7 @@ impl<'a> Scan<'a> {
             if self.is_master(&from) {
                 if let Ok(packet) = master::QueryServersResponse::decode(&buf[..n]) {
                     if self.check_key(&from, packet.key) {
-                        set.extend(packet.iter());
+                        set.extend(packet.iter::<SocketAddrV4>());
                     }
                 } else {
                     eprintln!(

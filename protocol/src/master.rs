@@ -166,10 +166,7 @@ impl QueryServersResponse<()> {
 
     /// Encode packet to `buf`.
     ///
-    /// If `buf` has not enougth size to hold all addresses the method must be called
-    /// multiple times until the end flag equals `true`.
-    ///
-    /// Returns how many bytes was written in `buf` and the end flag.
+    /// Returns number of bytes written into `buf` and how many items was written.
     pub fn encode<A>(&mut self, buf: &mut [u8], list: &[A]) -> Result<(usize, usize), Error>
     where
         A: ServerAddress,

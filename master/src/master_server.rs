@@ -41,6 +41,8 @@ pub trait AddrExt: Sized + Eq + Hash + Display + Copy + ToSocketAddrs + ServerAd
     fn extract(addr: SocketAddr) -> Result<Self, SocketAddr>;
     fn ip(&self) -> &Self::Ip;
     fn wrap(self) -> SocketAddr;
+
+    fn mtu() -> usize;
 }
 
 impl AddrExt for SocketAddrV4 {
@@ -60,6 +62,11 @@ impl AddrExt for SocketAddrV4 {
 
     fn wrap(self) -> SocketAddr {
         SocketAddr::V4(self)
+    }
+
+    #[inline(always)]
+    fn mtu() -> usize {
+        512
     }
 }
 
@@ -81,10 +88,15 @@ impl AddrExt for SocketAddrV6 {
     fn wrap(self) -> SocketAddr {
         SocketAddr::V6(self)
     }
+
+    #[inline(always)]
+    fn mtu() -> usize {
+        MAX_PACKET_SIZE
+    }
 }
 
 /// The maximum size of UDP packets.
-const MAX_PACKET_SIZE: usize = 512;
+const MAX_PACKET_SIZE: usize = 1280;
 
 /// How many cleanup calls should be skipped before removing outdated servers.
 const SERVER_CLEANUP_MAX: usize = 100;
@@ -333,7 +345,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
     pub fn run(&mut self, sig_flag: &AtomicBool) -> Result<(), Error> {
         let mut buf = [0; MAX_PACKET_SIZE];
         while !sig_flag.load(Ordering::Relaxed) {
-            let (n, from) = match self.sock.recv_from(&mut buf) {
+            let (n, from) = match self.sock.recv_from(&mut buf[..Addr::mtu()]) {
                 Ok(x) => x,
                 Err(e) => match e.kind() {
                     io::ErrorKind::Interrupted => break,
@@ -468,7 +480,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
                 };
                 trace!("{}: send {:?}", from, p);
                 let mut buf = [0; MAX_PACKET_SIZE];
-                let n = p.encode(&mut buf)?;
+                let n = p.encode(&mut buf[..Addr::mtu()])?;
                 self.sock.send_to(&buf[..n], from)?;
             }
         }
@@ -663,7 +675,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         let mut offset = 0;
         let mut list = master::QueryServersResponse::new(key);
         while offset < servers.len() {
-            let (n, c) = list.encode(&mut buf, &servers[offset..])?;
+            let (n, c) = list.encode(&mut buf[..Addr::mtu()], &servers[offset..])?;
             offset += c;
             self.sock.send_to(&buf[..n], &to)?;
         }

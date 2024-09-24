@@ -1,5 +1,6 @@
 use crate::config::StatConfig;
 
+#[allow(dead_code)]
 #[derive(Default)]
 struct Counters;
 

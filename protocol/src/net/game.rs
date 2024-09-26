@@ -5,10 +5,12 @@
 
 use core::{fmt, net::SocketAddr};
 
-use crate::cursor::{Cursor, CursorMut};
-use crate::filter::Filter;
-use crate::server::Region;
-use crate::Error;
+use crate::{
+    cursor::{Cursor, CursorMut},
+    filter::Filter,
+    net::server::Region,
+    Error,
+};
 
 /// Request a list of server addresses from master servers.
 #[derive(Clone, Debug, PartialEq)]

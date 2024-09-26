@@ -34,10 +34,16 @@ use core::{fmt, net::SocketAddr, str::FromStr};
 use bitflags::bitflags;
 
 use crate::{
-    cursor::{Cursor, GetKeyValue, PutKeyValue},
-    server::{ServerAdd, ServerFlags, ServerType},
+    cursor::{Cursor, CursorError, GetKeyValue, PutKeyValue},
+    server_info::ServerInfo,
     wrappers::Str,
-    ServerInfo, {CursorError, Error},
+    Error,
+};
+
+#[cfg(feature = "net")]
+use crate::{
+    net::server::ServerAdd,
+    server_info::{ServerFlags, ServerType},
 };
 
 bitflags! {
@@ -65,6 +71,7 @@ bitflags! {
     }
 }
 
+#[cfg(feature = "net")]
 impl<T> From<&ServerAdd<T>> for FilterFlags {
     fn from(info: &ServerAdd<T>) -> Self {
         let mut flags = Self::empty();
@@ -309,13 +316,9 @@ impl fmt::Display for &Filter<'_> {
 
 #[cfg(test)]
 mod tests {
-    use std::net::SocketAddr;
-
-    use crate::{cursor::CursorMut, wrappers::Str};
-
     use super::*;
 
-    type ServerInfo = crate::ServerInfo<Box<[u8]>>;
+    use crate::{cursor::CursorMut, wrappers::Str};
 
     macro_rules! tests {
         ($($name:ident$(($($predefined_f:ident: $predefined_v:expr),+ $(,)?))? {
@@ -454,6 +457,17 @@ mod tests {
             .pos();
         assert_eq!(&buf[..n], b"0.19.3");
     }
+}
+
+#[cfg(all(test, feature = "net"))]
+mod match_tests {
+    use std::net::SocketAddr;
+
+    use crate::{cursor::CursorMut, wrappers::Str};
+
+    use super::*;
+
+    type ServerInfo = crate::ServerInfo<Box<[u8]>>;
 
     macro_rules! servers {
         ($($addr:expr => $info:expr $(=> $func:expr)?)+) => (

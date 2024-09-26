@@ -15,15 +15,18 @@ extern crate alloc;
 extern crate log;
 
 mod cursor;
-mod server_info;
 
-pub mod admin;
+#[cfg(feature = "net")]
+pub mod net;
+
 pub mod color;
 pub mod filter;
-pub mod game;
-pub mod master;
-pub mod server;
+pub mod server_info;
 pub mod wrappers;
+
+#[deprecated(since = "0.2.1", note = "use net module instead")]
+#[cfg(feature = "net")]
+pub use crate::net::{admin, game, master, server};
 
 use core::fmt;
 

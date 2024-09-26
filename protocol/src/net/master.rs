@@ -5,8 +5,10 @@
 
 use core::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 
-use super::cursor::{Cursor, CursorMut};
-use super::Error;
+use crate::{
+    cursor::{Cursor, CursorMut},
+    Error,
+};
 
 /// Master server challenge response packet.
 #[derive(Clone, Debug, PartialEq)]

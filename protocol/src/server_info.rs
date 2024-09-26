@@ -132,6 +132,51 @@ bitflags! {
     }
 }
 
+/// The operating system on which the game server runs.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Os {
+    /// GNU/Linux.
+    Linux,
+    /// Microsoft Windows
+    Windows,
+    /// Apple macOS, OS X, Mac OS X
+    Mac,
+    /// Unknown
+    Unknown,
+}
+
+impl Default for Os {
+    fn default() -> Os {
+        Os::Unknown
+    }
+}
+
+impl TryFrom<&[u8]> for Os {
+    type Error = CursorError;
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        match value {
+            b"l" => Ok(Os::Linux),
+            b"w" => Ok(Os::Windows),
+            b"m" => Ok(Os::Mac),
+            _ => Ok(Os::Unknown),
+        }
+    }
+}
+
+impl fmt::Display for Os {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        let s = match self {
+            Os::Linux => "Linux",
+            Os::Windows => "Windows",
+            Os::Mac => "Mac",
+            Os::Unknown => "Unknown",
+        };
+        write!(fmt, "{}", s)
+    }
+}
+
 /// Game server information.
 #[derive(Clone, Debug)]
 pub struct ServerInfo<T> {

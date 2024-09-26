@@ -77,6 +77,12 @@ impl GetKeyValue<'_> for crate::server_info::ServerType {
     }
 }
 
+impl GetKeyValue<'_> for crate::server_info::Os {
+    fn get_key_value(cur: &mut Cursor) -> Result<Self, CursorError> {
+        cur.get_key_value_raw()?.try_into()
+    }
+}
+
 macro_rules! impl_get_value {
     ($($t:ty),+ $(,)?) => {
         $(impl<'a> GetKeyValue<'a> for $t {

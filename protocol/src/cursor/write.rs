@@ -49,6 +49,20 @@ impl PutKeyValue for crate::server_info::ServerType {
     }
 }
 
+impl PutKeyValue for crate::server_info::Os {
+    fn put_key_value<'a, 'b>(
+        &self,
+        cur: &'b mut CursorMut<'a>,
+    ) -> Result<&'b mut CursorMut<'a>, CursorError> {
+        match self {
+            Self::Linux => cur.put_str("l"),
+            Self::Windows => cur.put_str("w"),
+            Self::Mac => cur.put_str("m"),
+            Self::Unknown => cur.put_str("?"),
+        }
+    }
+}
+
 macro_rules! impl_put_key_value {
     ($($t:ty),+ $(,)?) => {
         $(impl PutKeyValue for $t {

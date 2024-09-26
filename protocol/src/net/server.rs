@@ -3,8 +3,6 @@
 
 //! Game server packets.
 
-use core::fmt;
-
 use crate::{
     cursor::{Cursor, CursorMut, GetKeyValue, PutKeyValue},
     filter::Version,
@@ -20,6 +18,9 @@ pub use crate::server_info::ServerType;
 
 #[deprecated(since = "0.2.1", note = "use server_info::ServerFlags instead")]
 pub use crate::server_info::ServerFlags;
+
+#[deprecated(since = "0.2.1", note = "use server_info::Os instead")]
+pub use crate::server_info::Os;
 
 /// Sended to a master server before `ServerAdd` packet.
 #[derive(Clone, Debug, PartialEq)]
@@ -58,71 +59,6 @@ impl Challenge {
             cur.put_u32_le(server_challenge)?;
         }
         Ok(cur.pos())
-    }
-}
-
-/// The operating system on which the game server runs.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-#[repr(u8)]
-pub enum Os {
-    /// GNU/Linux.
-    Linux,
-    /// Microsoft Windows
-    Windows,
-    /// Apple macOS, OS X, Mac OS X
-    Mac,
-    /// Unknown
-    Unknown,
-}
-
-impl Default for Os {
-    fn default() -> Os {
-        Os::Unknown
-    }
-}
-
-impl TryFrom<&[u8]> for Os {
-    type Error = CursorError;
-
-    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        match value {
-            b"l" => Ok(Os::Linux),
-            b"w" => Ok(Os::Windows),
-            b"m" => Ok(Os::Mac),
-            _ => Ok(Os::Unknown),
-        }
-    }
-}
-
-impl GetKeyValue<'_> for Os {
-    fn get_key_value(cur: &mut Cursor) -> Result<Self, CursorError> {
-        cur.get_key_value_raw()?.try_into()
-    }
-}
-
-impl PutKeyValue for Os {
-    fn put_key_value<'a, 'b>(
-        &self,
-        cur: &'b mut CursorMut<'a>,
-    ) -> Result<&'b mut CursorMut<'a>, CursorError> {
-        match self {
-            Self::Linux => cur.put_str("l"),
-            Self::Windows => cur.put_str("w"),
-            Self::Mac => cur.put_str("m"),
-            Self::Unknown => cur.put_str("?"),
-        }
-    }
-}
-
-impl fmt::Display for Os {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        let s = match self {
-            Os::Linux => "Linux",
-            Os::Windows => "Windows",
-            Os::Mac => "Mac",
-            Os::Unknown => "Unknown",
-        };
-        write!(fmt, "{}", s)
     }
 }
 

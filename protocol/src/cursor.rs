@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 // SPDX-FileCopyrightText: 2023 Denis Drakhnia <numas13@gmail.com>
 
-use std::io::{self, Write as _};
-use std::{fmt, mem, str};
+use std::{
+    fmt::{self, Write},
+    mem, str,
+};
 
 use thiserror::Error;
 
@@ -482,9 +484,7 @@ impl<'a> CursorMut<'a> {
     }
 
     pub fn put_as_str<T: fmt::Display>(&mut self, value: T) -> Result<&mut Self, Error> {
-        let mut cur = io::Cursor::new(&mut self.buffer[self.pos..]);
-        write!(&mut cur, "{}", value).map_err(|_| Error::UnexpectedEnd)?;
-        self.pos += cur.position() as usize;
+        write!(self, "{}", value).map_err(|_| Error::UnexpectedEnd)?;
         Ok(self)
     }
 
@@ -504,6 +504,14 @@ impl<'a> CursorMut<'a> {
             .put_str(key)?
             .put_u8(b'\\')?
             .put_key_value(value)
+    }
+}
+
+impl fmt::Write for CursorMut<'_> {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        self.put_bytes(s.as_bytes())
+            .map(|_| ())
+            .map_err(|_| fmt::Error)
     }
 }
 

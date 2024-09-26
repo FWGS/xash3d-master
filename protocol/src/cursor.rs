@@ -13,7 +13,7 @@ use super::wrappers::Str;
 
 /// The error type for `Cursor` and `CursorMut`.
 #[derive(Error, Debug, PartialEq, Eq)]
-pub enum Error {
+pub enum CursorError {
     /// Invalid number.
     #[error("Invalid number")]
     InvalidNumber,
@@ -43,53 +43,55 @@ pub enum Error {
     UnexpectedEnd,
 }
 
+pub type Result<T, E = CursorError> = std::result::Result<T, E>;
+
 pub trait GetKeyValue<'a>: Sized {
-    fn get_key_value(cur: &mut Cursor<'a>) -> Result<Self, Error>;
+    fn get_key_value(cur: &mut Cursor<'a>) -> Result<Self>;
 }
 
 impl<'a> GetKeyValue<'a> for &'a [u8] {
-    fn get_key_value(cur: &mut Cursor<'a>) -> Result<Self, Error> {
+    fn get_key_value(cur: &mut Cursor<'a>) -> Result<Self> {
         cur.get_key_value_raw()
     }
 }
 
 impl<'a> GetKeyValue<'a> for Str<&'a [u8]> {
-    fn get_key_value(cur: &mut Cursor<'a>) -> Result<Self, Error> {
+    fn get_key_value(cur: &mut Cursor<'a>) -> Result<Self> {
         cur.get_key_value_raw().map(Str)
     }
 }
 
 impl<'a> GetKeyValue<'a> for &'a str {
-    fn get_key_value(cur: &mut Cursor<'a>) -> Result<Self, Error> {
+    fn get_key_value(cur: &mut Cursor<'a>) -> Result<Self> {
         let raw = cur.get_key_value_raw()?;
-        str::from_utf8(raw).map_err(|_| Error::InvalidString)
+        str::from_utf8(raw).map_err(|_| CursorError::InvalidString)
     }
 }
 
 impl<'a> GetKeyValue<'a> for Box<str> {
-    fn get_key_value(cur: &mut Cursor<'a>) -> Result<Self, Error> {
+    fn get_key_value(cur: &mut Cursor<'a>) -> Result<Self> {
         let raw = cur.get_key_value_raw()?;
         str::from_utf8(raw)
             .map(|s| s.to_owned().into_boxed_str())
-            .map_err(|_| Error::InvalidString)
+            .map_err(|_| CursorError::InvalidString)
     }
 }
 
 impl<'a> GetKeyValue<'a> for String {
-    fn get_key_value(cur: &mut Cursor<'a>) -> Result<Self, Error> {
+    fn get_key_value(cur: &mut Cursor<'a>) -> Result<Self> {
         let raw = cur.get_key_value_raw()?;
         str::from_utf8(raw)
             .map(|s| s.to_owned())
-            .map_err(|_| Error::InvalidString)
+            .map_err(|_| CursorError::InvalidString)
     }
 }
 
 impl<'a> GetKeyValue<'a> for bool {
-    fn get_key_value(cur: &mut Cursor<'a>) -> Result<Self, Error> {
+    fn get_key_value(cur: &mut Cursor<'a>) -> Result<Self> {
         match cur.get_key_value_raw()? {
             b"0" => Ok(false),
             b"1" => Ok(true),
-            _ => Err(Error::InvalidBool),
+            _ => Err(CursorError::InvalidBool),
         }
     }
 }
@@ -97,11 +99,11 @@ impl<'a> GetKeyValue<'a> for bool {
 macro_rules! impl_get_value {
     ($($t:ty),+ $(,)?) => {
         $(impl<'a> GetKeyValue<'a> for $t {
-            fn get_key_value(cur: &mut Cursor<'a>) -> Result<Self, Error> {
+            fn get_key_value(cur: &mut Cursor<'a>) -> Result<Self> {
                 let s = cur.get_key_value::<&str>()?;
                 // HACK: special case for one asshole
                 let (_, s) = color::trim_start_color(s);
-                s.parse().map_err(|_| Error::InvalidNumber)
+                s.parse().map_err(|_| CursorError::InvalidNumber)
             }
         })+
     };
@@ -129,7 +131,7 @@ pub struct Cursor<'a> {
 macro_rules! impl_get {
     ($($n:ident: $t:ty = $f:ident),+ $(,)?) => (
         $(#[inline]
-        pub fn $n(&mut self) -> Result<$t, Error> {
+        pub fn $n(&mut self) -> Result<$t> {
             const N: usize = mem::size_of::<$t>();
             self.get_array::<N>().map(<$t>::$f)
         })+
@@ -159,21 +161,21 @@ impl<'a> Cursor<'a> {
         self.remaining() != 0
     }
 
-    pub fn get_bytes(&mut self, count: usize) -> Result<&'a [u8], Error> {
+    pub fn get_bytes(&mut self, count: usize) -> Result<&'a [u8]> {
         if count <= self.remaining() {
             let (head, tail) = self.buffer.split_at(count);
             self.buffer = tail;
             Ok(head)
         } else {
-            Err(Error::UnexpectedEnd)
+            Err(CursorError::UnexpectedEnd)
         }
     }
 
-    pub fn advance(&mut self, count: usize) -> Result<(), Error> {
+    pub fn advance(&mut self, count: usize) -> Result<()> {
         self.get_bytes(count).map(|_| ())
     }
 
-    pub fn get_array<const N: usize>(&mut self) -> Result<[u8; N], Error> {
+    pub fn get_array<const N: usize>(&mut self) -> Result<[u8; N]> {
         self.get_bytes(N).map(|s| {
             let mut array = [0; N];
             array.copy_from_slice(s);
@@ -181,37 +183,37 @@ impl<'a> Cursor<'a> {
         })
     }
 
-    pub fn get_str(&mut self, n: usize) -> Result<&'a str, Error> {
+    pub fn get_str(&mut self, n: usize) -> Result<&'a str> {
         let mut cur = *self;
         let s = cur
             .get_bytes(n)
-            .and_then(|s| str::from_utf8(s).map_err(|_| Error::InvalidString))?;
+            .and_then(|s| str::from_utf8(s).map_err(|_| CursorError::InvalidString))?;
         *self = cur;
         Ok(s)
     }
 
-    pub fn get_cstr(&mut self) -> Result<Str<&'a [u8]>, Error> {
+    pub fn get_cstr(&mut self) -> Result<Str<&'a [u8]>> {
         let pos = self
             .buffer
             .iter()
             .position(|&c| c == b'\0')
-            .ok_or(Error::UnexpectedEnd)?;
+            .ok_or(CursorError::UnexpectedEnd)?;
         let (head, tail) = self.buffer.split_at(pos);
         self.buffer = &tail[1..];
         Ok(Str(&head[..pos]))
     }
 
-    pub fn get_cstr_as_str(&mut self) -> Result<&'a str, Error> {
-        str::from_utf8(&self.get_cstr()?).map_err(|_| Error::InvalidString)
+    pub fn get_cstr_as_str(&mut self) -> Result<&'a str> {
+        str::from_utf8(&self.get_cstr()?).map_err(|_| CursorError::InvalidString)
     }
 
     #[inline(always)]
-    pub fn get_u8(&mut self) -> Result<u8, Error> {
+    pub fn get_u8(&mut self) -> Result<u8> {
         self.get_array::<1>().map(|s| s[0])
     }
 
     #[inline(always)]
-    pub fn get_i8(&mut self) -> Result<i8, Error> {
+    pub fn get_i8(&mut self) -> Result<i8> {
         self.get_array::<1>().map(|s| s[0] as i8)
     }
 
@@ -244,31 +246,31 @@ impl<'a> Cursor<'a> {
         get_f64_ne: f64 = from_ne_bytes,
     }
 
-    pub fn expect(&mut self, s: &[u8]) -> Result<(), Error> {
+    pub fn expect(&mut self, s: &[u8]) -> Result<()> {
         if self.buffer.starts_with(s) {
             self.advance(s.len())?;
             Ok(())
         } else {
-            Err(Error::Expect)
+            Err(CursorError::Expect)
         }
     }
 
-    pub fn expect_empty(&self) -> Result<(), Error> {
+    pub fn expect_empty(&self) -> Result<()> {
         if self.has_remaining() {
-            Err(Error::ExpectEmpty)
+            Err(CursorError::ExpectEmpty)
         } else {
             Ok(())
         }
     }
 
-    pub fn take_while<F>(&mut self, mut cond: F) -> Result<&'a [u8], Error>
+    pub fn take_while<F>(&mut self, mut cond: F) -> Result<&'a [u8]>
     where
         F: FnMut(u8) -> bool,
     {
         self.buffer
             .iter()
             .position(|&i| !cond(i))
-            .ok_or(Error::UnexpectedEnd)
+            .ok_or(CursorError::UnexpectedEnd)
             .and_then(|n| self.get_bytes(n))
     }
 
@@ -283,7 +285,7 @@ impl<'a> Cursor<'a> {
         })
     }
 
-    pub fn get_key_value_raw(&mut self) -> Result<&'a [u8], Error> {
+    pub fn get_key_value_raw(&mut self) -> Result<&'a [u8]> {
         let mut cur = *self;
         match cur.get_u8()? {
             b'\\' => {
@@ -291,19 +293,19 @@ impl<'a> Cursor<'a> {
                 *self = cur;
                 Ok(value)
             }
-            _ => Err(Error::InvalidTableValue),
+            _ => Err(CursorError::InvalidTableValue),
         }
     }
 
-    pub fn get_key_value<T: GetKeyValue<'a>>(&mut self) -> Result<T, Error> {
+    pub fn get_key_value<T: GetKeyValue<'a>>(&mut self) -> Result<T> {
         T::get_key_value(self)
     }
 
-    pub fn skip_key_value<T: GetKeyValue<'a>>(&mut self) -> Result<(), Error> {
+    pub fn skip_key_value<T: GetKeyValue<'a>>(&mut self) -> Result<()> {
         T::get_key_value(self).map(|_| ())
     }
 
-    pub fn get_key_raw(&mut self) -> Result<&'a [u8], Error> {
+    pub fn get_key_raw(&mut self) -> Result<&'a [u8]> {
         let mut cur = *self;
         match cur.get_u8() {
             Ok(b'\\') => {
@@ -311,49 +313,37 @@ impl<'a> Cursor<'a> {
                 *self = cur;
                 Ok(value)
             }
-            Ok(b'\n') | Err(Error::UnexpectedEnd) => Err(Error::TableEnd),
-            _ => Err(Error::InvalidTableKey),
+            Ok(b'\n') | Err(CursorError::UnexpectedEnd) => Err(CursorError::TableEnd),
+            _ => Err(CursorError::InvalidTableKey),
         }
     }
 
-    pub fn get_key<T: GetKeyValue<'a>>(&mut self) -> Result<(&'a [u8], T), Error> {
+    pub fn get_key<T: GetKeyValue<'a>>(&mut self) -> Result<(&'a [u8], T)> {
         Ok((self.get_key_raw()?, self.get_key_value()?))
     }
 }
 
 pub trait PutKeyValue {
-    fn put_key_value<'a, 'b>(
-        &self,
-        cur: &'b mut CursorMut<'a>,
-    ) -> Result<&'b mut CursorMut<'a>, Error>;
+    fn put_key_value<'a, 'b>(&self, cur: &'b mut CursorMut<'a>) -> Result<&'b mut CursorMut<'a>>;
 }
 
 impl<T> PutKeyValue for &T
 where
     T: PutKeyValue,
 {
-    fn put_key_value<'a, 'b>(
-        &self,
-        cur: &'b mut CursorMut<'a>,
-    ) -> Result<&'b mut CursorMut<'a>, Error> {
+    fn put_key_value<'a, 'b>(&self, cur: &'b mut CursorMut<'a>) -> Result<&'b mut CursorMut<'a>> {
         (*self).put_key_value(cur)
     }
 }
 
 impl PutKeyValue for &str {
-    fn put_key_value<'a, 'b>(
-        &self,
-        cur: &'b mut CursorMut<'a>,
-    ) -> Result<&'b mut CursorMut<'a>, Error> {
+    fn put_key_value<'a, 'b>(&self, cur: &'b mut CursorMut<'a>) -> Result<&'b mut CursorMut<'a>> {
         cur.put_str(self)
     }
 }
 
 impl PutKeyValue for bool {
-    fn put_key_value<'a, 'b>(
-        &self,
-        cur: &'b mut CursorMut<'a>,
-    ) -> Result<&'b mut CursorMut<'a>, Error> {
+    fn put_key_value<'a, 'b>(&self, cur: &'b mut CursorMut<'a>) -> Result<&'b mut CursorMut<'a>> {
         cur.put_u8(if *self { b'1' } else { b'0' })
     }
 }
@@ -361,7 +351,7 @@ impl PutKeyValue for bool {
 macro_rules! impl_put_key_value {
     ($($t:ty),+ $(,)?) => {
         $(impl PutKeyValue for $t {
-            fn put_key_value<'a, 'b>(&self, cur: &'b mut CursorMut<'a>) -> Result<&'b mut CursorMut<'a>, Error> {
+            fn put_key_value<'a, 'b>(&self, cur: &'b mut CursorMut<'a>) -> Result<&'b mut CursorMut<'a>> {
                 cur.put_as_str(self)
             }
         })+
@@ -391,7 +381,7 @@ pub struct CursorMut<'a> {
 macro_rules! impl_put {
     ($($n:ident: $t:ty = $f:ident),+ $(,)?) => (
         $(#[inline]
-        pub fn $n(&mut self, n: $t) -> Result<&mut Self, Error> {
+        pub fn $n(&mut self, n: $t) -> Result<&mut Self> {
             self.put_array(&n.$f())
         })+
     );
@@ -411,7 +401,7 @@ impl<'a> CursorMut<'a> {
         self.buffer.len() - self.pos
     }
 
-    pub fn advance<F>(&mut self, count: usize, mut f: F) -> Result<&mut Self, Error>
+    pub fn advance<F>(&mut self, count: usize, mut f: F) -> Result<&mut Self>
     where
         F: FnMut(&mut [u8]),
     {
@@ -420,37 +410,37 @@ impl<'a> CursorMut<'a> {
             self.pos += count;
             Ok(self)
         } else {
-            Err(Error::UnexpectedEnd)
+            Err(CursorError::UnexpectedEnd)
         }
     }
 
-    pub fn put_bytes(&mut self, s: &[u8]) -> Result<&mut Self, Error> {
+    pub fn put_bytes(&mut self, s: &[u8]) -> Result<&mut Self> {
         self.advance(s.len(), |i| {
             i.copy_from_slice(s);
         })
     }
 
-    pub fn put_array<const N: usize>(&mut self, s: &[u8; N]) -> Result<&mut Self, Error> {
+    pub fn put_array<const N: usize>(&mut self, s: &[u8; N]) -> Result<&mut Self> {
         self.advance(N, |i| {
             i.copy_from_slice(s);
         })
     }
 
-    pub fn put_str(&mut self, s: &str) -> Result<&mut Self, Error> {
+    pub fn put_str(&mut self, s: &str) -> Result<&mut Self> {
         self.put_bytes(s.as_bytes())
     }
 
-    pub fn put_cstr(&mut self, s: &str) -> Result<&mut Self, Error> {
+    pub fn put_cstr(&mut self, s: &str) -> Result<&mut Self> {
         self.put_str(s)?.put_u8(0)
     }
 
     #[inline(always)]
-    pub fn put_u8(&mut self, n: u8) -> Result<&mut Self, Error> {
+    pub fn put_u8(&mut self, n: u8) -> Result<&mut Self> {
         self.put_array(&[n])
     }
 
     #[inline(always)]
-    pub fn put_i8(&mut self, n: i8) -> Result<&mut Self, Error> {
+    pub fn put_i8(&mut self, n: i8) -> Result<&mut Self> {
         self.put_u8(n as u8)
     }
 
@@ -483,23 +473,23 @@ impl<'a> CursorMut<'a> {
         put_f64_ne: f64 = to_ne_bytes,
     }
 
-    pub fn put_as_str<T: fmt::Display>(&mut self, value: T) -> Result<&mut Self, Error> {
-        write!(self, "{}", value).map_err(|_| Error::UnexpectedEnd)?;
+    pub fn put_as_str<T: fmt::Display>(&mut self, value: T) -> Result<&mut Self> {
+        write!(self, "{}", value).map_err(|_| CursorError::UnexpectedEnd)?;
         Ok(self)
     }
 
-    pub fn put_key_value<T: PutKeyValue>(&mut self, value: T) -> Result<&mut Self, Error> {
+    pub fn put_key_value<T: PutKeyValue>(&mut self, value: T) -> Result<&mut Self> {
         value.put_key_value(self)
     }
 
-    pub fn put_key_raw(&mut self, key: &str, value: &[u8]) -> Result<&mut Self, Error> {
+    pub fn put_key_raw(&mut self, key: &str, value: &[u8]) -> Result<&mut Self> {
         self.put_u8(b'\\')?
             .put_str(key)?
             .put_u8(b'\\')?
             .put_bytes(value)
     }
 
-    pub fn put_key<T: PutKeyValue>(&mut self, key: &str, value: T) -> Result<&mut Self, Error> {
+    pub fn put_key<T: PutKeyValue>(&mut self, key: &str, value: T) -> Result<&mut Self> {
         self.put_u8(b'\\')?
             .put_str(key)?
             .put_u8(b'\\')?
@@ -520,7 +510,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cursor() -> Result<(), Error> {
+    fn cursor() -> Result<()> {
         let mut buf = [0; 64];
         let n = CursorMut::new(&mut buf)
             .put_bytes(b"12345678")?
@@ -541,13 +531,13 @@ mod tests {
         assert_eq!(cur.get_u8(), Ok(0x7f));
         assert_eq!(cur.get_i8(), Ok(-128));
         assert_eq!(cur.get_u32_le(), Ok(0x44332211));
-        assert_eq!(cur.get_u8(), Err(Error::UnexpectedEnd));
+        assert_eq!(cur.get_u8(), Err(CursorError::UnexpectedEnd));
 
         Ok(())
     }
 
     #[test]
-    fn key() -> Result<(), Error> {
+    fn key() -> Result<()> {
         let mut buf = [0; 512];
         let n = CursorMut::new(&mut buf)
             .put_key("p", 49)?
@@ -574,7 +564,7 @@ mod tests {
         assert_eq!(cur.get_key(), Ok((&b"gamedir"[..], "valve")));
         assert_eq!(cur.get_key(), Ok((&b"password"[..], false)));
         assert_eq!(cur.get_key(), Ok((&b"host"[..], "test")));
-        assert_eq!(cur.get_key::<&[u8]>(), Err(Error::TableEnd));
+        assert_eq!(cur.get_key::<&[u8]>(), Err(CursorError::TableEnd));
 
         Ok(())
     }

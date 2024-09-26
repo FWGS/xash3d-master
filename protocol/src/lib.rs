@@ -20,7 +20,7 @@ pub mod master;
 pub mod server;
 pub mod wrappers;
 
-pub use cursor::Error as CursorError;
+pub use cursor::CursorError;
 pub use server_info::ServerInfo;
 
 use thiserror::Error;

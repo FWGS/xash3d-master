@@ -405,7 +405,7 @@ impl<'a> CursorMut<'a> {
     }
 
     #[inline(always)]
-    pub fn remaining(&self) -> usize {
+    pub fn available(&self) -> usize {
         self.buffer.len() - self.pos
     }
 
@@ -413,7 +413,7 @@ impl<'a> CursorMut<'a> {
     where
         F: FnMut(&mut [u8]),
     {
-        if count <= self.remaining() {
+        if count <= self.available() {
             f(&mut self.buffer[self.pos..self.pos + count]);
             self.pos += count;
             Ok(self)

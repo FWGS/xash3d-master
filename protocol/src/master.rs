@@ -180,7 +180,7 @@ impl QueryServersResponse<()> {
         }
         let mut count = 0;
         let mut iter = list.iter();
-        while cur.remaining() >= A::size() * 2 {
+        while cur.available() >= A::size() * 2 {
             if let Some(i) = iter.next() {
                 i.put(&mut cur)?;
                 count += 1;

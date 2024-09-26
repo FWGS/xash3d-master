@@ -7,6 +7,7 @@
 //! Xash3D protocol between clients, servers and masters.
 
 #![cfg_attr(all(not(feature = "std"), not(test)), no_std)]
+#![cfg_attr(all(doc, has_doc_auto_cfg), feature(doc_auto_cfg))]
 
 #[cfg(feature = "alloc")]
 extern crate alloc;

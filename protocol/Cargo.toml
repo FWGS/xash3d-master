@@ -20,3 +20,6 @@ net = []
 [dependencies]
 log = "0.4.18"
 bitflags = "2.4"
+
+[build-dependencies]
+autocfg = "1"

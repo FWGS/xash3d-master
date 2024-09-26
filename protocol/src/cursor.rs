@@ -6,42 +6,50 @@ use std::{
     mem, str,
 };
 
-use thiserror::Error;
-
 use super::color;
 use super::wrappers::Str;
 
 /// The error type for `Cursor` and `CursorMut`.
-#[derive(Error, Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum CursorError {
     /// Invalid number.
-    #[error("Invalid number")]
     InvalidNumber,
     /// Invalid string.
-    #[error("Invalid string")]
     InvalidString,
     /// Invalid boolean.
-    #[error("Invalid boolean")]
     InvalidBool,
     /// Invalid table entry.
-    #[error("Invalid table key")]
     InvalidTableKey,
     /// Invalid table entry.
-    #[error("Invalid table entry")]
     InvalidTableValue,
     /// Table end found.
-    #[error("Table end")]
     TableEnd,
     /// Expected data not found.
-    #[error("Expected data not found")]
     Expect,
     /// An unexpected data found.
-    #[error("Unexpected data")]
     ExpectEmpty,
     /// Buffer size is no enougth to decode or encode a packet.
-    #[error("Unexpected end of buffer")]
     UnexpectedEnd,
 }
+
+impl fmt::Display for CursorError {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        let s = match self {
+            Self::InvalidNumber => "Invalid number",
+            Self::InvalidString => "Invalid string",
+            Self::InvalidBool => "Invalid boolean",
+            Self::InvalidTableKey => "Invalid table key",
+            Self::InvalidTableValue => "Invalid table entry",
+            Self::TableEnd => "Table end",
+            Self::Expect => "Expected data not found",
+            Self::ExpectEmpty => "Unexpected data",
+            Self::UnexpectedEnd => "Unexpected end of buffer",
+        };
+        s.fmt(fmt)
+    }
+}
+
+impl std::error::Error for CursorError {}
 
 pub type Result<T, E = CursorError> = std::result::Result<T, E>;
 

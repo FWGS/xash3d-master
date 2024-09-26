@@ -12,6 +12,5 @@ homepage = "https://xash.su"
 repository = "https://git.mentality.rip/numas13/xash3d-master"
 
 [dependencies]
-thiserror = "1.0.49"
 log = "0.4.18"
 bitflags = "2.4"

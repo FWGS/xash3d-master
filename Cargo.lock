@@ -719,7 +719,6 @@ version = "0.2.0"
 dependencies = [
  "bitflags 2.5.0",
  "log",
- "thiserror",
 ]
 
 [[package]]

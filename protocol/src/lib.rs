@@ -20,10 +20,10 @@ pub mod master;
 pub mod server;
 pub mod wrappers;
 
+use std::fmt;
+
 pub use cursor::CursorError;
 pub use server_info::ServerInfo;
-
-use thiserror::Error;
 
 use crate::filter::Version;
 
@@ -33,30 +33,53 @@ pub const PROTOCOL_VERSION: u8 = 49;
 pub const CLIENT_VERSION: Version = Version::new(0, 20);
 
 /// The error type for decoding and encoding packets.
-#[derive(Error, Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Error {
     /// Failed to decode a packet.
-    #[error("Invalid packet")]
     InvalidPacket,
     /// Invalid region.
-    #[error("Invalid region")]
     InvalidRegion,
     /// Invalid client announce IP.
-    #[error("Invalid client announce IP")]
     InvalidClientAnnounceIp,
     /// Invalid last IP.
-    #[error("Invalid last server IP")]
     InvalidQueryServersLast,
     /// Server protocol version is not supported.
-    #[error("Invalid protocol version")]
     InvalidProtocolVersion,
     /// Cursor error.
-    #[error("{0}")]
-    CursorError(#[from] CursorError),
+    CursorError(CursorError),
     /// Invalid value for server add packet.
-    #[error("Invalid value for server add key `{0}`: {1}")]
-    InvalidServerValue(&'static str, #[source] CursorError),
+    InvalidServerValue(&'static str, CursorError),
     /// Invalid value for query servers packet.
-    #[error("Invalid value for filter key `{0}`: {1}")]
-    InvalidFilterValue(&'static str, #[source] CursorError),
+    InvalidFilterValue(&'static str, CursorError),
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::InvalidPacket => "Invalid packet".fmt(fmt),
+            Self::InvalidRegion => "Invalid region".fmt(fmt),
+            Self::InvalidClientAnnounceIp => "Invalid client announce IP".fmt(fmt),
+            Self::InvalidQueryServersLast => "Invalid last server IP".fmt(fmt),
+            Self::InvalidProtocolVersion => "Invalid protocol version".fmt(fmt),
+            Self::CursorError(source) => source.fmt(fmt),
+            Self::InvalidServerValue(key, source) => {
+                write!(
+                    fmt,
+                    "Invalid value for server add key `{}`: {}",
+                    key, source
+                )
+            }
+            Self::InvalidFilterValue(key, source) => {
+                write!(fmt, "Invalid value for filter key `{}`: {}", key, source)
+            }
+        }
+    }
+}
+
+impl std::error::Error for Error {}
+
+impl From<CursorError> for Error {
+    fn from(source: CursorError) -> Self {
+        Self::CursorError(source)
+    }
 }

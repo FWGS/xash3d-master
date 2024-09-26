@@ -3,11 +3,9 @@
 
 //! Wrappers for byte slices with pretty-printers.
 
-use std::fmt;
-use std::ops::Deref;
+use core::{fmt, ops::Deref};
 
-use crate::cursor::{CursorMut, PutKeyValue};
-use crate::CursorError;
+use crate::cursor::{CursorError, CursorMut, PutKeyValue};
 
 /// Wrapper for slice of bytes with printing the bytes as a string.
 ///

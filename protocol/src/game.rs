@@ -3,8 +3,7 @@
 
 //! Game client packets.
 
-use std::fmt;
-use std::net::SocketAddr;
+use core::{fmt, net::SocketAddr};
 
 use crate::cursor::{Cursor, CursorMut};
 use crate::filter::Filter;
@@ -129,9 +128,13 @@ impl<'a> Packet<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::filter::{FilterFlags, Version};
-    use crate::wrappers::Str;
+
     use std::net::{IpAddr, Ipv4Addr};
+
+    use crate::{
+        filter::{FilterFlags, Version},
+        wrappers::Str,
+    };
 
     #[test]
     fn query_servers() {

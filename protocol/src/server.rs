@@ -3,7 +3,7 @@
 
 //! Game server packets.
 
-use std::fmt;
+use core::fmt;
 
 use bitflags::bitflags;
 

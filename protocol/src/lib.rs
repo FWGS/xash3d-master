@@ -6,6 +6,11 @@
 
 //! Xash3D protocol between clients, servers and masters.
 
+#![cfg_attr(all(not(feature = "std"), not(test)), no_std)]
+
+#[cfg(feature = "alloc")]
+extern crate alloc;
+
 #[macro_use]
 extern crate log;
 
@@ -20,7 +25,7 @@ pub mod master;
 pub mod server;
 pub mod wrappers;
 
-use std::fmt;
+use core::fmt;
 
 pub use cursor::CursorError;
 pub use server_info::ServerInfo;
@@ -76,7 +81,7 @@ impl fmt::Display for Error {
     }
 }
 
-impl std::error::Error for Error {}
+impl core::error::Error for Error {}
 
 impl From<CursorError> for Error {
     fn from(source: CursorError) -> Self {

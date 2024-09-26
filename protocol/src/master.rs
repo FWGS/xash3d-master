@@ -3,7 +3,7 @@
 
 //! Master server packets.
 
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
+use core::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 
 use super::cursor::{Cursor, CursorMut};
 use super::Error;
@@ -143,7 +143,7 @@ impl<'a> QueryServersResponse<&'a [u8]> {
         A: ServerAddress,
     {
         let mut cur = Cursor::new(self.inner);
-        std::iter::from_fn(move || {
+        core::iter::from_fn(move || {
             if cur.remaining() == A::size() && cur.end().ends_with(&[0; 2]) {
                 // skip last address with port 0
                 return None;

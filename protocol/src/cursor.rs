@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 // SPDX-FileCopyrightText: 2023 Denis Drakhnia <numas13@gmail.com>
 
-use std::{
+use core::{
     fmt::{self, Write},
     mem, str,
 };
+
+#[cfg(feature = "alloc")]
+use alloc::{borrow::ToOwned, boxed::Box, string::String};
 
 use super::color;
 use super::wrappers::Str;
@@ -49,9 +52,9 @@ impl fmt::Display for CursorError {
     }
 }
 
-impl std::error::Error for CursorError {}
+impl core::error::Error for CursorError {}
 
-pub type Result<T, E = CursorError> = std::result::Result<T, E>;
+pub type Result<T, E = CursorError> = core::result::Result<T, E>;
 
 pub trait GetKeyValue<'a>: Sized {
     fn get_key_value(cur: &mut Cursor<'a>) -> Result<Self>;
@@ -76,6 +79,7 @@ impl<'a> GetKeyValue<'a> for &'a str {
     }
 }
 
+#[cfg(feature = "alloc")]
 impl<'a> GetKeyValue<'a> for Box<str> {
     fn get_key_value(cur: &mut Cursor<'a>) -> Result<Self> {
         let raw = cur.get_key_value_raw()?;
@@ -85,6 +89,7 @@ impl<'a> GetKeyValue<'a> for Box<str> {
     }
 }
 
+#[cfg(feature = "alloc")]
 impl<'a> GetKeyValue<'a> for String {
     fn get_key_value(cur: &mut Cursor<'a>) -> Result<Self> {
         let raw = cur.get_key_value_raw()?;

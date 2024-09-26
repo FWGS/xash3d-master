@@ -3,7 +3,8 @@
 
 //! Color codes for strings.
 
-use std::borrow::Cow;
+#[cfg(feature = "alloc")]
+use alloc::{borrow::Cow, string::String};
 
 /// Color codes `^digit`.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -131,6 +132,7 @@ impl<'a> Iterator for ColorIter<'a> {
 /// # use xash3d_protocol::color::trim_color;
 /// assert_eq!(trim_color("^1no^7 ^2colors^7"), "no colors");
 /// ```
+#[cfg(feature = "alloc")]
 pub fn trim_color(s: &str) -> Cow<'_, str> {
     let (_, s) = trim_start_color(s);
     if !s.chars().any(|c| c == '^') {
@@ -157,6 +159,7 @@ mod tests {
         assert_eq!(trim_start_color("^1^2^3foo^2bar"), ("^3", "foo^2bar"));
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn trim_colors() {
         assert_eq!(trim_color("foo^2bar"), "foobar");

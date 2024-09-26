@@ -29,16 +29,16 @@
 //! * Do not have bots
 //! * Is not protected by a password
 
-use std::fmt;
-use std::net::SocketAddr;
-use std::str::FromStr;
+use core::{fmt, net::SocketAddr, str::FromStr};
 
 use bitflags::bitflags;
 
-use crate::cursor::{Cursor, GetKeyValue, PutKeyValue};
-use crate::server::{ServerAdd, ServerFlags, ServerType};
-use crate::wrappers::Str;
-use crate::{CursorError, Error, ServerInfo};
+use crate::{
+    cursor::{Cursor, GetKeyValue, PutKeyValue},
+    server::{ServerAdd, ServerFlags, ServerType},
+    wrappers::Str,
+    ServerInfo, {CursorError, Error},
+};
 
 bitflags! {
     /// Additional filter flags.
@@ -196,11 +196,14 @@ impl Filter<'_> {
     }
 
     /// Returns `true` if a server matches the filter.
-    pub fn matches(&self, _addr: SocketAddr, info: &ServerInfo) -> bool {
+    pub fn matches<T>(&self, _addr: SocketAddr, info: &ServerInfo<T>) -> bool
+    where
+        T: AsRef<[u8]>,
+    {
         // TODO: match addr
         !((info.flags & self.flags_mask) != self.flags
-            || self.gamedir.map_or(false, |s| *s != &*info.gamedir)
-            || self.map.map_or(false, |s| *s != &*info.map)
+            || self.gamedir.map_or(false, |s| *s != info.gamedir.as_ref())
+            || self.map.map_or(false, |s| *s != info.map.as_ref())
             || self.protocol.map_or(false, |s| s != info.protocol))
     }
 }
@@ -306,10 +309,13 @@ impl fmt::Display for &Filter<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::cursor::CursorMut;
-    use crate::wrappers::Str;
     use std::net::SocketAddr;
+
+    use crate::{cursor::CursorMut, wrappers::Str};
+
+    use super::*;
+
+    type ServerInfo = crate::ServerInfo<Box<[u8]>>;
 
     macro_rules! tests {
         ($($name:ident$(($($predefined_f:ident: $predefined_v:expr),+ $(,)?))? {

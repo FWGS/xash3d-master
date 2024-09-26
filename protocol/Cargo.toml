@@ -11,6 +11,11 @@ rust-version = "1.56"
 homepage = "https://xash.su"
 repository = "https://git.mentality.rip/numas13/xash3d-master"
 
+[features]
+default = ["std"]
+std = ["alloc"]
+alloc = []
+
 [dependencies]
 log = "0.4.18"
 bitflags = "2.4"

@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 // SPDX-FileCopyrightText: 2023 Denis Drakhnia <numas13@gmail.com>
 
-mod cursor;
-mod cursor_mut;
+mod read;
+mod write;
 
 use core::fmt;
 
-pub use cursor::{Cursor, GetKeyValue};
-pub use cursor_mut::{CursorMut, PutKeyValue};
+pub use read::{Cursor, GetKeyValue};
+pub use write::{CursorMut, PutKeyValue};
 
 /// The error type for `Cursor` and `CursorMut`.
 #[derive(Debug, PartialEq, Eq)]

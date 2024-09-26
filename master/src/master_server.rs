@@ -27,13 +27,15 @@ use xash3d_protocol::{
     server,
     server::Region,
     wrappers::Str,
-    Error as ProtocolError, ServerInfo,
+    Error as ProtocolError,
 };
 
 use crate::{
     config::{self, Config},
     stats::Stats,
 };
+
+type ServerInfo = xash3d_protocol::ServerInfo<Box<[u8]>>;
 
 pub trait AddrExt: Sized + Eq + Hash + Display + Copy + ToSocketAddrs + ServerAddress {
     type Ip: Eq + Hash + Display + Copy + FromStr;

@@ -29,7 +29,7 @@
 //! * Do not have bots
 //! * Is not protected by a password
 
-use core::{fmt, net::SocketAddr, str::FromStr};
+use core::{fmt, str::FromStr};
 
 use bitflags::bitflags;
 
@@ -203,11 +203,10 @@ impl Filter<'_> {
     }
 
     /// Returns `true` if a server matches the filter.
-    pub fn matches<T>(&self, _addr: SocketAddr, info: &ServerInfo<T>) -> bool
+    pub fn matches<T>(&self, info: &ServerInfo<T>) -> bool
     where
         T: AsRef<[u8]>,
     {
-        // TODO: match addr
         !((info.flags & self.flags_mask) != self.flags
             || self.gamedir.map_or(false, |s| *s != info.gamedir.as_ref())
             || self.map.map_or(false, |s| *s != info.map.as_ref())
@@ -498,7 +497,7 @@ mod match_tests {
             let iter = servers
                 .iter()
                 .enumerate()
-                .filter(|(_, (addr, server))| filter.matches(*addr, &server))
+                .filter(|(_, (_addr, server))| filter.matches(&server))
                 .map(|(i, _)| i);
             assert_eq!(iter.collect::<Vec<_>>(), [$($expected),*])
         );

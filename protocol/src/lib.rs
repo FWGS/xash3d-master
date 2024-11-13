@@ -85,7 +85,8 @@ impl fmt::Display for Error {
     }
 }
 
-impl core::error::Error for Error {}
+#[cfg(feature = "std")]
+impl std::error::Error for Error {}
 
 impl From<CursorError> for Error {
     fn from(source: CursorError) -> Self {

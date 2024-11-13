@@ -3,7 +3,7 @@
 
 //! Game client packets.
 
-use core::{fmt, net::SocketAddr};
+use std::{fmt, net::SocketAddr};
 
 use crate::{
     cursor::{Cursor, CursorMut},

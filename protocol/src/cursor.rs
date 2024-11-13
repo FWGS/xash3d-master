@@ -49,7 +49,8 @@ impl fmt::Display for CursorError {
     }
 }
 
-impl core::error::Error for CursorError {}
+#[cfg(feature = "std")]
+impl std::error::Error for CursorError {}
 
 pub type Result<T, E = CursorError> = core::result::Result<T, E>;
 

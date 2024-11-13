@@ -146,8 +146,8 @@ impl<T> Entry<T> {
 }
 
 impl Entry<ServerInfo> {
-    fn matches<Addr: AddrExt>(&self, addr: Addr, region: Region, filter: &Filter) -> bool {
-        self.region == region && filter.matches(addr.wrap(), &self.value)
+    fn matches(&self, region: Region, filter: &Filter) -> bool {
+        self.region == region && filter.matches(&self.value)
     }
 }
 
@@ -448,9 +448,9 @@ impl<Addr: AddrExt> MasterServer<Addr> {
                     self.filtered_servers_nat.clear();
                     self.servers
                         .iter()
-                        .filter(|(addr, info)| {
+                        .filter(|(_addr, info)| {
                             info.is_valid(now, self.timeout.server)
-                                && info.matches(**addr, p.region, &p.filter)
+                                && info.matches(p.region, &p.filter)
                         })
                         .for_each(|(addr, info)| {
                             self.filtered_servers.push(*addr);

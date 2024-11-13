@@ -15,7 +15,7 @@ repository = "https://git.mentality.rip/numas13/xash3d-master"
 default = ["std", "net"]
 std = ["alloc"]
 alloc = []
-net = []
+net = ["std"]
 
 [dependencies]
 log = "0.4.18"

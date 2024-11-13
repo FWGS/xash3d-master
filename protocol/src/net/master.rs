@@ -3,7 +3,7 @@
 
 //! Master server packets.
 
-use core::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 
 use crate::{
     cursor::{Cursor, CursorMut},

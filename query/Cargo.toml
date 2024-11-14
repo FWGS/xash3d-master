@@ -9,7 +9,7 @@ authors = ["Denis Drakhnia <numas13@gmail.com>"]
 edition = "2021"
 rust-version = "1.56"
 homepage = "https://xash.su"
-repository = "https://git.mentality.rip/numas13/xash3d-master"
+repository = "https://github.com/FWGS/xash3d-master"
 
 [features]
 default = ["color"]

@@ -5,22 +5,36 @@ on:
 
 jobs:
   test:
-    name: cargo test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1
-      - run: cargo test --all-features
+      - run: cargo t --all --all-features
 
-  # Check formatting with rustfmt
   formatting:
-    name: cargo fmt
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # Ensure rustfmt is installed and setup problem matcher
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: rustfmt
       - name: Rustfmt Check
         uses: actions-rust-lang/rustfmt@v1
+
+  compile:
+    runs-on: ubuntu-latest
+    needs: test
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-unknown-linux-gnu
+          - target: riscv64gc-unknown-linux-gnu
+          - target: x86_64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: ${{ matrix.target }}
+      - run: cargo b --all --release

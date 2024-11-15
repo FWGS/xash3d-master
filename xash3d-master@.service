@@ -1,0 +1,16 @@
+[Unit]
+Description=Xash3D Master Server
+After=network.target
+
+[Service]
+Type=simple
+DynamicUser=yes
+ExecStart=/usr/local/bin/xash3d-master -c /etc/xash3d-master/%i.toml
+ExecReload=/bin/kill -USR1 $MAINPID
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=full
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

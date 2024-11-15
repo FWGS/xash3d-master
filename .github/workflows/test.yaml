@@ -1,4 +1,4 @@
-name: "Test Suite"
+name: "test, compile and deploy"
 on:
   push:
   pull_request:
@@ -28,7 +28,7 @@ jobs:
       - name: Rustfmt Check
         uses: actions-rust-lang/rustfmt@v1
 
-  compile:
+  build:
     runs-on: ubuntu-latest
     needs: test
     continue-on-error: true
@@ -37,11 +37,66 @@ jobs:
       matrix:
         include:
           - target: aarch64-unknown-linux-gnu
+            build-essential: crossbuild-essential-arm64
+            cargoflags: --config=target.aarch64-unknown-linux-gnu.linker=\"aarch64-linux-gnu-gcc\"
+            cross: true
           - target: riscv64gc-unknown-linux-gnu
+            build-essential: crossbuild-essential-riscv64
+            cargoflags: --config=target.riscv64gc-unknown-linux-gnu.linker=\"riscv64-linux-gnu-gcc\"
+            cross: true
           - target: x86_64-unknown-linux-gnu
+            cross: false
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           target: ${{ matrix.target }}
-      - run: cargo b --all --release
+          cache-key: compile-release-${{ matrix.target }}
+      - if: ${{ matrix.cross }}
+        run: sudo apt install ${{ matrix.build-essential }}
+      - run: cargo b --workspace --release --target=${{ matrix.target }} ${{ matrix.cargoflags }}
+      - run: |
+          mkdir -p staging/ artifacts/
+          cp master/config/default.toml staging/config.toml
+          find target/${{ matrix.target }}/release -maxdepth 1 -type f -executable -exec cp {} staging/ ';'
+          pushd staging/
+            tar --zstd -cvf ../artifacts/xash3d-master-${{ matrix.target }}.tar.zst *
+          popd
+      - uses: actions/upload-artifact@v4
+        with:
+          name: artifact-${{ matrix.target }}
+          path: artifacts/*
+
+  release:
+    runs-on: ubuntu-latest
+    needs: build
+    if: ${{ github.event_name == 'push' }}
+    steps:
+    - env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        RELEASE_TAG: ${{ github.ref_name == 'master' && 'continuous' || format('continuous-{0}', github.ref_name) }}
+      run: |
+        gh release delete "$RELEASE_TAG" \
+          --yes \
+          --cleanup-tag \
+          --repo "$GITHUB_REPOSITORY" || true
+        sleep 20s
+        gh run download "$GITHUB_RUN_ID" \
+          --dir artifacts/ \
+          --repo "$GITHUB_REPOSITORY"
+        pushd artifacts/
+        echo "Found artifacts:"
+        ls
+        for i in $(find -mindepth 1 -maxdepth 1 -type d); do
+          mv "$i"/* .
+          rm -rf "$i"
+        done
+        echo "Repackaged artifacts:"
+        ls -R
+        popd
+        sleep 20s
+        gh release create "$RELEASE_TAG" artifacts/* \
+          --title "xash3d-master Continuous ${{ github.ref_name }} Build" \
+          --target $GITHUB_SHA \
+          --repo "$GITHUB_REPOSITORY" \
+          --prerelease

@@ -714,6 +714,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "xash3d-observer"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "xash3d-protocol",
+]
+
+[[package]]
 name = "xash3d-protocol"
 version = "0.2.0"
 dependencies = [

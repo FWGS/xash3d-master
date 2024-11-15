@@ -1,0 +1,16 @@
+[package]
+name = "xash3d-observer"
+description = "Library to monitor Xash3D game servers"
+version = "0.1.0"
+license = "LGPL-3.0-only"
+keywords = ["xash3d"]
+categories = []
+authors = ["Denis Drakhnia <numas13@gmail.com>"]
+edition = "2021"
+rust-version = "1.56"
+homepage = "https://xash.su"
+repository = "https://github.com/FWGS/xash3d-master"
+
+[dependencies]
+log = "0.4.18"
+xash3d-protocol = { path = "../protocol", version = "0.2.0", features = ["net"] }

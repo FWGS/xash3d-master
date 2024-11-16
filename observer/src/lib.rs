@@ -61,8 +61,7 @@ impl Connection {
         Ok(())
     }
 
-    fn is_changed(&mut self, now: Instant, buf: &[u8]) -> bool {
-        self.time = now;
+    fn is_changed(&mut self, buf: &[u8]) -> bool {
         if self.data.as_ref() != buf {
             self.data = Box::from(buf);
             true
@@ -74,7 +73,14 @@ impl Connection {
 
 #[allow(unused_variables)]
 pub trait Handler {
-    fn server_update(&mut self, addr: SocketAddr, info: &GetServerInfoResponse, is_new: bool) {}
+    fn server_update(
+        &mut self,
+        addr: SocketAddr,
+        info: &GetServerInfoResponse,
+        is_new: bool,
+        ping: Duration,
+    ) {
+    }
 
     fn server_remove(&mut self, addr: &SocketAddr) {}
 
@@ -85,6 +91,7 @@ pub trait Handler {
 pub struct ObserverBuilder<'a> {
     gamedir: Option<&'a str>,
     nat: Option<bool>,
+    filter: Option<&'a str>,
 }
 
 impl<'a> ObserverBuilder<'a> {
@@ -95,6 +102,11 @@ impl<'a> ObserverBuilder<'a> {
 
     pub fn nat(mut self, value: bool) -> Self {
         self.nat = Some(value);
+        self
+    }
+
+    pub fn filter(mut self, value: &'a str) -> Self {
+        self.filter = Some(value);
         self
     }
 
@@ -122,6 +134,9 @@ impl<'a> ObserverBuilder<'a> {
         let mut filter = String::new();
         append(&mut filter, "nat", self.nat.map(|i| i as u8));
         append(&mut filter, "gamedir", self.gamedir);
+        if let Some(s) = self.filter {
+            filter.push_str(s);
+        }
 
         let connections = HashMap::new();
         let now = Instant::now();
@@ -198,6 +213,7 @@ impl<T: Handler> Observer<T> {
                     if con.state == S::WaitingInfo {
                         self.handler.server_timeout(addr);
                     }
+                    con.time = self.now;
                     con.query_info(&self.sock, *addr)?;
                     con.state = ConnectionState::WaitingInfo;
                 }
@@ -276,14 +292,17 @@ impl<T: Handler> Observer<T> {
                 if let Some(con) = self.connections.get_mut(&from) {
                     match con.state {
                         S::ProtocolDetection | S::WaitingInfo => {
-                            if con.is_changed(self.now, buf) {
+                            if con.is_changed(buf) {
                                 let is_new = con.state == S::ProtocolDetection;
-                                self.handler.server_update(from, &packet, is_new);
+                                let ping = self.now.duration_since(con.time);
+                                self.handler.server_update(from, &packet, is_new, ping);
                             }
                             con.state = S::Idle;
                         }
                         S::Idle => {}
                     }
+                } else {
+                    // TODO: unexpected server response
                 }
             }
             Err(proto::Error::InvalidProtocolVersion) => {

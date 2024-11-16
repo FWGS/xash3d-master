@@ -2,6 +2,7 @@ use std::{
     collections::{hash_map::Entry, HashMap},
     fmt, io,
     net::SocketAddr,
+    time::Duration,
 };
 
 use xash3d_observer::{GetServerInfoResponse, Handler, ObserverBuilder};
@@ -90,16 +91,22 @@ struct Monitor {
 }
 
 impl Handler for Monitor {
-    fn server_update(&mut self, addr: SocketAddr, info: &GetServerInfoResponse, _: bool) {
+    fn server_update(
+        &mut self,
+        addr: SocketAddr,
+        info: &GetServerInfoResponse,
+        _: bool,
+        ping: Duration,
+    ) {
         let info = ServerInfo::new(info);
         match self.servers.entry(addr) {
             Entry::Occupied(mut e) => {
-                println!("{:24?} --- {}", addr, e.get());
-                println!("{:24?} +++ {}", addr, info);
+                println!("{:24?} --- {:>7.1} {}", addr, ' ', e.get());
+                println!("{:24?} +++ {:>7.1?} {}", addr, ping, info);
                 e.insert(info);
             }
             Entry::Vacant(e) => {
-                println!("{:24?} +++ {}", addr, info);
+                println!("{:24?} +++ {:>7.1?} {}", addr, ping, info);
                 e.insert(info);
             }
         }

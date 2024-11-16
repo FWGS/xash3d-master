@@ -56,7 +56,8 @@ Usage: {} [options] <COMMAND> [ARGS]
 COMMANDS:
     all                 fetch servers from all masters and fetch info for each server
     info hosts...       fetch info for each server
-    list                fetch servers from all masters and print server addresses\
+    list                fetch servers from all masters and print server addresses
+    monitor             live monitoring for server updates\
         ",
         BIN_NAME
     );

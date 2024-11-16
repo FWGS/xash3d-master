@@ -3,18 +3,19 @@
 
 mod cli;
 
-use std::cmp;
-use std::collections::{HashMap, HashSet};
-use std::fmt;
-use std::io;
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
-use std::process;
-use std::time::{Duration, Instant};
+use std::{
+    cmp,
+    collections::{hash_map::Entry, HashMap, HashSet},
+    fmt, io,
+    net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket},
+    process,
+    time::{Duration, Instant},
+};
 
 use serde::{Serialize, Serializer};
 use thiserror::Error;
-use xash3d_protocol::wrappers::Str;
-use xash3d_protocol::{color, game, master, server, Error as ProtocolError};
+use xash3d_observer::{Handler, ObserverBuilder};
+use xash3d_protocol::{color, game, master, server, wrappers::Str, Error as ProtocolError};
 
 use crate::cli::Cli;
 
@@ -45,6 +46,7 @@ enum ServerResultKind {
     },
     Timeout,
     Protocol,
+    Remove,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -118,9 +120,34 @@ struct ServerInfo {
     pub team: bool,
     pub coop: bool,
     pub password: bool,
+    pub dedicated: bool,
 }
 
 impl ServerInfo {
+    fn printer<'a>(&'a self, cli: &'a Cli) -> ServerInfoPrinter<'a> {
+        ServerInfoPrinter { info: self, cli }
+    }
+}
+
+impl From<&server::GetServerInfoResponse<&[u8]>> for ServerInfo {
+    fn from(other: &server::GetServerInfoResponse<&[u8]>) -> Self {
+        ServerInfo {
+            gamedir: String::from_utf8_lossy(other.gamedir).to_string(),
+            map: String::from_utf8_lossy(other.map).to_string(),
+            host: String::from_utf8_lossy(other.host).to_string(),
+            protocol: other.protocol,
+            numcl: other.numcl,
+            maxcl: other.maxcl,
+            dm: other.dm,
+            team: other.team,
+            coop: other.coop,
+            password: other.password,
+            dedicated: other.dedicated,
+        }
+    }
+}
+
+impl From<server::GetServerInfoResponse<&str>> for ServerInfo {
     fn from(other: server::GetServerInfoResponse<&str>) -> Self {
         Self {
             gamedir: other.gamedir.to_owned(),
@@ -133,7 +160,40 @@ impl ServerInfo {
             team: other.team,
             coop: other.coop,
             password: other.password,
+            dedicated: other.dedicated,
         }
+    }
+}
+
+struct ServerInfoPrinter<'a> {
+    cli: &'a Cli,
+    info: &'a ServerInfo,
+}
+
+impl fmt::Display for ServerInfoPrinter<'_> {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        fn flag(c: char, cond: bool) -> char {
+            if cond {
+                c
+            } else {
+                '-'
+            }
+        }
+
+        write!(
+            fmt,
+            "{}{}{}{}{} {:>2}/{:<2} {:8} {:18} \"{}\"",
+            flag('d', self.info.dm),
+            flag('t', self.info.team),
+            flag('c', self.info.coop),
+            flag('p', self.info.password),
+            flag('D', self.info.dedicated),
+            self.info.numcl,
+            self.info.maxcl,
+            self.info.gamedir,
+            self.info.map,
+            Colored::new(&self.info.host, self.cli.force_color),
+        )
     }
 }
 
@@ -178,9 +238,13 @@ impl fmt::Display for Colored<'_> {
         #[cfg(feature = "color")]
         use crossterm::{style::Stylize, tty::IsTty};
 
+        // TODO: unicode width
+        let mut width = 0;
+
         #[cfg(feature = "color")]
         if self.forced || io::stdout().is_tty() {
             for (color, text) in color::ColorIter::new(self.inner) {
+                width += text.chars().count();
                 let colored = match color::Color::try_from(color) {
                     Ok(color::Color::Black) => text.black(),
                     Ok(color::Color::Red) => text.red(),
@@ -192,13 +256,21 @@ impl fmt::Display for Colored<'_> {
                     Ok(color::Color::White) => text.white(),
                     _ => text.reset(),
                 };
-                write!(fmt, "{}", colored)?;
+                colored.fmt(fmt)?;
             }
         }
 
         #[cfg(not(feature = "color"))]
         for (_, text) in color::ColorIter::new(self.inner) {
-            write!(fmt, "{}", text)?;
+            width += text.chars().count();
+            text.fmt(fmt)?;
+        }
+
+        if let Some(w) = fmt.width() {
+            let c = fmt.fill();
+            for _ in width..w {
+                write!(fmt, "{}", c)?;
+            }
         }
 
         Ok(())
@@ -534,6 +606,7 @@ fn query_server_info(cli: &Cli, servers: &[String]) -> Result<(), Error> {
                         response: response,
                     }
                 }
+                ServerResultKind::Remove => unreachable!(),
             }
             println!();
         }
@@ -571,11 +644,98 @@ fn list_servers(cli: &Cli) -> Result<(), Error> {
     Ok(())
 }
 
+struct Monitor<'a> {
+    cli: &'a Cli,
+    servers: HashMap<SocketAddr, ServerInfo>,
+}
+
+impl<'a> Monitor<'a> {
+    fn new(cli: &'a Cli) -> Self {
+        Self {
+            cli,
+            servers: Default::default(),
+        }
+    }
+}
+
+impl Handler for Monitor<'_> {
+    fn server_update(
+        &mut self,
+        addr: SocketAddr,
+        info: &server::GetServerInfoResponse<&[u8]>,
+        _: bool,
+        ping: Duration,
+    ) {
+        let info = ServerInfo::from(info);
+        if self.cli.json {
+            let address = match addr {
+                SocketAddr::V4(address) => address,
+                SocketAddr::V6(_) => todo!(),
+            };
+            let result = ServerResult::ok(address, ping.as_micros() as f32 / 1000.0, info);
+            println!("{}", serde_json::to_string_pretty(&result).unwrap());
+        } else {
+            match self.servers.entry(addr) {
+                Entry::Occupied(mut e) => {
+                    let p = e.get().printer(self.cli);
+                    println!("{:24?} --- {:>7.1} {}", addr, ' ', p,);
+                    let p = info.printer(self.cli);
+                    println!("{:24?} +++ {:>7.1?} {}", addr, ping, p);
+                    e.insert(info);
+                }
+                Entry::Vacant(e) => {
+                    let p = info.printer(self.cli);
+                    println!("{:24?} +++ {:>7.1?} {}", addr, ping, p);
+                    e.insert(info);
+                }
+            }
+        }
+    }
+
+    fn server_timeout(&mut self, addr: &SocketAddr) {
+        if self.cli.json {
+            let address = match addr {
+                SocketAddr::V4(address) => *address,
+                SocketAddr::V6(_) => todo!(),
+            };
+            let result = ServerResult::timeout(address);
+            println!("{}", serde_json::to_string_pretty(&result).unwrap());
+        }
+    }
+
+    fn server_remove(&mut self, addr: &SocketAddr) {
+        if self.cli.json {
+            let address = match addr {
+                SocketAddr::V4(address) => *address,
+                SocketAddr::V6(_) => todo!(),
+            };
+            let result = ServerResult {
+                address,
+                ping: None,
+                kind: ServerResultKind::Remove,
+            };
+            println!("{}", serde_json::to_string_pretty(&result).unwrap());
+        } else {
+            self.servers.remove(addr);
+        }
+    }
+}
+
+fn monitor_servers(cli: &Cli) -> Result<(), Error> {
+    let masters: Vec<_> = cli.masters.iter().map(|i| &**i).collect();
+    ObserverBuilder::default()
+        .filter(&cli.filter)
+        .build(Monitor::new(cli), masters.as_slice())?
+        .run()?;
+    Ok(())
+}
+
 fn execute(cli: Cli) -> Result<(), Error> {
     match cli.args.first().map(|s| s.as_str()).unwrap_or_default() {
         "all" | "" => query_server_info(&cli, &[])?,
         "info" => query_server_info(&cli, &cli.args[1..])?,
         "list" => list_servers(&cli)?,
+        "monitor" => monitor_servers(&cli)?,
         _ => return Err(Error::UndefinedCommand),
     }
 

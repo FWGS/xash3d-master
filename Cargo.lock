@@ -741,5 +741,6 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "xash3d-observer",
  "xash3d-protocol",
 ]

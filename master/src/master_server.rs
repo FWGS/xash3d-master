@@ -335,6 +335,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         }
 
         self.update_addr = resolve_update_addr(&cfg, addr);
+        self.min_version = cfg.server.min_version;
         self.timeout = cfg.server.timeout;
         self.clver = cfg.client.version;
         self.update_title = cfg.client.update_title;

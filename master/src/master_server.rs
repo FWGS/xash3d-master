@@ -187,6 +187,7 @@ pub struct MasterServer<Addr: AddrExt> {
     servers: HashMap<Addr, Entry<ServerInfo>>,
     servers_counter: Counter,
     max_servers_per_ip: u16,
+    min_version: Version,
     rng: Rng,
 
     start_time: Instant,
@@ -294,6 +295,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
             servers: Default::default(),
             servers_counter: Counter::new(SERVER_CLEANUP_MAX),
             max_servers_per_ip: cfg.server.max_servers_per_ip,
+            min_version: cfg.server.min_version,
             rng: Rng::new(),
             timeout: cfg.server.timeout,
             clver: cfg.client.version,
@@ -400,6 +402,13 @@ impl<Addr: AddrExt> MasterServer<Addr> {
                     }
                 };
                 if !entry.is_valid(self.now(), self.timeout.challenge) {
+                    return Ok(());
+                }
+                if p.version < self.min_version {
+                    warn!(
+                        "{}: server version is {} but minimal allowed is {}",
+                        from, p.version, self.min_version
+                    );
                     return Ok(());
                 }
                 if p.challenge != entry.value {

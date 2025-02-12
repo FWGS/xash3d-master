@@ -87,6 +87,9 @@ pub struct ServerConfig {
     pub port: u16,
     #[serde(default = "default_u16::<DEFAULT_MAX_SERVERS_PER_IP>")]
     pub max_servers_per_ip: u16,
+    #[serde(default = "default_server_version")]
+    #[serde(deserialize_with = "deserialize_version")]
+    pub min_version: Version,
     #[serde(default)]
     pub timeout: TimeoutConfig,
 }
@@ -97,6 +100,7 @@ impl Default for ServerConfig {
             ip: default_server_ip(),
             port: DEFAULT_MASTER_SERVER_PORT,
             max_servers_per_ip: DEFAULT_MAX_SERVERS_PER_IP,
+            min_version: default_server_version(),
             timeout: Default::default(),
         }
     }
@@ -203,6 +207,10 @@ fn default_server_ip() -> IpAddr {
 
 fn default_client_version() -> Version {
     Version::new(0, 19)
+}
+
+fn default_server_version() -> Version {
+    Version::with_patch(0, 19, 2)
 }
 
 fn default_client_update_map() -> Box<str> {

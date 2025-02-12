@@ -9,6 +9,8 @@
 #port = 27010
 ## How many servers with the same ip can be registred
 #max-servers-per-ip = 14
+## Minimal accepted server version
+#min-version = "0.19.2"
 
 #[server.timeout]
 ## Time in seconds while challenge is valid

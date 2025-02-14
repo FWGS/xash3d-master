@@ -151,6 +151,7 @@ mod tests {
                 clver: Some(Version::new(0, 20)),
                 flags: FilterFlags::all(),
                 flags_mask: FilterFlags::all(),
+                ..Filter::default()
             },
         };
         let mut buf = [0; 512];
@@ -171,6 +172,7 @@ mod tests {
                 clver: Some(Version::new(0, 20)),
                 flags: FilterFlags::empty(),
                 flags_mask: FilterFlags::NAT,
+                ..Filter::default()
             },
         };
 

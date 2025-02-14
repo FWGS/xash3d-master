@@ -423,7 +423,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
             game::Packet::QueryServers(p) => {
                 if p.filter
                     .clver
-                    .map_or(false, |v| v < self.cfg.client.version)
+                    .map_or(false, |v| v < self.cfg.client.min_version)
                 {
                     match self.update_addr {
                         SocketAddr::V4(addr) => {

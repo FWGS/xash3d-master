@@ -132,7 +132,7 @@ impl Default for TimeoutConfig {
 pub struct ClientConfig {
     #[serde(default = "default_client_version")]
     #[serde(deserialize_with = "deserialize_version")]
-    pub version: Version,
+    pub min_version: Version,
     #[serde(default = "default_client_update_map")]
     pub update_map: Box<str>,
     #[serde(default = "default_client_update_title")]
@@ -144,7 +144,7 @@ pub struct ClientConfig {
 impl Default for ClientConfig {
     fn default() -> Self {
         Self {
-            version: default_client_version(),
+            min_version: default_client_version(),
             update_map: default_client_update_map(),
             update_title: default_client_update_title(),
             update_addr: None,

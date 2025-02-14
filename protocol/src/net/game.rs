@@ -51,7 +51,7 @@ where
     }
 }
 
-impl<'a, T: 'a> QueryServers<T>
+impl<T> QueryServers<T>
 where
     for<'b> &'b T: fmt::Display,
 {

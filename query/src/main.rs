@@ -9,7 +9,7 @@ use std::{
     fmt, io,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket},
     process,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 
 use serde::{Serialize, Serializer};
@@ -49,8 +49,20 @@ enum ServerResultKind {
     Remove,
 }
 
+fn unix_time(time: &SystemTime) -> u64 {
+    time.duration_since(SystemTime::UNIX_EPOCH)
+        .map(|i| i.as_secs())
+        .unwrap_or(0)
+}
+
+fn serialize_unix_time<S: Serializer>(time: &SystemTime, ser: S) -> Result<S::Ok, S::Error> {
+    ser.serialize_u64(unix_time(time))
+}
+
 #[derive(Clone, Debug, Serialize)]
 struct ServerResult {
+    #[serde(serialize_with = "serialize_unix_time")]
+    time: SystemTime,
     address: SocketAddrV4,
     #[serde(skip_serializing_if = "Option::is_none")]
     ping: Option<f32>,
@@ -61,6 +73,7 @@ struct ServerResult {
 impl ServerResult {
     fn new(address: SocketAddrV4, ping: Option<f32>, kind: ServerResultKind) -> Self {
         Self {
+            time: SystemTime::now(),
             address,
             ping,
             kind,
@@ -709,11 +722,7 @@ impl Handler for Monitor<'_> {
                 SocketAddr::V4(address) => *address,
                 SocketAddr::V6(_) => todo!(),
             };
-            let result = ServerResult {
-                address,
-                ping: None,
-                kind: ServerResultKind::Remove,
-            };
+            let result = ServerResult::new(address, None, ServerResultKind::Remove);
             println!("{}", serde_json::to_string_pretty(&result).unwrap());
         } else {
             self.servers.remove(addr);

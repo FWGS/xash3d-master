@@ -21,7 +21,7 @@ use log::{debug, error, info, trace, warn};
 use thiserror::Error;
 use xash3d_protocol::{
     admin,
-    filter::{Filter, FilterFlags, Version},
+    filter::{Filter, FilterFlags},
     game,
     master::{self, ServerAddress},
     server,
@@ -30,10 +30,7 @@ use xash3d_protocol::{
     Error as ProtocolError,
 };
 
-use crate::{
-    config::{self, Config},
-    stats::Stats,
-};
+use crate::{config::Config, stats::Stats};
 
 type ServerInfo = xash3d_protocol::ServerInfo<Box<[u8]>>;
 
@@ -181,30 +178,24 @@ impl Counter {
 }
 
 pub struct MasterServer<Addr: AddrExt> {
+    cfg: Config,
+
     sock: UdpSocket,
     challenges: HashMap<Addr, Entry<u32>>,
     challenges_counter: Counter,
     servers: HashMap<Addr, Entry<ServerInfo>>,
     servers_counter: Counter,
-    max_servers_per_ip: u16,
-    min_version: Version,
     rng: Rng,
 
     start_time: Instant,
-    timeout: config::TimeoutConfig,
 
-    clver: Version,
-    update_title: Box<str>,
-    update_map: Box<str>,
     update_addr: SocketAddr,
 
     admin_challenges: HashMap<Addr::Ip, Entry<(u32, u32)>>,
     admin_challenges_counter: Counter,
-    admin_list: Box<[config::AdminConfig]>,
     // rate limit if hash is invalid
     admin_limit: HashMap<Addr::Ip, Entry<()>>,
     admin_limit_counter: Counter,
-    hash: config::HashConfig,
 
     blocklist: HashSet<Addr::Ip>,
 
@@ -294,25 +285,19 @@ impl<Addr: AddrExt> MasterServer<Addr> {
             challenges_counter: Counter::new(CHALLENGE_CLEANUP_MAX),
             servers: Default::default(),
             servers_counter: Counter::new(SERVER_CLEANUP_MAX),
-            max_servers_per_ip: cfg.server.max_servers_per_ip,
-            min_version: cfg.server.min_version,
             rng: Rng::new(),
-            timeout: cfg.server.timeout,
-            clver: cfg.client.version,
-            update_title: cfg.client.update_title,
-            update_map: cfg.client.update_map,
             update_addr,
             admin_challenges: Default::default(),
             admin_challenges_counter: Counter::new(ADMIN_CHALLENGE_CLEANUP_MAX),
-            admin_list: cfg.admin_list,
             admin_limit: Default::default(),
             admin_limit_counter: Counter::new(ADMIN_LIMIT_CLEANUP_MAX),
-            hash: cfg.hash,
             blocklist: Default::default(),
-            stats: Stats::new(cfg.stat),
+            stats: Stats::new(cfg.stat.clone()),
 
             filtered_servers: Default::default(),
             filtered_servers_nat: Default::default(),
+
+            cfg,
         })
     }
 
@@ -335,14 +320,8 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         }
 
         self.update_addr = resolve_update_addr(&cfg, addr);
-        self.min_version = cfg.server.min_version;
-        self.timeout = cfg.server.timeout;
-        self.clver = cfg.client.version;
-        self.update_title = cfg.client.update_title;
-        self.update_map = cfg.client.update_map;
-        self.admin_list = cfg.admin_list;
-        self.hash = cfg.hash;
-        self.stats.update_config(cfg.stat);
+        self.stats.update_config(cfg.stat.clone());
+        self.cfg = cfg;
 
         Ok(None)
     }
@@ -402,13 +381,13 @@ impl<Addr: AddrExt> MasterServer<Addr> {
                         return Ok(());
                     }
                 };
-                if !entry.is_valid(self.now(), self.timeout.challenge) {
+                if !entry.is_valid(self.now(), self.cfg.server.timeout.challenge) {
                     return Ok(());
                 }
-                if p.version < self.min_version {
+                if p.version < self.cfg.server.min_version {
                     warn!(
                         "{}: server version is {} but minimal allowed is {}",
-                        from, p.version, self.min_version
+                        from, p.version, self.cfg.server.min_version
                     );
                     return Ok(());
                 }
@@ -442,7 +421,10 @@ impl<Addr: AddrExt> MasterServer<Addr> {
 
         match p {
             game::Packet::QueryServers(p) => {
-                if p.filter.clver.map_or(false, |v| v < self.clver) {
+                if p.filter
+                    .clver
+                    .map_or(false, |v| v < self.cfg.client.version)
+                {
                     match self.update_addr {
                         SocketAddr::V4(addr) => {
                             self.send_server_list(from, p.filter.key, &[addr])?;
@@ -459,7 +441,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
                     self.servers
                         .iter()
                         .filter(|(_addr, info)| {
-                            info.is_valid(now, self.timeout.server)
+                            info.is_valid(now, self.cfg.server.timeout.server)
                                 && info.matches(p.region, &p.filter)
                         })
                         .for_each(|(addr, info)| {
@@ -482,8 +464,8 @@ impl<Addr: AddrExt> MasterServer<Addr> {
             }
             game::Packet::GetServerInfo(_) => {
                 let p = server::GetServerInfoResponse {
-                    map: self.update_map.as_ref(),
-                    host: self.update_title.as_ref(),
+                    map: self.cfg.client.update_map.as_ref(),
+                    host: self.cfg.client.update_title.as_ref(),
                     protocol: 48, // XXX: how to detect what version client will accept?
                     dm: true,
                     maxcl: 32,
@@ -506,7 +488,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         let now = self.now();
 
         if let Some(e) = self.admin_limit.get(from.ip()) {
-            if e.is_valid(now, self.timeout.admin) {
+            if e.is_valid(now, self.cfg.server.timeout.admin) {
                 trace!("{}: rate limit", from);
                 return Ok(());
             }
@@ -535,18 +517,18 @@ impl<Addr: AddrExt> MasterServer<Addr> {
                     return Ok(());
                 }
 
-                if !entry.is_valid(now, self.timeout.challenge) {
+                if !entry.is_valid(now, self.cfg.server.timeout.challenge) {
                     trace!("{}: challenge is outdated", from);
                     return Ok(());
                 }
 
                 let state = Params::new()
-                    .hash_length(self.hash.len)
-                    .key(self.hash.key.as_bytes())
-                    .personal(self.hash.personal.as_bytes())
+                    .hash_length(self.cfg.hash.len)
+                    .key(self.cfg.hash.key.as_bytes())
+                    .personal(self.cfg.hash.personal.as_bytes())
                     .to_state();
 
-                let admin = self.admin_list.iter().find(|i| {
+                let admin = self.cfg.admin_list.iter().find(|i| {
                     let hash = state
                         .clone()
                         .update(i.password.as_bytes())
@@ -590,7 +572,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
             Err(e) => Err(e)?,
         }
 
-        match admin::Packet::decode(self.hash.len, src) {
+        match admin::Packet::decode(self.cfg.hash.len, src) {
             Ok(Some(p)) => return self.handle_admin_packet(from, p),
             Ok(None) => {}
             Err(e) => Err(e)?,
@@ -614,7 +596,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         if self.challenges_counter.next() {
             let now = self.now();
             self.challenges
-                .retain(|_, v| v.is_valid(now, self.timeout.challenge));
+                .retain(|_, v| v.is_valid(now, self.cfg.server.timeout.challenge));
         }
     }
 
@@ -635,7 +617,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         if self.admin_challenges_counter.next() {
             let now = self.now();
             self.admin_challenges
-                .retain(|_, v| v.is_valid(now, self.timeout.challenge));
+                .retain(|_, v| v.is_valid(now, self.cfg.server.timeout.challenge));
         }
     }
 
@@ -643,7 +625,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         if self.admin_limit_counter.next() {
             let now = self.now();
             self.admin_limit
-                .retain(|_, v| v.is_valid(now, self.timeout.admin));
+                .retain(|_, v| v.is_valid(now, self.cfg.server.timeout.admin));
         }
     }
 
@@ -659,7 +641,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
                 e.insert(Entry::new(now, server));
             }
             hash_map::Entry::Vacant(_) => {
-                if self.count_servers(addr.ip()) >= self.max_servers_per_ip {
+                if self.count_servers(addr.ip()) >= self.cfg.server.max_servers_per_ip {
                     trace!("{}: max servers per ip", addr);
                     return;
                 }
@@ -673,7 +655,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         if self.servers_counter.next() {
             let now = self.now();
             self.servers
-                .retain(|_, v| v.is_valid(now, self.timeout.server));
+                .retain(|_, v| v.is_valid(now, self.cfg.server.timeout.server));
             self.stats.servers_count(self.servers.len());
         }
     }

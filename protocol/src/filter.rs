@@ -176,8 +176,18 @@ pub struct Filter<'a> {
     pub map: Option<Str<&'a [u8]>>,
     /// Client version.
     pub clver: Option<Version>,
-    /// Protocol version
+    /// Client protocol version.
     pub protocol: Option<u8>,
+    /// Client OS.
+    pub client_os: Option<Str<&'a [u8]>>,
+    /// Client CPU architecture.
+    pub client_arch: Option<Str<&'a [u8]>>,
+    /// Client branch.
+    pub client_branch: Option<Str<&'a [u8]>>,
+    /// Client commit.
+    pub client_commit: Option<Str<&'a [u8]>>,
+    /// Client buildnum.
+    pub client_buildnum: Option<u32>,
     /// A number that master must sent back to game client.
     pub key: Option<u32>,
     /// Additional filter flags.
@@ -249,6 +259,11 @@ impl<'a> TryFrom<&'a [u8]> for Filter<'a> {
                 b"password" => filter.insert_flag(FilterFlags::PASSWORD, cur.get("password")?),
                 b"noplayers" => filter.insert_flag(FilterFlags::NOPLAYERS, cur.get("noplayers")?),
                 b"clver" => filter.clver = Some(cur.get("clver")?),
+                b"os" => filter.client_os = Some(cur.get("os")?),
+                b"arch" => filter.client_arch = Some(cur.get("arch")?),
+                b"branch" => filter.client_branch = Some(cur.get("branch")?),
+                b"commit" => filter.client_commit = Some(cur.get("commit")?),
+                b"buildnum" => filter.client_buildnum = Some(cur.get("buildnum")?),
                 b"nat" => filter.insert_flag(FilterFlags::NAT, cur.get("nat")?),
                 b"lan" => filter.insert_flag(FilterFlags::LAN, cur.get("lan")?),
                 b"bots" => filter.insert_flag(FilterFlags::BOTS, cur.get("bots")?),

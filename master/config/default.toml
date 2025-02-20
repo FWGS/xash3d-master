@@ -3,6 +3,8 @@
 #[log]
 ## Possible values: 0-5, off, error, warn, info, debug, trace
 #level = "info"
+## Print time (feature logtime)
+#time = true
 
 #[server]
 #ip = "0.0.0.0"

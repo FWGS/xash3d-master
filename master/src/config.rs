@@ -30,6 +30,7 @@ macro_rules! impl_helpers {
 }
 
 impl_helpers! {
+    default_bool: bool,
     default_u16: u16,
     default_u32: u32,
     default_usize: usize,
@@ -67,12 +68,15 @@ pub struct LogConfig {
     #[serde(default = "default_log_level")]
     #[serde(deserialize_with = "deserialize_log_level")]
     pub level: LevelFilter,
+    #[serde(default = "default_bool::<true>")]
+    pub time: bool,
 }
 
 impl Default for LogConfig {
     fn default() -> Self {
         Self {
             level: default_log_level(),
+            time: true,
         }
     }
 }

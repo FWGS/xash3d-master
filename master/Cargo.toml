@@ -5,11 +5,11 @@ version = "0.2.1"
 license = "GPL-3.0-only"
 keywords = ["xash3d"]
 categories = ["command-line-utilities"]
-authors = ["Denis Drakhnia <numas13@gmail.com>"]
+authors.workspace = true
 edition = "2021"
-rust-version = "1.56"
-homepage = "https://xash.su"
-repository = "https://github.com/FWGS/xash3d-master"
+rust-version.workspace = true
+homepage.workspace = true
+repository.workspace = true
 
 [features]
 default = ["logtime"]
@@ -17,16 +17,16 @@ logtime = ["chrono"]
 stats = []
 
 [dependencies]
-thiserror = "1.0.49"
-getopts = "0.2.21"
-log = "0.4.18"
-bitflags = "2.4"
+thiserror.workspace = true
+getopts.workspace = true
+log.workspace = true
+bitflags.workspace = true
 fastrand = "2.0.1"
-serde = { version = "1.0.188", features = ["derive"] }
+serde.workspace = true
 toml = "0.5.11"
-blake2b_simd = "1.0"
+blake2b_simd.workspace = true
 ahash = "0.4.8"
-xash3d-protocol = { path = "../protocol", version = "0.2.0" }
+xash3d-protocol.workspace = true
 
 [target.'cfg(not(windows))'.dependencies]
 signal-hook = { version = "0.3.17", default-features = false }

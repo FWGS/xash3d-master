@@ -5,11 +5,11 @@ version = "0.2.0"
 license = "LGPL-3.0-only"
 keywords = ["xash3d"]
 categories = ["parsing"]
-authors = ["Denis Drakhnia <numas13@gmail.com>"]
+authors.workspace = true
 edition = "2021"
-rust-version = "1.56"
-homepage = "https://xash.su"
-repository = "https://github.com/FWGS/xash3d-master"
+rust-version.workspace = true
+homepage.workspace = true
+repository.workspace = true
 
 [features]
 default = ["std", "net"]
@@ -18,8 +18,8 @@ alloc = []
 net = ["std"]
 
 [dependencies]
-log = "0.4.18"
-bitflags = "2.4"
+log.workspace = true
+bitflags.workspace = true
 
 [build-dependencies]
 autocfg = "1.3"

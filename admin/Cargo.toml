@@ -5,15 +5,15 @@ version = "0.2.0"
 license = "GPL-3.0-only"
 keywords = ["xash3d"]
 categories = ["command-line-utilities"]
-authors = ["Denis Drakhnia <numas13@gmail.com>"]
+authors.workspace = true
 edition = "2021"
-rust-version = "1.56"
-homepage = "https://xash.su"
-repository = "https://github.com/FWGS/xash3d-master"
+rust-version.workspace = true
+homepage.workspace = true
+repository.workspace = true
 
 [dependencies]
-thiserror = "1.0.49"
-getopts = "0.2.21"
+thiserror.workspace = true
+getopts.workspace = true
 crossterm = "0.25.0"
-blake2b_simd = "=1.0.0"
-xash3d-protocol = { path = "../protocol", version = "0.2.0" }
+blake2b_simd.workspace = true
+xash3d-protocol.workspace = true

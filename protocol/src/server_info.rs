@@ -133,23 +133,18 @@ bitflags! {
 }
 
 /// The operating system on which the game server runs.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
 #[repr(u8)]
 pub enum Os {
+    /// Unknown
+    #[default]
+    Unknown,
     /// GNU/Linux.
     Linux,
     /// Microsoft Windows
     Windows,
     /// Apple macOS, OS X, Mac OS X
     Mac,
-    /// Unknown
-    Unknown,
-}
-
-impl Default for Os {
-    fn default() -> Os {
-        Os::Unknown
-    }
 }
 
 impl TryFrom<&[u8]> for Os {

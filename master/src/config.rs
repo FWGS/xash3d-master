@@ -23,6 +23,11 @@ pub const DEFAULT_MAX_SERVERS_PER_IP: u16 = 14;
 
 pub const DEFAULT_HASH_LEN: usize = admin::HASH_LEN;
 
+// it was added in 0.19.4 on 26 Feb 2025:
+// https://github.com/tyabus/xash3d/commit/839504e464ccdfeb15bce060be0603e2ee580d00
+// give it 100 more days in the past, just in case
+pub const DEFAULT_MIN_OLD_ENGINE_BUILDNUM: u32 = 3500;
+
 macro_rules! impl_helpers {
     ($($f:ident: $t:ty),+$(,)?) => (
         $(const fn $f<const N: $t>() -> $t { N })+
@@ -137,6 +142,8 @@ pub struct ClientConfig {
     #[serde(default = "default_client_version")]
     #[serde(deserialize_with = "deserialize_version")]
     pub min_version: Version,
+    #[serde(default = "default_u32::<DEFAULT_MIN_OLD_ENGINE_BUILDNUM>")]
+    pub min_old_engine_buildnum: u32,
     #[serde(default = "default_client_update_map")]
     pub update_map: Box<str>,
     #[serde(default = "default_client_update_title")]
@@ -149,6 +156,7 @@ impl Default for ClientConfig {
     fn default() -> Self {
         Self {
             min_version: default_client_version(),
+            min_old_engine_buildnum: DEFAULT_MIN_OLD_ENGINE_BUILDNUM,
             update_map: default_client_update_map(),
             update_title: default_client_update_title(),
             update_addr: None,

@@ -47,6 +47,8 @@
 #[client]
 ## If client version is less then show update message
 #version = "0.19"
+## If client buildnum is old engine and less than number specified, show update message
+#min_old_engine_buildnum = 3500
 #update_title = "https://github.com/FWGS/xash3d-fwgs"
 #update_map = "Update please"
 ##update_addr = "mentality.rip"

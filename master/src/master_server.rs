@@ -21,6 +21,7 @@ use log::{debug, error, info, trace, warn};
 use thiserror::Error;
 use xash3d_protocol::{
     admin,
+    filter::Version,
     filter::{Filter, FilterFlags},
     game,
     master::{self, ServerAddress},
@@ -416,51 +417,76 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         Ok(())
     }
 
+    fn send_fake_server(
+        &self,
+        from: Addr,
+        key: Option<u32>,
+        update_addr: SocketAddr,
+    ) -> Result<(), Error> {
+        match update_addr {
+            SocketAddr::V4(addr) => {
+                self.send_server_list(from, key, &[addr])?;
+            }
+            SocketAddr::V6(addr) => {
+                self.send_server_list(from, key, &[addr])?;
+            }
+        }
+        Ok(())
+    }
+
     fn handle_game_packet(&mut self, from: Addr, p: game::Packet) -> Result<(), Error> {
         trace!("{}: recv {:?}", from, p);
 
         match p {
             game::Packet::QueryServers(p) => {
+                // FIXME: if we will ever support XashNT master server protocol, depends whether
+                // Unkle Mike would like to use our implementation and server, just hide this
+                // whole mess under a "feature" and host a MS for him on a separate port
+
                 if p.filter
                     .clver
                     .map_or(false, |v| v < self.cfg.client.min_version)
                 {
-                    match self.update_addr {
-                        SocketAddr::V4(addr) => {
-                            self.send_server_list(from, p.filter.key, &[addr])?;
-                        }
-                        SocketAddr::V6(addr) => {
-                            self.send_server_list(from, p.filter.key, &[addr])?;
-                        }
-                    }
-                } else {
-                    let now = self.now();
-
-                    self.filtered_servers.clear();
-                    self.filtered_servers_nat.clear();
-                    self.servers
-                        .iter()
-                        .filter(|(_addr, info)| {
-                            info.is_valid(now, self.cfg.server.timeout.server)
-                                && info.matches(p.region, &p.filter)
-                        })
-                        .for_each(|(addr, info)| {
-                            self.filtered_servers.push(*addr);
-                            if info.flags.contains(FilterFlags::NAT) {
-                                self.filtered_servers_nat.push(*addr);
-                            }
-                        });
-
-                    self.send_server_list(from, p.filter.key, &self.filtered_servers)?;
-
-                    // NOTE: If NAT is not set in a filter then by default the client is announced
-                    // to filtered servers behind NAT.
-                    if p.filter.contains_flags(FilterFlags::NAT).unwrap_or(true) {
-                        self.send_client_to_nat_servers(from, &self.filtered_servers_nat)?;
-                    }
-
-                    self.stats.on_query_servers();
+                    return self.send_fake_server(from, p.filter.key, self.update_addr);
                 }
+
+                // old engine has separate buildnum limit
+                if p.filter.clver.map_or(false, |v| v < Version::new(0, 20))
+                    && p.filter
+                        .client_buildnum
+                        .map_or(false, |v| v < self.cfg.client.min_old_engine_buildnum)
+                {
+                    return self.send_fake_server(from, p.filter.key, self.update_addr);
+                }
+
+                // TODO: check for >=0.20 and implement min_buildnum for it too
+
+                let now = self.now();
+
+                self.filtered_servers.clear();
+                self.filtered_servers_nat.clear();
+                self.servers
+                    .iter()
+                    .filter(|(_addr, info)| {
+                        info.is_valid(now, self.cfg.server.timeout.server)
+                            && info.matches(p.region, &p.filter)
+                    })
+                    .for_each(|(addr, info)| {
+                        self.filtered_servers.push(*addr);
+                        if info.flags.contains(FilterFlags::NAT) {
+                            self.filtered_servers_nat.push(*addr);
+                        }
+                    });
+
+                self.send_server_list(from, p.filter.key, &self.filtered_servers)?;
+
+                // NOTE: If NAT is not set in a filter then by default the client is announced
+                // to filtered servers behind NAT.
+                if p.filter.contains_flags(FilterFlags::NAT).unwrap_or(true) {
+                    self.send_client_to_nat_servers(from, &self.filtered_servers_nat)?;
+                }
+
+                self.stats.on_query_servers();
             }
             game::Packet::GetServerInfo(_) => {
                 let p = server::GetServerInfoResponse {

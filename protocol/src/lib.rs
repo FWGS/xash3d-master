@@ -39,7 +39,7 @@ use crate::filter::Version;
 /// Current protocol version.
 pub const PROTOCOL_VERSION: u8 = 49;
 /// Current client version.
-pub const CLIENT_VERSION: Version = Version::new(0, 20);
+pub const CLIENT_VERSION: Version = Version::new(0, 21);
 
 /// The error type for decoding and encoding packets.
 #[derive(Debug, PartialEq, Eq)]

@@ -396,6 +396,37 @@ mod tests {
                 protocol: Some(48)
             }
         }
+        parse_os {
+            b"\\os\\linux" => {
+                client_os: Some(Str(b"linux")),
+            }
+            b"\\os\\win32" => {
+                client_os: Some(Str(b"win32")),
+            }
+        }
+        parse_arch {
+            b"\\arch\\i386" => {
+                client_arch: Some(Str(b"i386")),
+            }
+            b"\\arch\\riscv64" => {
+                client_arch: Some(Str(b"riscv64")),
+            }
+        }
+        parse_branch {
+            b"\\branch\\master" => {
+                client_branch: Some(Str(b"master")),
+            }
+        }
+        parse_commit {
+            b"\\commit\\1234abcd" => {
+                client_commit: Some(Str(b"1234abcd")),
+            }
+        }
+        parse_buildnum {
+            b"\\buildnum\\1234" => {
+                client_buildnum: Some(1234),
+            }
+        }
         parse_dedicated(flags_mask: FilterFlags::DEDICATED) {
             b"\\dedicated\\0" => {}
             b"\\dedicated\\1" => {

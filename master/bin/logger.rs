@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// SPDX-FileCopyrightText: 2023 Denis Drakhnia <numas13@gmail.com>
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use log::{Metadata, Record};
-
-use crate::config::LogConfig;
+use xash3d_master::config::LogConfig;
 
 pub struct Logger {
     print_time: AtomicBool,

@@ -1,6 +1,3 @@
-// SPDX-License-Identifier: GPL-3.0-only
-// SPDX-FileCopyrightText: 2023 Denis Drakhnia <numas13@gmail.com>
-
 use std::{
     cmp::Eq,
     collections::hash_map,

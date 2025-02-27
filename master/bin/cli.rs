@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// SPDX-FileCopyrightText: 2023 Denis Drakhnia <numas13@gmail.com>
 
 use std::net::IpAddr;
 use std::process;
@@ -8,7 +7,7 @@ use getopts::Options;
 use log::LevelFilter;
 use thiserror::Error;
 
-use crate::config;
+use xash3d_master::config;
 
 const BIN_NAME: &str = env!("CARGO_BIN_NAME");
 const PKG_NAME: &str = env!("CARGO_PKG_NAME");

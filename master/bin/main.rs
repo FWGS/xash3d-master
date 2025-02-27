@@ -1,13 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// SPDX-FileCopyrightText: 2023 Denis Drakhnia <numas13@gmail.com>
 
 #![deny(unsafe_code)]
 
 mod cli;
-mod config;
 mod logger;
-mod master_server;
-mod stats;
 
 use std::{
     process,
@@ -20,13 +16,12 @@ use std::{
 use log::{error, info};
 #[cfg(not(windows))]
 use signal_hook::{consts::signal::*, flag as signal_flag};
-
-use crate::{
-    cli::Cli,
-    config::Config,
-    logger::Logger,
-    master_server::{Error, Master},
+use xash3d_master::{
+    config::{self, Config},
+    Error, Master,
 };
+
+use crate::{cli::Cli, logger::Logger};
 
 fn load_config(cli: &Cli, logger: &Logger) -> Result<Config, config::Error> {
     let mut cfg = match cli.config_path {

@@ -27,8 +27,6 @@ pub const DEFAULT_MIN_ENGINE_BUILDNUM: u32 = 0;
 // give it 100 more days in the past, just in case
 pub const DEFAULT_MIN_OLD_ENGINE_BUILDNUM: u32 = 3500;
 
-pub const DEFAULT_CLIENT_UPDATE_PROTOCOL: u8 = 48;
-
 macro_rules! impl_helpers {
     ($($f:ident: $t:ty),+$(,)?) => (
         $(const fn $f<const N: $t>() -> $t { N })+
@@ -37,7 +35,6 @@ macro_rules! impl_helpers {
 
 impl_helpers! {
     default_bool: bool,
-    default_u8: u8,
     default_u16: u16,
     default_u32: u32,
     default_usize: usize,
@@ -154,10 +151,6 @@ pub struct ClientConfig {
     pub update_title: Box<str>,
     #[serde(default)]
     pub update_addr: Option<Box<str>>,
-    #[serde(default = "default_u8::<DEFAULT_CLIENT_UPDATE_PROTOCOL>")]
-    pub update_protocol: u8,
-    #[serde(default = "default_client_update_gamedir")]
-    pub update_gamedir: Box<str>,
 }
 
 impl Default for ClientConfig {
@@ -169,8 +162,6 @@ impl Default for ClientConfig {
             update_map: default_client_update_map(),
             update_title: default_client_update_title(),
             update_addr: None,
-            update_protocol: DEFAULT_CLIENT_UPDATE_PROTOCOL,
-            update_gamedir: default_client_update_gamedir(),
         }
     }
 }
@@ -242,10 +233,6 @@ fn default_client_update_map() -> Box<str> {
 
 fn default_client_update_title() -> Box<str> {
     Box::from("https://github.com/FWGS/xash3d-fwgs")
-}
-
-fn default_client_update_gamedir() -> Box<str> {
-    Box::from("valve")
 }
 
 fn default_hash_key() -> Box<str> {

@@ -1,3 +1,5 @@
+mod str_arr;
+
 use std::{
     cmp::Eq,
     collections::hash_map,
@@ -6,7 +8,7 @@ use std::{
     io,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, ToSocketAddrs, UdpSocket},
     ops::Deref,
-    str::FromStr,
+    str::{self, FromStr},
     sync::atomic::{AtomicBool, Ordering},
     time::{Duration, Instant},
 };
@@ -15,6 +17,7 @@ use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use blake2b_simd::Params;
 use fastrand::Rng;
 use log::{debug, error, info, trace, warn};
+use str_arr::StrArr;
 use thiserror::Error;
 use xash3d_protocol::{
     admin,
@@ -105,6 +108,11 @@ const ADMIN_CHALLENGE_CLEANUP_MAX: usize = 100;
 /// How many cleanup calls should be skipped before removing outdated admin limit entries
 const ADMIN_LIMIT_CLEANUP_MAX: usize = 100;
 
+/// How many cleanup calls should be skipped before removing outdated update gamedir entries
+const UPDATE_GAMEDIR_CLEANUP_MAX: usize = 100;
+
+const GAMEDIR_MAX_SIZE: usize = 31;
+
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Failed to bind server socket: {0}")]
@@ -173,35 +181,6 @@ impl Counter {
     }
 }
 
-pub struct MasterServer<Addr: AddrExt> {
-    cfg: Config,
-
-    sock: UdpSocket,
-    challenges: HashMap<Addr, Entry<u32>>,
-    challenges_counter: Counter,
-    servers: HashMap<Addr, Entry<ServerInfo>>,
-    servers_counter: Counter,
-    rng: Rng,
-
-    start_time: Instant,
-
-    update_addr: SocketAddr,
-
-    admin_challenges: HashMap<Addr::Ip, Entry<(u32, u32)>>,
-    admin_challenges_counter: Counter,
-    // rate limit if hash is invalid
-    admin_limit: HashMap<Addr::Ip, Entry<()>>,
-    admin_limit_counter: Counter,
-
-    blocklist: HashSet<Addr::Ip>,
-
-    stats: Stats,
-
-    // temporary data
-    filtered_servers: Vec<Addr>,
-    filtered_servers_nat: Vec<Addr>,
-}
-
 fn resolve_socket_addr<A>(addr: A, is_ipv4: bool) -> io::Result<Option<SocketAddr>>
 where
     A: ToSocketAddrs,
@@ -264,6 +243,36 @@ impl Master {
     }
 }
 
+pub struct MasterServer<Addr: AddrExt> {
+    cfg: Config,
+    rng: Rng,
+    start_time: Instant,
+
+    sock: UdpSocket,
+    challenges: HashMap<Addr, Entry<u32>>,
+    challenges_counter: Counter,
+    servers: HashMap<Addr, Entry<ServerInfo>>,
+    servers_counter: Counter,
+
+    admin_challenges: HashMap<Addr::Ip, Entry<(u32, u32)>>,
+    admin_challenges_counter: Counter,
+    // rate limit if hash is invalid
+    admin_limit: HashMap<Addr::Ip, Entry<()>>,
+    admin_limit_counter: Counter,
+
+    update_addr: SocketAddr,
+    update_gamedir: HashMap<Addr, Entry<StrArr<GAMEDIR_MAX_SIZE>>>,
+    update_gamedir_counter: Counter,
+
+    blocklist: HashSet<Addr::Ip>,
+
+    stats: Stats,
+
+    // temporary data
+    filtered_servers: Vec<Addr>,
+    filtered_servers_nat: Vec<Addr>,
+}
+
 impl<Addr: AddrExt> MasterServer<Addr> {
     pub fn new(cfg: Config, addr: Addr) -> Result<Self, Error> {
         info!("Listen address: {}", addr);
@@ -283,6 +292,8 @@ impl<Addr: AddrExt> MasterServer<Addr> {
             servers_counter: Counter::new(SERVER_CLEANUP_MAX),
             rng: Rng::new(),
             update_addr,
+            update_gamedir: Default::default(),
+            update_gamedir_counter: Counter::new(UPDATE_GAMEDIR_CLEANUP_MAX),
             admin_challenges: Default::default(),
             admin_challenges_counter: Counter::new(ADMIN_CHALLENGE_CLEANUP_MAX),
             admin_limit: Default::default(),
@@ -457,6 +468,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         key: Option<u32>,
         update_addr: SocketAddr,
     ) -> Result<(), Error> {
+        trace!("{from}: send fake server ({key:?}, {update_addr})");
         match update_addr {
             SocketAddr::V4(addr) => {
                 self.send_server_list(from, key, &[addr])?;
@@ -472,6 +484,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         let filter = &query.filter;
 
         if !self.is_query_servers_valid(&from, query) {
+            self.save_client_gamedir(from, query.filter.gamedir);
             return self.send_fake_server(from, filter.key, self.update_addr);
         }
 
@@ -519,33 +532,55 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         Ok(())
     }
 
-    fn handle_game_packet(&mut self, from: Addr, p: game::Packet) -> Result<(), Error> {
-        trace!("{}: recv {:?}", from, p);
+    fn save_client_gamedir(&mut self, from: Addr, gamedir: Option<Str<&[u8]>>) {
+        let err_msg = "failed to save gamedir for update message";
+        let Some(gamedir) = gamedir else {
+            trace!("{from}: {err_msg}, gamedir is none");
+            return;
+        };
+        let Some(gamedir) = StrArr::new(&gamedir) else {
+            trace!("{from}: {err_msg}, gamedir is invalid {gamedir:?}");
+            return;
+        };
+        let now = self.now();
+        let entry = Entry::new(now, gamedir);
+        self.update_gamedir.insert(from, entry);
 
+        // remove outdated saved client gamedirs
+        if self.update_gamedir_counter.next() {
+            self.challenges.retain(|_, v| v.is_valid(now, 5));
+        }
+    }
+
+    fn send_update_info(&mut self, from: Addr, protocol: u8) -> Result<(), Error> {
+        let gamedir = self.update_gamedir.remove(&from).map(|i| i.value);
+        let p = server::GetServerInfoResponse {
+            map: self.cfg.client.update_map.as_ref(),
+            host: self.cfg.client.update_title.as_ref(),
+            protocol,
+            dm: true,
+            maxcl: 32,
+            gamedir: gamedir.as_ref().map_or("valve", |i| i.as_str()),
+            ..Default::default()
+        };
+        trace!("{from}: send {p:?}");
+        let mut buf = [0; MAX_PACKET_SIZE];
+        let n = p.encode(&mut buf[..Addr::mtu()])?;
+        self.sock.send_to(&buf[..n], from)?;
+        Ok(())
+    }
+
+    fn handle_game_packet(&mut self, from: Addr, p: game::Packet) -> Result<(), Error> {
+        trace!("{from}: recv {p:?}");
         match p {
             game::Packet::QueryServers(p) => {
                 self.stats.on_query_servers();
                 self.send_servers(from, &p)?;
             }
-            game::Packet::GetServerInfo(_) => {
-                let p = server::GetServerInfoResponse {
-                    map: self.cfg.client.update_map.as_ref(),
-                    host: self.cfg.client.update_title.as_ref(),
-                    // XXX: how to detect what version client will accept?
-                    protocol: self.cfg.client.update_protocol,
-                    dm: true,
-                    maxcl: 32,
-                    // XXX: probably must be specific for client...
-                    gamedir: &self.cfg.client.update_gamedir,
-                    ..Default::default()
-                };
-                trace!("{}: send {:?}", from, p);
-                let mut buf = [0; MAX_PACKET_SIZE];
-                let n = p.encode(&mut buf[..Addr::mtu()])?;
-                self.sock.send_to(&buf[..n], from)?;
+            game::Packet::GetServerInfo(p) => {
+                self.send_update_info(from, p.protocol)?;
             }
         }
-
         Ok(())
     }
 

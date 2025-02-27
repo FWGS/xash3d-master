@@ -53,8 +53,6 @@ interval = 0
 #update_title = "https://github.com/FWGS/xash3d-fwgs"
 #update_map = "Update please"
 #update_addr = "mentality.rip"
-#update_protocol = 48
-#update_gamedir = "valve"
 
 [hash]
 #len = 64

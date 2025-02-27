@@ -484,8 +484,12 @@ impl<'a> Scan<'a> {
                             }
                         }
                     }
+                    continue;
                 }
-            } else if let Some(query) = active.remove(&from) {
+                // fallthrough, update message from master server
+            }
+
+            if let Some(query) = active.remove(&from) {
                 match server::GetServerInfoResponse::decode(raw) {
                     Ok(packet) => {
                         let info = ServerInfo::from(packet);

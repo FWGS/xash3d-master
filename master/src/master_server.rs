@@ -495,6 +495,11 @@ impl<Addr: AddrExt> MasterServer<Addr> {
                 continue;
             }
 
+            // skip if client is 0.20 and server protocol is above 48
+            if client_version < Version::new(0, 20) && info.protocol != 48 {
+                continue;
+            }
+
             self.filtered_servers.push(*addr);
 
             if info.flags.contains(FilterFlags::NAT) {

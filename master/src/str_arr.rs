@@ -31,8 +31,6 @@ impl<const N: usize> StrArr<N> {
 
     pub fn as_str(&self) -> &str {
         // SAFETY: checked in constructor
-        unsafe {
-            str::from_utf8_unchecked(self.as_bytes())
-        }
+        unsafe { str::from_utf8_unchecked(self.as_bytes()) }
     }
 }

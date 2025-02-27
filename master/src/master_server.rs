@@ -1,5 +1,3 @@
-mod str_arr;
-
 use std::{
     cmp::Eq,
     collections::hash_map,
@@ -10,14 +8,13 @@ use std::{
     ops::Deref,
     str::{self, FromStr},
     sync::atomic::{AtomicBool, Ordering},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use blake2b_simd::Params;
 use fastrand::Rng;
 use log::{debug, error, info, trace, warn};
-use str_arr::StrArr;
 use thiserror::Error;
 use xash3d_protocol::{
     admin,
@@ -29,7 +26,7 @@ use xash3d_protocol::{
     Error as ProtocolError,
 };
 
-use crate::{config::Config, stats::Stats};
+use crate::{cleanup::Cleanup, config::Config, stats::Stats, str_arr::StrArr, time::RelativeTimer};
 
 type ServerInfo = xash3d_protocol::ServerInfo<Box<[u8]>>;
 
@@ -96,21 +93,6 @@ impl AddrExt for SocketAddrV6 {
 /// The maximum size of UDP packets.
 const MAX_PACKET_SIZE: usize = 1280;
 
-/// How many cleanup calls should be skipped before removing outdated servers.
-const SERVER_CLEANUP_MAX: usize = 100;
-
-/// How many cleanup calls should be skipped before removing outdated challenges.
-const CHALLENGE_CLEANUP_MAX: usize = 100;
-
-/// How many cleanup calls should be skipped before removing outdated admin challenges.
-const ADMIN_CHALLENGE_CLEANUP_MAX: usize = 100;
-
-/// How many cleanup calls should be skipped before removing outdated admin limit entries
-const ADMIN_LIMIT_CLEANUP_MAX: usize = 100;
-
-/// How many cleanup calls should be skipped before removing outdated update gamedir entries
-const UPDATE_GAMEDIR_CLEANUP_MAX: usize = 100;
-
 const GAMEDIR_MAX_SIZE: usize = 31;
 
 #[derive(Error, Debug)]
@@ -157,27 +139,6 @@ impl<T> Deref for Entry<T> {
 
     fn deref(&self) -> &Self::Target {
         &self.value
-    }
-}
-
-struct Counter {
-    max: usize,
-    cur: usize,
-}
-
-impl Counter {
-    fn new(max: usize) -> Self {
-        Self { max, cur: 0 }
-    }
-
-    fn next(&mut self) -> bool {
-        if self.cur <= self.max {
-            self.cur += 1;
-            false
-        } else {
-            self.cur = 0;
-            true
-        }
     }
 }
 
@@ -243,26 +204,23 @@ impl Master {
     }
 }
 
+type CleanupHashMap<K, V> = Cleanup<HashMap<K, V>>;
+
 pub struct MasterServer<Addr: AddrExt> {
     cfg: Config,
     rng: Rng,
-    start_time: Instant,
+    time: RelativeTimer,
 
     sock: UdpSocket,
-    challenges: HashMap<Addr, Entry<u32>>,
-    challenges_counter: Counter,
-    servers: HashMap<Addr, Entry<ServerInfo>>,
-    servers_counter: Counter,
+    challenges: CleanupHashMap<Addr, Entry<u32>>,
+    servers: CleanupHashMap<Addr, Entry<ServerInfo>>,
 
-    admin_challenges: HashMap<Addr::Ip, Entry<(u32, u32)>>,
-    admin_challenges_counter: Counter,
+    admin_challenges: CleanupHashMap<Addr::Ip, Entry<(u32, u32)>>,
     // rate limit if hash is invalid
-    admin_limit: HashMap<Addr::Ip, Entry<()>>,
-    admin_limit_counter: Counter,
+    admin_limit: CleanupHashMap<Addr::Ip, Entry<()>>,
 
     update_addr: SocketAddr,
-    update_gamedir: HashMap<Addr, Entry<StrArr<GAMEDIR_MAX_SIZE>>>,
-    update_gamedir_counter: Counter,
+    update_gamedir: CleanupHashMap<Addr, Entry<StrArr<GAMEDIR_MAX_SIZE>>>,
 
     blocklist: HashSet<Addr::Ip>,
 
@@ -285,19 +243,14 @@ impl<Addr: AddrExt> MasterServer<Addr> {
 
         Ok(Self {
             sock,
-            start_time: Instant::now(),
+            time: RelativeTimer::new(),
             challenges: Default::default(),
-            challenges_counter: Counter::new(CHALLENGE_CLEANUP_MAX),
             servers: Default::default(),
-            servers_counter: Counter::new(SERVER_CLEANUP_MAX),
             rng: Rng::new(),
             update_addr,
             update_gamedir: Default::default(),
-            update_gamedir_counter: Counter::new(UPDATE_GAMEDIR_CLEANUP_MAX),
             admin_challenges: Default::default(),
-            admin_challenges_counter: Counter::new(ADMIN_CHALLENGE_CLEANUP_MAX),
             admin_limit: Default::default(),
-            admin_limit_counter: Counter::new(ADMIN_LIMIT_CLEANUP_MAX),
             blocklist: Default::default(),
             stats: Stats::new(cfg.stat.clone()),
 
@@ -388,7 +341,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
                         return Ok(());
                     }
                 };
-                if !entry.is_valid(self.now(), self.cfg.server.timeout.challenge) {
+                if !entry.is_valid(self.time.now(), self.cfg.server.timeout.challenge) {
                     return Ok(());
                 }
                 if p.version < self.cfg.server.min_version {
@@ -496,8 +449,8 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         self.filtered_servers.clear();
         self.filtered_servers_nat.clear();
 
-        let now = self.now();
-        for (addr, info) in &self.servers {
+        let now = self.time.now();
+        for (addr, info) in self.servers.iter() {
             // skip if server is outdated
             if !info.is_valid(now, self.cfg.server.timeout.server) {
                 continue;
@@ -542,14 +495,11 @@ impl<Addr: AddrExt> MasterServer<Addr> {
             trace!("{from}: {err_msg}, gamedir is invalid {gamedir:?}");
             return;
         };
-        let now = self.now();
+        let now = self.time.now();
         let entry = Entry::new(now, gamedir);
         self.update_gamedir.insert(from, entry);
-
-        // remove outdated saved client gamedirs
-        if self.update_gamedir_counter.next() {
-            self.challenges.retain(|_, v| v.is_valid(now, 5));
-        }
+        self.update_gamedir
+            .maybe_clean(|map| map.retain(|_, v| v.is_valid(now, 5)));
     }
 
     fn send_update_info(&mut self, from: Addr, protocol: u8) -> Result<(), Error> {
@@ -587,7 +537,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
     fn handle_admin_packet(&mut self, from: Addr, p: admin::Packet) -> Result<(), Error> {
         trace!("{}: recv {:?}", from, p);
 
-        let now = self.now();
+        let now = self.time.now();
 
         if let Some(e) = self.admin_limit.get(from.ip()) {
             if e.is_valid(now, self.cfg.server.timeout.admin) {
@@ -683,29 +633,24 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         Err(Error::UndefinedPacket)
     }
 
-    fn now(&self) -> u32 {
-        self.start_time.elapsed().as_secs() as u32
-    }
-
     fn add_challenge(&mut self, addr: Addr) -> u32 {
         let x = self.rng.u32(..);
-        let entry = Entry::new(self.now(), x);
+        let entry = Entry::new(self.time.now(), x);
         self.challenges.insert(addr, entry);
         x
     }
 
     fn remove_outdated_challenges(&mut self) {
-        if self.challenges_counter.next() {
-            let now = self.now();
-            self.challenges
-                .retain(|_, v| v.is_valid(now, self.cfg.server.timeout.challenge));
-        }
+        self.challenges.maybe_clean(|map| {
+            let now = self.time.now();
+            map.retain(|_, v| v.is_valid(now, self.cfg.server.timeout.challenge));
+        });
     }
 
     fn admin_challenge_add(&mut self, addr: Addr) -> (u32, u32) {
         let x = self.rng.u32(..);
         let y = self.rng.u32(..);
-        let entry = Entry::new(self.now(), (x, y));
+        let entry = Entry::new(self.time.now(), (x, y));
         self.admin_challenges.insert(*addr.ip(), entry);
         (x, y)
     }
@@ -716,19 +661,17 @@ impl<Addr: AddrExt> MasterServer<Addr> {
 
     /// Remove outdated entries
     fn admin_challenges_cleanup(&mut self) {
-        if self.admin_challenges_counter.next() {
-            let now = self.now();
-            self.admin_challenges
-                .retain(|_, v| v.is_valid(now, self.cfg.server.timeout.challenge));
-        }
+        self.admin_challenges.maybe_clean(|map| {
+            let now = self.time.now();
+            map.retain(|_, v| v.is_valid(now, self.cfg.server.timeout.challenge));
+        });
     }
 
     fn admin_limit_cleanup(&mut self) {
-        if self.admin_limit_counter.next() {
-            let now = self.now();
-            self.admin_limit
-                .retain(|_, v| v.is_valid(now, self.cfg.server.timeout.admin));
-        }
+        self.admin_limit.maybe_clean(|map| {
+            let now = self.time.now();
+            map.retain(|_, v| v.is_valid(now, self.cfg.server.timeout.admin));
+        });
     }
 
     fn count_servers(&self, ip: &Addr::Ip) -> u16 {
@@ -736,7 +679,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
     }
 
     fn add_server(&mut self, addr: Addr, server: ServerInfo) {
-        let now = self.now();
+        let now = self.time.now();
         match self.servers.entry(addr) {
             hash_map::Entry::Occupied(mut e) => {
                 trace!("{}: Updated GameServer", addr);
@@ -754,12 +697,11 @@ impl<Addr: AddrExt> MasterServer<Addr> {
     }
 
     fn remove_outdated_servers(&mut self) {
-        if self.servers_counter.next() {
-            let now = self.now();
-            self.servers
-                .retain(|_, v| v.is_valid(now, self.cfg.server.timeout.server));
-            self.stats.servers_count(self.servers.len());
-        }
+        self.servers.maybe_clean(|map| {
+            let now = self.time.now();
+            map.retain(|_, v| v.is_valid(now, self.cfg.server.timeout.server));
+            self.stats.servers_count(map.len());
+        });
     }
 
     fn send_server_list<A, S>(&self, to: A, key: Option<u32>, servers: &[S]) -> Result<(), Error>

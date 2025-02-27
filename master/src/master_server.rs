@@ -297,7 +297,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         })
     }
 
-    fn local_addr(&self) -> io::Result<SocketAddr> {
+    pub fn local_addr(&self) -> io::Result<SocketAddr> {
         self.sock.local_addr()
     }
 

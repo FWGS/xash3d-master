@@ -7,8 +7,26 @@ use std::{
 use xash3d_master::{Config, MasterServer};
 use xash3d_protocol::{filter::Filter, game, master, server, wrappers::Str};
 
+struct Logger;
+static LOGGER: Logger = Logger;
+
+impl log::Log for Logger {
+    fn enabled(&self, _metadata: &log::Metadata) -> bool {
+        true
+    }
+
+    fn log(&self, record: &log::Record) {
+        println!("{} - {}", record.level(), record.args());
+    }
+
+    fn flush(&self) {}
+}
+
 #[test]
 fn server_add() {
+    log::set_logger(&LOGGER).unwrap();
+    log::set_max_level(log::LevelFilter::Trace);
+
     // create master
     let cfg = Config::default();
     let addr = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0);
@@ -35,7 +53,7 @@ fn server_add() {
 
     let p = server::ServerAdd {
         gamedir: "valve",
-        map: "crossfile",
+        map: "crossfire",
         version: cfg.server.min_version,
         challenge: r.master_challenge,
         server_type: server::ServerType::Dedicated,
@@ -57,8 +75,7 @@ fn server_add() {
         last: addr.into(),
         filter: Filter {
             gamedir: Some(Str(b"valve")),
-            clver: Some(cfg.client.min_version),
-            protocol: Some(xash3d_protocol::PROTOCOL_VERSION),
+            clver: Some(xash3d_protocol::CLIENT_VERSION),
             client_os: Some(Str(b"linux")),
             client_arch: Some(Str(b"amd64")),
             client_buildnum: Some(cfg.client.min_engine_buildnum),

@@ -324,6 +324,21 @@ impl fmt::Display for &Filter<'_> {
         if let Some(x) = self.protocol {
             write!(fmt, "\\protocol\\{}", x)?;
         }
+        if let Some(x) = self.client_buildnum {
+            write!(fmt, "\\buildnum\\{}", x)?;
+        }
+        if let Some(x) = self.client_os {
+            write!(fmt, "\\os\\{}", x)?;
+        }
+        if let Some(x) = self.client_arch {
+            write!(fmt, "\\arch\\{}", x)?;
+        }
+        if let Some(x) = self.client_branch {
+            write!(fmt, "\\branch\\{}", x)?;
+        }
+        if let Some(x) = self.client_commit {
+            write!(fmt, "\\commit\\{}", x)?;
+        }
         Ok(())
     }
 }

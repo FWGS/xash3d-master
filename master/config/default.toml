@@ -1,32 +1,31 @@
 # Default config file
 
-#[log]
-## Possible values: 0-5, off, error, warn, info, debug, trace
+[log]
+# Possible values: 0-5, off, error, warn, info, debug, trace
 #level = "info"
-## Print time (feature logtime)
+# Print time (require build with `logtime` feature flag)
 #time = true
 
-#[server]
+[server]
 #ip = "0.0.0.0"
 #port = 27010
-## How many servers with the same ip can be registred
+# How many servers with the same ip can be registred
 #max-servers-per-ip = 14
-## Minimal accepted server version
+# Minimal accepted server version
 #min-version = "0.19.2"
 
-#[server.timeout]
-## Time in seconds while challenge is valid
+[server.timeout]
+# Time in seconds while challenge is valid
 #challenge = 10
-## Time in seconds while server is valid
+# Time in seconds while server is valid
 #server = 300
-## Time in seconds before next admin request is allowed after wrong password
+# Time in seconds before next admin request is allowed after wrong password
 #admin = 10
 
 # NOTE: require build with `stats` feature flag
-#
-#[stat]
+[stat]
 # Interval in seconds, set zero to disable
-#interval = 0
+interval = 0
 # Format string description
 #
 # %s - servers count
@@ -44,12 +43,12 @@
 # %E - errors
 #format = "stats: %s servers, %a add/s, %d del/s, %q query/s, %e error/s"
 
-#[client]
-## If client version is less then show update message
+[client]
+# If client version is less then show update message
 #version = "0.19"
 # If client buildnum is engine and less than number specified, show update message
 #min_engine_buildnum = 0
-## If client buildnum is old engine and less than number specified, show update message
+# If client buildnum is old engine and less than number specified, show update message
 #min_old_engine_buildnum = 3500
 #update_title = "https://github.com/FWGS/xash3d-fwgs"
 #update_map = "Update please"
@@ -57,15 +56,15 @@
 #update_protocol = 48
 #update_gamedir = "valve"
 
-#[hash]
+[hash]
 #len = 64
 #key = "Half-Life"
 #personal = "Freeman"
 
-##[[admin]]
-##name = "gordon"
-##password = "crowbar"
+#[[admin]]
+#name = "gordon"
+#password = "crowbar"
 
-##[[admin]]
-##name = "gman"
-##password = "time2choose"
+#[[admin]]
+#name = "gman"
+#password = "time2choose"

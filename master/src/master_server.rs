@@ -776,3 +776,55 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn check_query_servers() {
+        const BUILDNUM_NEW: u32 = 3500;
+        const BUILDNUM_OLD: u32 = 3000;
+
+        let mut cfg = Config::default();
+        cfg.client.min_version = Version::new(0, 19);
+        cfg.client.min_engine_buildnum = BUILDNUM_NEW;
+        cfg.client.min_old_engine_buildnum = BUILDNUM_OLD;
+
+        let addr = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0);
+        let master = MasterServer::new(cfg, addr).unwrap();
+
+        let mut query = QueryServers {
+            region: Region::RestOfTheWorld,
+            last: SocketAddr::V4(addr),
+            filter: Filter::default(),
+        };
+
+        // check missing fields
+        query.filter.clver = None;
+        query.filter.client_buildnum = None;
+        assert!(!master.is_query_servers_valid(&addr, &query));
+
+        query.filter.clver = Some(Version::new(0, 21));
+        query.filter.client_buildnum = None;
+        assert!(!master.is_query_servers_valid(&addr, &query));
+
+        query.filter.clver = None;
+        query.filter.client_buildnum = Some(BUILDNUM_NEW);
+        assert!(!master.is_query_servers_valid(&addr, &query));
+
+        // check engine buildnum
+        query.filter.clver = Some(Version::new(0, 21));
+        query.filter.client_buildnum = Some(BUILDNUM_NEW);
+        assert!(master.is_query_servers_valid(&addr, &query));
+        query.filter.client_buildnum = Some(BUILDNUM_NEW - 1);
+        assert!(!master.is_query_servers_valid(&addr, &query));
+
+        // check engine buildnum
+        query.filter.clver = Some(Version::new(0, 19));
+        query.filter.client_buildnum = Some(BUILDNUM_OLD);
+        assert!(master.is_query_servers_valid(&addr, &query));
+        query.filter.client_buildnum = Some(BUILDNUM_OLD - 1);
+        assert!(!master.is_query_servers_valid(&addr, &query));
+    }
+}

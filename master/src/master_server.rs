@@ -438,11 +438,13 @@ impl<Addr: AddrExt> MasterServer<Addr> {
             return false;
         }
 
-        // old engine has separate buildnum limit
-        if version < Version::new(0, 20) && buildnum < self.cfg.client.min_old_engine_buildnum {
-            let min = self.cfg.client.min_old_engine_buildnum;
-            trace!("{from}: query rejected, buildnum {buildnum} is less than {min}");
-            return false;
+        if version < Version::new(0, 20) {
+            // old engine has separate buildnum limit
+            if buildnum < self.cfg.client.min_old_engine_buildnum {
+                let min = self.cfg.client.min_old_engine_buildnum;
+                trace!("{from}: query rejected, buildnum {buildnum} is less than {min}");
+                return false;
+            }
         } else if buildnum < self.cfg.client.min_engine_buildnum {
             let min = self.cfg.client.min_engine_buildnum;
             trace!("{from}: query rejected, buildnum {buildnum} is less than {min}");

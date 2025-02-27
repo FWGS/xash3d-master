@@ -21,12 +21,10 @@ use log::{debug, error, info, trace, warn};
 use thiserror::Error;
 use xash3d_protocol::{
     admin,
-    filter::Version,
-    filter::{Filter, FilterFlags},
-    game,
+    filter::{Filter, FilterFlags, Version},
+    game::{self, QueryServers},
     master::{self, ServerAddress},
-    server,
-    server::Region,
+    server::{self, Region},
     wrappers::Str,
     Error as ProtocolError,
 };
@@ -417,6 +415,43 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         Ok(())
     }
 
+    fn is_query_servers_valid(&self, from: &Addr, query: &QueryServers<Filter>) -> bool {
+        // FIXME: if we will ever support XashNT master server protocol, depends whether
+        // Unkle Mike would like to use our implementation and server, just hide this
+        // whole mess under a "feature" and host a MS for him on a separate port
+
+        let Some(version) = query.filter.clver else {
+            // clver field is required
+            trace!("{from}: query rejected, no clver field");
+            return false;
+        };
+
+        let Some(buildnum) = query.filter.client_buildnum else {
+            // buildnum field is required
+            trace!("{from}: query rejected, no buildnum field");
+            return false;
+        };
+
+        if version < self.cfg.client.min_version {
+            let min = self.cfg.client.min_version;
+            trace!("{from}: query rejected, version {version} is less than {min}");
+            return false;
+        }
+
+        // old engine has separate buildnum limit
+        if version < Version::new(0, 20) && buildnum < self.cfg.client.min_old_engine_buildnum {
+            let min = self.cfg.client.min_old_engine_buildnum;
+            trace!("{from}: query rejected, buildnum {buildnum} is less than {min}");
+            return false;
+        } else if buildnum < self.cfg.client.min_engine_buildnum {
+            let min = self.cfg.client.min_engine_buildnum;
+            trace!("{from}: query rejected, buildnum {buildnum} is less than {min}");
+            return false;
+        }
+
+        true
+    }
+
     fn send_fake_server(
         &self,
         from: Addr,
@@ -439,27 +474,9 @@ impl<Addr: AddrExt> MasterServer<Addr> {
 
         match p {
             game::Packet::QueryServers(p) => {
-                // FIXME: if we will ever support XashNT master server protocol, depends whether
-                // Unkle Mike would like to use our implementation and server, just hide this
-                // whole mess under a "feature" and host a MS for him on a separate port
-
-                if p.filter
-                    .clver
-                    .map_or(false, |v| v < self.cfg.client.min_version)
-                {
+                if self.is_query_servers_valid(&from, &p) {
                     return self.send_fake_server(from, p.filter.key, self.update_addr);
                 }
-
-                // old engine has separate buildnum limit
-                if p.filter.clver.map_or(false, |v| v < Version::new(0, 20))
-                    && p.filter
-                        .client_buildnum
-                        .map_or(false, |v| v < self.cfg.client.min_old_engine_buildnum)
-                {
-                    return self.send_fake_server(from, p.filter.key, self.update_addr);
-                }
-
-                // TODO: check for >=0.20 and implement min_buildnum for it too
 
                 let now = self.now();
 
@@ -492,10 +509,12 @@ impl<Addr: AddrExt> MasterServer<Addr> {
                 let p = server::GetServerInfoResponse {
                     map: self.cfg.client.update_map.as_ref(),
                     host: self.cfg.client.update_title.as_ref(),
-                    protocol: 48, // XXX: how to detect what version client will accept?
+                    // XXX: how to detect what version client will accept?
+                    protocol: self.cfg.client.update_protocol,
                     dm: true,
                     maxcl: 32,
-                    gamedir: "valve", // XXX: probably must be specific for client...
+                    // XXX: probably must be specific for client...
+                    gamedir: &self.cfg.client.update_gamedir,
                     ..Default::default()
                 };
                 trace!("{}: send {:?}", from, p);

@@ -23,10 +23,14 @@ pub const DEFAULT_MAX_SERVERS_PER_IP: u16 = 14;
 
 pub const DEFAULT_HASH_LEN: usize = admin::HASH_LEN;
 
+pub const DEFAULT_MIN_ENGINE_BUILDNUM: u32 = 0;
+
 // it was added in 0.19.4 on 26 Feb 2025:
 // https://github.com/tyabus/xash3d/commit/839504e464ccdfeb15bce060be0603e2ee580d00
 // give it 100 more days in the past, just in case
 pub const DEFAULT_MIN_OLD_ENGINE_BUILDNUM: u32 = 3500;
+
+pub const DEFAULT_CLIENT_UPDATE_PROTOCOL: u8 = 48;
 
 macro_rules! impl_helpers {
     ($($f:ident: $t:ty),+$(,)?) => (
@@ -36,6 +40,7 @@ macro_rules! impl_helpers {
 
 impl_helpers! {
     default_bool: bool,
+    default_u8: u8,
     default_u16: u16,
     default_u32: u32,
     default_usize: usize,
@@ -142,6 +147,8 @@ pub struct ClientConfig {
     #[serde(default = "default_client_version")]
     #[serde(deserialize_with = "deserialize_version")]
     pub min_version: Version,
+    #[serde(default = "default_u32::<DEFAULT_MIN_ENGINE_BUILDNUM>")]
+    pub min_engine_buildnum: u32,
     #[serde(default = "default_u32::<DEFAULT_MIN_OLD_ENGINE_BUILDNUM>")]
     pub min_old_engine_buildnum: u32,
     #[serde(default = "default_client_update_map")]
@@ -150,16 +157,23 @@ pub struct ClientConfig {
     pub update_title: Box<str>,
     #[serde(default)]
     pub update_addr: Option<Box<str>>,
+    #[serde(default = "default_u8::<DEFAULT_CLIENT_UPDATE_PROTOCOL>")]
+    pub update_protocol: u8,
+    #[serde(default = "default_client_update_gamedir")]
+    pub update_gamedir: Box<str>,
 }
 
 impl Default for ClientConfig {
     fn default() -> Self {
         Self {
             min_version: default_client_version(),
+            min_engine_buildnum: DEFAULT_MIN_ENGINE_BUILDNUM,
             min_old_engine_buildnum: DEFAULT_MIN_OLD_ENGINE_BUILDNUM,
             update_map: default_client_update_map(),
             update_title: default_client_update_title(),
             update_addr: None,
+            update_protocol: DEFAULT_CLIENT_UPDATE_PROTOCOL,
+            update_gamedir: default_client_update_gamedir(),
         }
     }
 }
@@ -231,6 +245,10 @@ fn default_client_update_map() -> Box<str> {
 
 fn default_client_update_title() -> Box<str> {
     Box::from("https://github.com/FWGS/xash3d-fwgs")
+}
+
+fn default_client_update_gamedir() -> Box<str> {
+    Box::from("valve")
 }
 
 fn default_hash_key() -> Box<str> {

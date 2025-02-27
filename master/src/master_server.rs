@@ -468,41 +468,59 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         Ok(())
     }
 
+    fn send_servers(&mut self, from: Addr, query: &QueryServers<Filter>) -> Result<(), Error> {
+        let filter = &query.filter;
+
+        if !self.is_query_servers_valid(&from, query) {
+            return self.send_fake_server(from, filter.key, self.update_addr);
+        }
+
+        let Some(client_version) = filter.clver else {
+            // checked in is_query_servers_valid
+            return Ok(());
+        };
+
+        self.filtered_servers.clear();
+        self.filtered_servers_nat.clear();
+
+        let now = self.now();
+        for (addr, info) in &self.servers {
+            // skip if server is outdated
+            if !info.is_valid(now, self.cfg.server.timeout.server) {
+                continue;
+            }
+
+            // skip if server does not match filter
+            if !info.matches(query.region, filter) {
+                continue;
+            }
+
+            self.filtered_servers.push(*addr);
+
+            if info.flags.contains(FilterFlags::NAT) {
+                // add server to client announce list
+                self.filtered_servers_nat.push(*addr);
+            }
+        }
+
+        self.send_server_list(from, filter.key, &self.filtered_servers)?;
+
+        // NOTE: If NAT is not set in a filter then by default the client is announced
+        // to filtered servers behind NAT.
+        if filter.contains_flags(FilterFlags::NAT).unwrap_or(true) {
+            self.send_client_to_nat_servers(from, &self.filtered_servers_nat)?;
+        }
+
+        Ok(())
+    }
+
     fn handle_game_packet(&mut self, from: Addr, p: game::Packet) -> Result<(), Error> {
         trace!("{}: recv {:?}", from, p);
 
         match p {
             game::Packet::QueryServers(p) => {
-                if !self.is_query_servers_valid(&from, &p) {
-                    return self.send_fake_server(from, p.filter.key, self.update_addr);
-                }
-
-                let now = self.now();
-
-                self.filtered_servers.clear();
-                self.filtered_servers_nat.clear();
-                self.servers
-                    .iter()
-                    .filter(|(_addr, info)| {
-                        info.is_valid(now, self.cfg.server.timeout.server)
-                            && info.matches(p.region, &p.filter)
-                    })
-                    .for_each(|(addr, info)| {
-                        self.filtered_servers.push(*addr);
-                        if info.flags.contains(FilterFlags::NAT) {
-                            self.filtered_servers_nat.push(*addr);
-                        }
-                    });
-
-                self.send_server_list(from, p.filter.key, &self.filtered_servers)?;
-
-                // NOTE: If NAT is not set in a filter then by default the client is announced
-                // to filtered servers behind NAT.
-                if p.filter.contains_flags(FilterFlags::NAT).unwrap_or(true) {
-                    self.send_client_to_nat_servers(from, &self.filtered_servers_nat)?;
-                }
-
                 self.stats.on_query_servers();
+                self.send_servers(from, &p)?;
             }
             game::Packet::GetServerInfo(_) => {
                 let p = server::GetServerInfoResponse {

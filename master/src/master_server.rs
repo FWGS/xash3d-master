@@ -473,7 +473,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
 
         match p {
             game::Packet::QueryServers(p) => {
-                if self.is_query_servers_valid(&from, &p) {
+                if !self.is_query_servers_valid(&from, &p) {
                     return self.send_fake_server(from, p.filter.key, self.update_addr);
                 }
 

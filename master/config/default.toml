@@ -25,7 +25,8 @@
 # NOTE: require build with `stats` feature flag
 [stat]
 # Interval in seconds, set zero to disable
-interval = 0
+#interval = 0
+
 # Format string description
 #
 # %s - servers count
@@ -45,14 +46,17 @@ interval = 0
 
 [client]
 # If client version is less then show update message
-#version = "0.19"
+#min-version = "0.21"
+
 # If client buildnum is engine and less than number specified, show update message
-#min_engine_buildnum = 0
+#min-engine-buildnum = 0
+
 # If client buildnum is old engine and less than number specified, show update message
-#min_old_engine_buildnum = 3500
-#update_title = "https://github.com/FWGS/xash3d-fwgs"
-#update_map = "Update please"
-#update_addr = "mentality.rip"
+#min-old-engine-buildnum = 3500
+
+#update-title = "https://github.com/FWGS/xash3d-fwgs"
+#update-map = "Update please"
+#update-addr = "mentality.rip"
 
 [hash]
 #len = 64

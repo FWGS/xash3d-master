@@ -50,6 +50,7 @@ pub enum Error {
 
 #[derive(Clone, Default, Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
+#[serde(rename_all = "kebab-case")]
 pub struct Config {
     #[serde(default)]
     pub log: LogConfig,
@@ -68,6 +69,7 @@ pub struct Config {
 
 #[derive(Clone, Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
+#[serde(rename_all = "kebab-case")]
 pub struct LogConfig {
     #[serde(default = "default_log_level")]
     #[serde(deserialize_with = "deserialize_log_level")]
@@ -116,6 +118,7 @@ impl Default for ServerConfig {
 
 #[derive(Clone, Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
+#[serde(rename_all = "kebab-case")]
 pub struct TimeoutConfig {
     #[serde(default = "default_u32::<DEFAULT_CHALLENGE_TIMEOUT>")]
     pub challenge: u32,
@@ -137,6 +140,7 @@ impl Default for TimeoutConfig {
 
 #[derive(Clone, Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
+#[serde(rename_all = "kebab-case")]
 pub struct ClientConfig {
     #[serde(default = "default_client_version")]
     #[serde(deserialize_with = "deserialize_version")]
@@ -168,6 +172,7 @@ impl Default for ClientConfig {
 
 #[derive(Clone, Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
+#[serde(rename_all = "kebab-case")]
 pub struct HashConfig {
     #[serde(default = "default_usize::<DEFAULT_HASH_LEN>")]
     pub len: usize,
@@ -189,6 +194,7 @@ impl Default for HashConfig {
 
 #[derive(Clone, Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
+#[serde(rename_all = "kebab-case")]
 pub struct AdminConfig {
     pub name: Box<str>,
     pub password: Box<str>,
@@ -196,7 +202,9 @@ pub struct AdminConfig {
 
 #[derive(Clone, Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
+#[serde(rename_all = "kebab-case")]
 pub struct StatConfig {
+    #[serde(default = "default_u32::<0>")]
     pub interval: u32,
     #[serde(default = "default_stats_format")]
     pub format: Box<str>,

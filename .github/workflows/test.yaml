@@ -53,7 +53,9 @@ jobs:
           target: ${{ matrix.target }}
           cache-key: compile-release-${{ matrix.target }}
       - if: ${{ matrix.cross }}
-        run: sudo apt install ${{ matrix.build-essential }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install ${{ matrix.build-essential }}
       - run: cargo b --workspace --release --target=${{ matrix.target }} ${{ matrix.cargoflags }}
       - run: |
           mkdir -p staging/ artifacts/

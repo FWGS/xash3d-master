@@ -33,10 +33,10 @@ fn load_config(cli: &Cli, logger: &Logger) -> Result<Config, config::Error> {
         cfg.log.level = level;
     }
     if let Some(ip) = cli.listen_ip {
-        cfg.server.ip = ip;
+        cfg.master.server.ip = ip;
     }
     if let Some(port) = cli.listen_port {
-        cfg.server.port = port;
+        cfg.master.server.port = port;
     }
     if let Some(format) = &cli.stats_format {
         cfg.stat.format = format.clone();

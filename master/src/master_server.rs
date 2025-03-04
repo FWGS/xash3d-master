@@ -26,7 +26,13 @@ use xash3d_protocol::{
     Error as ProtocolError,
 };
 
-use crate::{cleanup::Cleanup, config::Config, stats::Stats, str_arr::StrArr, time::RelativeTimer};
+use crate::{
+    cleanup::Cleanup,
+    config::{Config, MasterConfig},
+    stats::Stats,
+    str_arr::StrArr,
+    time::RelativeTimer,
+};
 
 type ServerInfo = xash3d_protocol::ServerInfo<Box<[u8]>>;
 
@@ -154,7 +160,7 @@ where
     Ok(None)
 }
 
-fn resolve_update_addr(cfg: &Config, local_addr: SocketAddr) -> SocketAddr {
+fn resolve_update_addr(cfg: &MasterConfig, local_addr: SocketAddr) -> SocketAddr {
     if let Some(s) = cfg.client.update_addr.as_deref() {
         let addr = if !s.contains(':') {
             format!("{}:{}", s, local_addr.port())
@@ -178,7 +184,7 @@ pub enum Master {
 
 impl Master {
     pub fn new(cfg: Config) -> Result<Self, Error> {
-        match SocketAddr::new(cfg.server.ip, cfg.server.port) {
+        match SocketAddr::new(cfg.master.server.ip, cfg.master.server.port) {
             SocketAddr::V4(addr) => MasterServer::new(cfg, addr).map(Self::V4),
             SocketAddr::V6(addr) => MasterServer::new(cfg, addr).map(Self::V6),
         }
@@ -207,7 +213,7 @@ impl Master {
 type CleanupHashMap<K, V> = Cleanup<HashMap<K, V>>;
 
 pub struct MasterServer<Addr: AddrExt> {
-    cfg: Config,
+    cfg: MasterConfig,
     rng: Rng,
     time: RelativeTimer,
 
@@ -239,9 +245,11 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         // make socket interruptable by singals
         sock.set_read_timeout(Some(Duration::from_secs(u32::MAX as u64)))?;
 
-        let update_addr = resolve_update_addr(&cfg, addr.wrap());
+        let update_addr = resolve_update_addr(&cfg.master, addr.wrap());
 
         Ok(Self {
+            cfg: cfg.master,
+
             sock,
             time: RelativeTimer::new(),
             challenges: Default::default(),
@@ -252,12 +260,10 @@ impl<Addr: AddrExt> MasterServer<Addr> {
             admin_challenges: Default::default(),
             admin_limit: Default::default(),
             blocklist: Default::default(),
-            stats: Stats::new(cfg.stat.clone()),
+            stats: Stats::new(cfg.stat),
 
             filtered_servers: Default::default(),
             filtered_servers_nat: Default::default(),
-
-            cfg,
         })
     }
 
@@ -267,7 +273,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
 
     pub fn update_config(&mut self, cfg: Config) -> Result<Option<Config>, Error> {
         let local_addr = self.local_addr()?;
-        let addr = SocketAddr::new(cfg.server.ip, cfg.server.port);
+        let addr = SocketAddr::new(cfg.master.server.ip, cfg.master.server.port);
         if local_addr.is_ipv4() != addr.is_ipv4() {
             return Ok(Some(cfg));
         } else if local_addr != addr {
@@ -279,9 +285,9 @@ impl<Addr: AddrExt> MasterServer<Addr> {
             self.clear();
         }
 
-        self.update_addr = resolve_update_addr(&cfg, addr);
-        self.stats.update_config(cfg.stat.clone());
-        self.cfg = cfg;
+        self.update_addr = resolve_update_addr(&cfg.master, addr);
+        self.stats.update_config(cfg.stat);
+        self.cfg = cfg.master;
 
         Ok(None)
     }
@@ -785,9 +791,9 @@ mod tests {
         const BUILDNUM_OLD: u32 = 3000;
 
         let mut cfg = Config::default();
-        cfg.client.min_version = Version::new(0, 19);
-        cfg.client.min_engine_buildnum = BUILDNUM_NEW;
-        cfg.client.min_old_engine_buildnum = BUILDNUM_OLD;
+        cfg.master.client.min_version = Version::new(0, 19);
+        cfg.master.client.min_engine_buildnum = BUILDNUM_NEW;
+        cfg.master.client.min_old_engine_buildnum = BUILDNUM_OLD;
 
         let addr = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0);
         let master = MasterServer::new(cfg, addr).unwrap();

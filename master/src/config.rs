@@ -57,6 +57,16 @@ pub enum Error {
 pub struct Config {
     #[serde(default)]
     pub log: LogConfig,
+    #[serde(flatten)]
+    pub master: MasterConfig,
+    #[serde(default)]
+    pub stat: StatConfig,
+}
+
+#[derive(Clone, Default, Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
+#[serde(rename_all = "kebab-case")]
+pub struct MasterConfig {
     #[serde(default)]
     pub server: ServerConfig,
     #[serde(default)]
@@ -66,8 +76,6 @@ pub struct Config {
     #[serde(rename = "admin")]
     #[serde(default)]
     pub admin_list: Box<[AdminConfig]>,
-    #[serde(default)]
-    pub stat: StatConfig,
 }
 
 #[derive(Clone, Deserialize, Debug)]

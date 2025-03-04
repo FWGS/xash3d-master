@@ -54,7 +54,7 @@ fn server_add() {
     let p = server::ServerAdd {
         gamedir: "valve",
         map: "crossfire",
-        version: cfg.server.min_version,
+        version: cfg.master.server.min_version,
         challenge: r.master_challenge,
         server_type: server::ServerType::Dedicated,
         os: server::Os::Linux,
@@ -78,7 +78,7 @@ fn server_add() {
             clver: Some(xash3d_protocol::CLIENT_VERSION),
             client_os: Some(Str(b"linux")),
             client_arch: Some(Str(b"amd64")),
-            client_buildnum: Some(cfg.client.min_engine_buildnum),
+            client_buildnum: Some(cfg.master.client.min_engine_buildnum),
             key: game_key,
             ..Filter::default()
         },

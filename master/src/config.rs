@@ -20,11 +20,14 @@ pub const DEFAULT_MAX_SERVERS_PER_IP: u16 = 14;
 
 pub const DEFAULT_HASH_LEN: usize = admin::HASH_LEN;
 
+// Disabled if zero.
 pub const DEFAULT_MIN_ENGINE_BUILDNUM: u32 = 0;
 
 // it was added in 0.19.4 on 26 Feb 2025:
 // https://github.com/tyabus/xash3d/commit/839504e464ccdfeb15bce060be0603e2ee580d00
 // give it 100 more days in the past, just in case
+//
+// Disabled if zero.
 pub const DEFAULT_MIN_OLD_ENGINE_BUILDNUM: u32 = 3500;
 
 macro_rules! impl_helpers {

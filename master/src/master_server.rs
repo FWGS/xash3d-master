@@ -376,6 +376,21 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         Ok(())
     }
 
+    fn is_buildnum_valid(&self, from: &Addr, query: &QueryServers<Filter>, min: u32) -> bool {
+        if min == 0 {
+            return true;
+        }
+        let Some(buildnum) = query.filter.client_buildnum else {
+            trace!("{from}: query rejected, no buildnum field");
+            return false;
+        };
+        if buildnum < min {
+            trace!("{from}: query rejected, buildnum {buildnum} is less than {min}");
+            return false;
+        }
+        true
+    }
+
     fn is_query_servers_valid(&self, from: &Addr, query: &QueryServers<Filter>) -> bool {
         // FIXME: if we will ever support XashNT master server protocol, depends whether
         // Unkle Mike would like to use our implementation and server, just hide this
@@ -386,33 +401,19 @@ impl<Addr: AddrExt> MasterServer<Addr> {
             trace!("{from}: query rejected, no clver field");
             return false;
         };
-
-        let Some(buildnum) = query.filter.client_buildnum else {
-            // buildnum field is required
-            trace!("{from}: query rejected, no buildnum field");
-            return false;
-        };
-
         if version < self.cfg.client.min_version {
             let min = self.cfg.client.min_version;
             trace!("{from}: query rejected, version {version} is less than {min}");
             return false;
         }
 
-        if version < Version::new(0, 20) {
+        let buildnum_min = if version < Version::new(0, 20) {
             // old engine has separate buildnum limit
-            if buildnum < self.cfg.client.min_old_engine_buildnum {
-                let min = self.cfg.client.min_old_engine_buildnum;
-                trace!("{from}: query rejected, buildnum {buildnum} is less than {min}");
-                return false;
-            }
-        } else if buildnum < self.cfg.client.min_engine_buildnum {
-            let min = self.cfg.client.min_engine_buildnum;
-            trace!("{from}: query rejected, buildnum {buildnum} is less than {min}");
-            return false;
-        }
-
-        true
+            self.cfg.client.min_old_engine_buildnum
+        } else {
+            self.cfg.client.min_engine_buildnum
+        };
+        self.is_buildnum_valid(from, query, buildnum_min)
     }
 
     fn send_fake_server(

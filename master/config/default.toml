@@ -49,9 +49,13 @@
 #min-version = "0.21"
 
 # If client buildnum is engine and less than number specified, show update message
+#
+# To disable set to 0.
 #min-engine-buildnum = 0
 
 # If client buildnum is old engine and less than number specified, show update message
+#
+# To disable set to 0.
 #min-old-engine-buildnum = 3500
 
 #update-title = "https://github.com/FWGS/xash3d-fwgs"

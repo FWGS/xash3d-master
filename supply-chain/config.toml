@@ -2,7 +2,7 @@
 # cargo-vet config file
 
 [cargo-vet]
-version = "0.9"
+version = "0.10"
 
 [imports.bytecode-alliance]
 url = "https://raw.githubusercontent.com/bytecodealliance/wasmtime/main/supply-chain/audits.toml"
@@ -31,8 +31,8 @@ audit-as-crates-io = true
 [policy.xash3d-query]
 audit-as-crates-io = true
 
-[[exemptions.crossterm_winapi]]
-version = "0.9.1"
+[[exemptions.chrono]]
+version = "0.4.40"
 criteria = "safe-to-deploy"
 
 [[exemptions.mio]]
@@ -40,17 +40,17 @@ version = "0.8.10"
 criteria = "safe-to-deploy"
 
 [[exemptions.redox_syscall]]
-version = "0.5.1"
+version = "0.5.10"
 criteria = "safe-to-deploy"
 
-[[exemptions.winapi]]
-version = "0.3.9"
+[[exemptions.wasm-bindgen]]
+version = "0.2.100"
 criteria = "safe-to-deploy"
 
-[[exemptions.winapi-i686-pc-windows-gnu]]
-version = "0.4.0"
+[[exemptions.wasm-bindgen-macro]]
+version = "0.2.100"
 criteria = "safe-to-deploy"
 
-[[exemptions.winapi-x86_64-pc-windows-gnu]]
-version = "0.4.0"
+[[exemptions.windows-link]]
+version = "0.1.0"
 criteria = "safe-to-deploy"

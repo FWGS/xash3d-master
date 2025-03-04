@@ -14,6 +14,6 @@ repository.workspace = true
 [dependencies]
 thiserror.workspace = true
 getopts.workspace = true
-crossterm = "0.25.0"
+crossterm.workspace = true
 blake2b_simd.workspace = true
 xash3d-protocol.workspace = true

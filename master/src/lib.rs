@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 mod cleanup;
 mod master_server;
 mod stats;

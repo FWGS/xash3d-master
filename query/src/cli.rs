@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // SPDX-FileCopyrightText: 2023 Denis Drakhnia <numas13@gmail.com>
 
-use std::process;
+use std::{
+    fmt::{self, Write},
+    process,
+    str::FromStr,
+};
 
 use getopts::Options;
 
-use xash3d_protocol as proto;
+use xash3d_protocol::{self as proto, filter::Version};
 
 const BIN_NAME: &str = env!("CARGO_BIN_NAME");
 const PKG_NAME: &str = env!("CARGO_PKG_NAME");
@@ -13,6 +17,98 @@ const PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 const DEFAULT_HOST: &str = "mentality.rip";
 const DEFAULT_PORT: u16 = 27010;
+
+const DEFAULT_CLIENT_BUILDNUM: u32 = 4000;
+
+struct Filter {
+    clver: Option<Version>,
+    buildnum: Option<u32>,
+    protocol: Option<u8>,
+    gamedir: Option<String>,
+    map: Option<String>,
+}
+
+fn filter_opt<T: FromStr, F: Fn(&T) -> bool>(
+    matches: &getopts::Matches,
+    name: &str,
+    dst: &mut Option<T>,
+    f: F,
+) {
+    if let Some(s) = matches.opt_str(name) {
+        if s == "none" {
+            *dst = None;
+            return;
+        }
+        match s.parse() {
+            Ok(v) => {
+                if f(&v) {
+                    *dst = Some(v);
+                }
+            }
+            Err(_) => {
+                eprintln!("Invalid value for --{name}: {s}");
+                process::exit(1);
+            }
+        }
+    }
+}
+
+impl Filter {
+    fn opt_get(&mut self, matches: &getopts::Matches) -> String {
+        let mut out = String::new();
+
+        if let Some(s) = matches.opt_str("filter") {
+            if s.contains("\\clver\\") {
+                self.clver = None;
+            }
+            if s.contains("\\buildnum\\") {
+                self.buildnum = None;
+            }
+            out = s;
+        }
+
+        filter_opt(matches, "filter-clver", &mut self.clver, |_| true);
+        filter_opt(matches, "filter-buildnum", &mut self.buildnum, |_| true);
+        filter_opt(matches, "filter-gamedir", &mut self.gamedir, |s| s != "all");
+        filter_opt(matches, "filter-map", &mut self.map, |s| s != "map");
+
+        write!(&mut out, "{self}").unwrap();
+        out
+    }
+}
+
+impl fmt::Display for Filter {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        if let Some(clver) = self.clver {
+            write!(fmt, "\\clver\\{clver}")?;
+        }
+        if let Some(buildnum) = self.buildnum {
+            write!(fmt, "\\buildnum\\{buildnum}")?;
+        }
+        if let Some(protocol) = self.protocol {
+            write!(fmt, "\\protocol\\{protocol}")?;
+        }
+        if let Some(gamedir) = &self.gamedir {
+            write!(fmt, "\\gamedir\\{gamedir}")?;
+        }
+        if let Some(map) = &self.map {
+            write!(fmt, "\\map\\{map}")?;
+        }
+        Ok(())
+    }
+}
+
+impl Default for Filter {
+    fn default() -> Self {
+        Self {
+            clver: Some(proto::CLIENT_VERSION),
+            buildnum: Some(DEFAULT_CLIENT_BUILDNUM),
+            protocol: None,
+            gamedir: None,
+            map: None,
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct Cli {
@@ -42,7 +138,7 @@ impl Default for Cli {
             json: false,
             debug: false,
             force_color: false,
-            filter: format!("\\gamedir\\valve\\clver\\{}", proto::CLIENT_VERSION),
+            filter: String::new(),
             key: None,
         }
     }
@@ -79,7 +175,7 @@ pub fn parse() -> Cli {
         "master address to connect [default: {}]",
         cli.masters.join(",")
     );
-    opts.optopt("m", "master", &help, "LIST");
+    opts.optopt("M", "master", &help, "LIST");
     let help = format!(
         "time to wait results from masters [default: {}]",
         cli.master_timeout
@@ -102,8 +198,21 @@ pub fn parse() -> Cli {
     opts.optflag("d", "debug", "output debug");
     opts.optflag("F", "force-color", "force colored output");
     opts.optflag("k", "key", "send challenge key to master");
-    let help = format!("query filter [default: {:?}]", cli.filter);
+
+    // Filter options
+    let mut filter = Filter::default();
+    let help = format!("query filter [default: {filter}]");
     opts.optopt("f", "filter", &help, "FILTER");
+    let default = filter.clver.unwrap();
+    let help = format!("set query filter clver [default: {default}]");
+    opts.optopt("V", "filter-clver", &help, "VERSION");
+    let default = filter.buildnum.unwrap();
+    let help = format!("set query filter buildnum [default: {default}]");
+    opts.optopt("b", "filter-buildnum", &help, "BUILDNUM");
+    let help = "set query filter gamedir [default: all]";
+    opts.optopt("g", "filter-gamedir", help, "GAMEDIR");
+    let help = "set query filter map [default: all]";
+    opts.optopt("m", "filter-map", help, "MAP");
 
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => m,
@@ -160,7 +269,7 @@ pub fn parse() -> Cli {
             match i.parse() {
                 Ok(i) => cli.protocol.push(i),
                 Err(_) => {
-                    eprintln!("Invalid protocol version: {}", i);
+                    eprintln!("Invalid protocol version: {i}");
                     error = true;
                 }
             }
@@ -171,9 +280,7 @@ pub fn parse() -> Cli {
         }
     }
 
-    if let Some(s) = matches.opt_str("filter") {
-        cli.filter = s;
-    }
+    cli.filter = filter.opt_get(&matches);
 
     if matches.opt_present("key") {
         let key = fastrand::u32(..);

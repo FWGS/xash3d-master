@@ -218,9 +218,9 @@ impl Filter<'_> {
         T: AsRef<[u8]>,
     {
         !((info.flags & self.flags_mask) != self.flags
-            || self.gamedir.map_or(false, |s| *s != info.gamedir.as_ref())
-            || self.map.map_or(false, |s| *s != info.map.as_ref())
-            || self.protocol.map_or(false, |s| s != info.protocol))
+            || self.gamedir.is_some_and(|s| *s != info.gamedir.as_ref())
+            || self.map.is_some_and(|s| *s != info.map.as_ref())
+            || self.protocol.is_some_and(|s| s != info.protocol))
     }
 }
 

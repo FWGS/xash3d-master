@@ -11,7 +11,7 @@ default-members = ["master", "protocol"]
 
 [workspace.package]
 authors = ["Denis Drakhnia <numas13@gmail.com>"]
-rust-version = "1.68"
+rust-version = "1.70"
 homepage = "https://xash.su"
 repository = "https://github.com/FWGS/xash3d-master"
 

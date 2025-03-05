@@ -1,23 +1,24 @@
-use std::time::Instant;
+use std::{
+    sync::OnceLock,
+    time::{Duration, Instant},
+};
 
-pub struct RelativeTimer {
-    start: Instant,
-}
+/// A time relative to the startup of the program.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(transparent)]
+pub struct RelativeTime(u32);
 
-impl RelativeTimer {
-    pub fn new() -> Self {
-        RelativeTimer {
-            start: Instant::now(),
-        }
+impl RelativeTime {
+    /// Returns current relative time.
+    pub fn now() -> Self {
+        static TIMER: OnceLock<Instant> = OnceLock::new();
+        Self(TIMER.get_or_init(Instant::now).elapsed().as_secs() as u32)
     }
 
-    pub fn now(&self) -> u32 {
-        self.start.elapsed().as_secs() as u32
-    }
-}
-
-impl Default for RelativeTimer {
-    fn default() -> Self {
-        Self::new()
+    /// Returns the amount of time elapsed from another time to this one.
+    ///
+    /// Returns zero if `earlier` is later than this time.
+    pub fn duration_since(&self, earlier: Self) -> Duration {
+        Duration::from_secs(self.0.saturating_sub(earlier.0) as u64)
     }
 }

@@ -28,7 +28,7 @@ use xash3d_protocol::{
 
 use crate::{
     config::{Config, MasterConfig},
-    Periodic, RelativeTimer, Stats, StrArr,
+    Periodic, RelativeTime, Stats, StrArr,
 };
 
 type ServerInfo = xash3d_protocol::ServerInfo<Box<[u8]>>;
@@ -117,17 +117,20 @@ pub enum Error {
 /// HashMap entry to keep tracking creation time.
 #[derive(Copy, Clone, Debug)]
 struct Entry<T> {
-    time: u32,
+    time: RelativeTime,
     value: T,
 }
 
 impl<T> Entry<T> {
-    fn new(time: u32, value: T) -> Self {
-        Self { time, value }
+    fn new(value: T) -> Self {
+        Self {
+            time: RelativeTime::now(),
+            value,
+        }
     }
 
-    fn is_valid(&self, now: u32, duration: u32) -> bool {
-        (now - self.time) < duration
+    fn is_valid(&self, now: RelativeTime, secs: u32) -> bool {
+        now.duration_since(self.time).as_secs() < secs as u64
     }
 }
 
@@ -212,7 +215,6 @@ type CleanupHashMap<K, V> = Periodic<HashMap<K, V>>;
 pub struct MasterServer<Addr: AddrExt> {
     cfg: MasterConfig,
     rng: Rng,
-    time: RelativeTimer,
 
     sock: UdpSocket,
     challenges: CleanupHashMap<Addr, Entry<u32>>,
@@ -248,7 +250,6 @@ impl<Addr: AddrExt> MasterServer<Addr> {
             cfg: cfg.master,
 
             sock,
-            time: RelativeTimer::new(),
             challenges: Default::default(),
             servers: Default::default(),
             rng: Rng::new(),
@@ -344,7 +345,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
                         return Ok(());
                     }
                 };
-                if !entry.is_valid(self.time.now(), self.cfg.server.timeout.challenge) {
+                if !entry.is_valid(RelativeTime::now(), self.cfg.server.timeout.challenge) {
                     return Ok(());
                 }
                 if p.version < self.cfg.server.min_version {
@@ -453,7 +454,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         self.filtered_servers.clear();
         self.filtered_servers_nat.clear();
 
-        let now = self.time.now();
+        let now = RelativeTime::now();
         for (addr, info) in self.servers.iter() {
             // skip if server is outdated
             if !info.is_valid(now, self.cfg.server.timeout.server) {
@@ -499,11 +500,12 @@ impl<Addr: AddrExt> MasterServer<Addr> {
             trace!("{from}: {err_msg}, gamedir is invalid {gamedir:?}");
             return;
         };
-        let now = self.time.now();
-        let entry = Entry::new(now, gamedir);
+        let entry = Entry::new(gamedir);
         self.update_gamedir.insert(from, entry);
-        self.update_gamedir
-            .maybe_run(|map| map.retain(|_, v| v.is_valid(now, 5)));
+        self.update_gamedir.maybe_run(|map| {
+            let now = RelativeTime::now();
+            map.retain(|_, v| v.is_valid(now, 5))
+        });
     }
 
     fn send_update_info(&mut self, from: Addr, protocol: u8) -> Result<(), Error> {
@@ -541,7 +543,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
     fn handle_admin_packet(&mut self, from: Addr, p: admin::Packet) -> Result<(), Error> {
         trace!("{}: recv {:?}", from, p);
 
-        let now = self.time.now();
+        let now = RelativeTime::now();
 
         if let Some(e) = self.admin_limit.get(from.ip()) {
             if e.is_valid(now, self.cfg.server.timeout.admin) {
@@ -601,7 +603,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
                     }
                     None => {
                         warn!("{}: invalid admin hash, command: {:?}", from, p.command);
-                        self.admin_limit.insert(*from.ip(), Entry::new(now, ()));
+                        self.admin_limit.insert(*from.ip(), Entry::new(()));
                         self.admin_limit_cleanup();
                     }
                 }
@@ -639,14 +641,14 @@ impl<Addr: AddrExt> MasterServer<Addr> {
 
     fn add_challenge(&mut self, addr: Addr) -> u32 {
         let x = self.rng.u32(..);
-        let entry = Entry::new(self.time.now(), x);
+        let entry = Entry::new(x);
         self.challenges.insert(addr, entry);
         x
     }
 
     fn remove_outdated_challenges(&mut self) {
         self.challenges.maybe_run(|map| {
-            let now = self.time.now();
+            let now = RelativeTime::now();
             map.retain(|_, v| v.is_valid(now, self.cfg.server.timeout.challenge));
         });
     }
@@ -654,7 +656,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
     fn admin_challenge_add(&mut self, addr: Addr) -> (u32, u32) {
         let x = self.rng.u32(..);
         let y = self.rng.u32(..);
-        let entry = Entry::new(self.time.now(), (x, y));
+        let entry = Entry::new((x, y));
         self.admin_challenges.insert(*addr.ip(), entry);
         (x, y)
     }
@@ -666,14 +668,14 @@ impl<Addr: AddrExt> MasterServer<Addr> {
     /// Remove outdated entries
     fn admin_challenges_cleanup(&mut self) {
         self.admin_challenges.maybe_run(|map| {
-            let now = self.time.now();
+            let now = RelativeTime::now();
             map.retain(|_, v| v.is_valid(now, self.cfg.server.timeout.challenge));
         });
     }
 
     fn admin_limit_cleanup(&mut self) {
         self.admin_limit.maybe_run(|map| {
-            let now = self.time.now();
+            let now = RelativeTime::now();
             map.retain(|_, v| v.is_valid(now, self.cfg.server.timeout.admin));
         });
     }
@@ -683,11 +685,10 @@ impl<Addr: AddrExt> MasterServer<Addr> {
     }
 
     fn add_server(&mut self, addr: Addr, server: ServerInfo) {
-        let now = self.time.now();
         match self.servers.entry(addr) {
             hash_map::Entry::Occupied(mut e) => {
                 trace!("{}: Updated GameServer", addr);
-                e.insert(Entry::new(now, server));
+                e.insert(Entry::new(server));
             }
             hash_map::Entry::Vacant(_) => {
                 if self.count_servers(addr.ip()) >= self.cfg.server.max_servers_per_ip {
@@ -695,14 +696,14 @@ impl<Addr: AddrExt> MasterServer<Addr> {
                     return;
                 }
                 trace!("{}: New GameServer", addr);
-                self.servers.insert(addr, Entry::new(now, server));
+                self.servers.insert(addr, Entry::new(server));
             }
         }
     }
 
     fn remove_outdated_servers(&mut self) {
         self.servers.maybe_run(|map| {
-            let now = self.time.now();
+            let now = RelativeTime::now();
             map.retain(|_, v| v.is_valid(now, self.cfg.server.timeout.server));
             self.stats.servers_count(map.len());
         });

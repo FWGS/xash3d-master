@@ -8,7 +8,7 @@ mod time;
 
 pub mod config;
 
-use crate::{periodic::Periodic, stats::Stats, str_arr::StrArr, time::RelativeTimer};
+use crate::{periodic::Periodic, stats::Stats, str_arr::StrArr, time::RelativeTime};
 
 pub use crate::{
     config::Config,

@@ -27,11 +27,8 @@ use xash3d_protocol::{
 };
 
 use crate::{
-    cleanup::Cleanup,
     config::{Config, MasterConfig},
-    stats::Stats,
-    str_arr::StrArr,
-    time::RelativeTimer,
+    Periodic, RelativeTimer, Stats, StrArr,
 };
 
 type ServerInfo = xash3d_protocol::ServerInfo<Box<[u8]>>;
@@ -210,7 +207,7 @@ impl Master {
     }
 }
 
-type CleanupHashMap<K, V> = Cleanup<HashMap<K, V>>;
+type CleanupHashMap<K, V> = Periodic<HashMap<K, V>>;
 
 pub struct MasterServer<Addr: AddrExt> {
     cfg: MasterConfig,
@@ -506,7 +503,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         let entry = Entry::new(now, gamedir);
         self.update_gamedir.insert(from, entry);
         self.update_gamedir
-            .maybe_clean(|map| map.retain(|_, v| v.is_valid(now, 5)));
+            .maybe_run(|map| map.retain(|_, v| v.is_valid(now, 5)));
     }
 
     fn send_update_info(&mut self, from: Addr, protocol: u8) -> Result<(), Error> {
@@ -648,7 +645,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
     }
 
     fn remove_outdated_challenges(&mut self) {
-        self.challenges.maybe_clean(|map| {
+        self.challenges.maybe_run(|map| {
             let now = self.time.now();
             map.retain(|_, v| v.is_valid(now, self.cfg.server.timeout.challenge));
         });
@@ -668,14 +665,14 @@ impl<Addr: AddrExt> MasterServer<Addr> {
 
     /// Remove outdated entries
     fn admin_challenges_cleanup(&mut self) {
-        self.admin_challenges.maybe_clean(|map| {
+        self.admin_challenges.maybe_run(|map| {
             let now = self.time.now();
             map.retain(|_, v| v.is_valid(now, self.cfg.server.timeout.challenge));
         });
     }
 
     fn admin_limit_cleanup(&mut self) {
-        self.admin_limit.maybe_clean(|map| {
+        self.admin_limit.maybe_run(|map| {
             let now = self.time.now();
             map.retain(|_, v| v.is_valid(now, self.cfg.server.timeout.admin));
         });
@@ -704,7 +701,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
     }
 
     fn remove_outdated_servers(&mut self) {
-        self.servers.maybe_clean(|map| {
+        self.servers.maybe_run(|map| {
             let now = self.time.now();
             map.retain(|_, v| v.is_valid(now, self.cfg.server.timeout.server));
             self.stats.servers_count(map.len());

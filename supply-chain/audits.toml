@@ -6,6 +6,11 @@ who = "Denis Drakhnia <numas13@gmail.com>"
 criteria = "safe-to-deploy"
 version = "0.4.8"
 
+[[audits.ahash]]
+who = "Denis Drakhnia <numas13@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.4.8 -> 0.7.6"
+
 [[audits.android-tzdata]]
 who = "Denis Drakhnia <numas13@gmail.com>"
 criteria = "safe-to-deploy"

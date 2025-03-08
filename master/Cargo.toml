@@ -29,7 +29,7 @@ fastrand = "2.0.1"
 serde.workspace = true
 toml = "0.5.11"
 blake2b_simd.workspace = true
-ahash = "0.4.8"
+ahash = "0.8"
 xash3d-protocol.workspace = true
 
 [target.'cfg(not(windows))'.dependencies]

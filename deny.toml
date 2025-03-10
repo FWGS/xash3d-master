@@ -4,7 +4,6 @@ all-features = true
 
 [licenses]
 allow = [
-    "Apache-2.0 WITH LLVM-exception",
     "Apache-2.0",
     "BSD-2-Clause",
     "CC0-1.0",
@@ -13,9 +12,8 @@ allow = [
 ]
 exceptions = [
     { allow = ["GPL-3.0"], crate = "xash3d-admin" },
-    { allow = ["GPL-3.0"], crate = "xash3d-master" },
     { allow = ["GPL-3.0"], crate = "xash3d-query" },
-    { allow = ["Unicode-DFS-2016"], crate = "unicode-ident" },
+    { allow = ["Unicode-3.0"], crate = "unicode-ident" },
 ]
 
 [sources]
@@ -31,11 +29,3 @@ allow-git = []
 multiple-versions = "deny"
 # Deny if a crate version requirement is `*`.
 wildcards = "deny"
-# Skip duplicate detection for crates.
-skip = [
-    { crate = "bitflags@1.3.2", reason = "dependency of crosstem@0.25.0 required for MSRV 1.56" },
-]
-# Skip duplicate detection for crate and transitive dependencies.
-skip-tree = [
-    { crate = "windows-sys@0.48", reason = "dependency of crosstem@0.25.0 required for MSRV 1.56" },
-]

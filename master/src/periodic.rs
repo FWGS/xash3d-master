@@ -7,13 +7,15 @@ pub struct Periodic<T> {
     data: T,
 }
 
-impl<T> Periodic<T> {
+impl Periodic<()> {
     /// Default limit.
     pub const DEFAULT_LIMIT: u16 = 100;
+}
 
+impl<T> Periodic<T> {
     /// Wraps `data` with a default limit.
     pub fn new(data: T) -> Self {
-        Self::with_limit(data, Self::DEFAULT_LIMIT)
+        Self::with_limit(data, Periodic::DEFAULT_LIMIT)
     }
 
     /// Wraps `data`.

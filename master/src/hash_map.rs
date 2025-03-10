@@ -130,3 +130,23 @@ impl<K: Eq + Hash, V> TimedHashMap<K, V> {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{thread, time::Duration};
+
+    use super::*;
+
+    #[test]
+    fn cleanup() {
+        let n = Periodic::DEFAULT_LIMIT as usize;
+        let mut map = TimedHashMap::new(1);
+        for i in (0..3).map(|i| i * n) {
+            for j in 0..n {
+                map.insert(i + j, ());
+            }
+            assert_eq!(map.len(), n);
+            thread::sleep(Duration::from_secs(1));
+        }
+    }
+}

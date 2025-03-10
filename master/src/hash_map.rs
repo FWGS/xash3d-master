@@ -40,7 +40,8 @@ impl<T> From<T> for Timed<T> {
 
 pub struct TimedHashMap<K, V> {
     timeout: u32,
-    map: Periodic<AHashMap<K, Timed<V>>>,
+    periodic: Periodic,
+    map: AHashMap<K, Timed<V>>,
 }
 
 impl<K: Eq + Hash, V> Default for TimedHashMap<K, V> {
@@ -53,6 +54,7 @@ impl<K: Eq + Hash, V> TimedHashMap<K, V> {
     pub fn new(timeout: u32) -> Self {
         Self {
             timeout,
+            periodic: Default::default(),
             map: Default::default(),
         }
     }
@@ -70,9 +72,9 @@ impl<K: Eq + Hash, V> TimedHashMap<K, V> {
     }
 
     fn cleanup(&mut self) {
-        self.map.maybe_run(|map| {
+        self.periodic.maybe_run(|| {
             let now = RelativeTime::now();
-            map.retain(|_, v| v.is_valid(now, self.timeout));
+            self.map.retain(|_, v| v.is_valid(now, self.timeout));
         });
     }
 

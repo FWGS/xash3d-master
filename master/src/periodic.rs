@@ -1,36 +1,25 @@
-use std::ops::{Deref, DerefMut};
-
 /// Helper wrapper to periodically execute an action.
-pub struct Periodic<T> {
+pub struct Periodic {
     limit: u16,
     cur: u16,
-    data: T,
 }
 
-impl Periodic<()> {
+impl Periodic {
     /// Default limit.
     pub const DEFAULT_LIMIT: u16 = 100;
-}
 
-impl<T> Periodic<T> {
-    /// Wraps `data` with a default limit.
-    pub fn new(data: T) -> Self {
-        Self::with_limit(data, Periodic::DEFAULT_LIMIT)
+    pub fn new() -> Self {
+        Self::with_limit(Periodic::DEFAULT_LIMIT)
     }
 
-    /// Wraps `data`.
-    pub fn with_limit(data: T, limit: u16) -> Self {
-        Self {
-            limit,
-            cur: 0,
-            data,
-        }
+    pub fn with_limit(limit: u16) -> Self {
+        Self { limit, cur: 0 }
     }
 
     /// Increase the counter.
     ///
     /// Returns true if the counter has reached the limit.
-    fn next(&mut self) -> bool {
+    pub fn next(&mut self) -> bool {
         self.cur += 1;
         if self.cur < self.limit {
             false
@@ -43,32 +32,18 @@ impl<T> Periodic<T> {
     /// Increase a counter and execute a function if it has reached the limit.
     ///
     /// Resets the counter if the function was executed.
-    pub fn maybe_run<R, F: FnMut(&mut T) -> R>(&mut self, mut f: F) -> Option<R> {
+    pub fn maybe_run<R, F: FnMut() -> R>(&mut self, mut f: F) -> Option<R> {
         if self.next() {
-            Some(f(&mut self.data))
+            Some(f())
         } else {
             None
         }
     }
 }
 
-impl<T: Default> Default for Periodic<T> {
+impl Default for Periodic {
     fn default() -> Self {
-        Self::new(T::default())
-    }
-}
-
-impl<T> Deref for Periodic<T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        &self.data
-    }
-}
-
-impl<T> DerefMut for Periodic<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.data
+        Self::new()
     }
 }
 
@@ -78,46 +53,51 @@ mod tests {
 
     #[test]
     fn test1() {
-        let mut x = Periodic::with_limit(0, 3);
-        x.maybe_run(|x| *x += 1);
-        x.maybe_run(|x| *x += 1);
-        x.maybe_run(|x| *x += 1);
-        assert_eq!(*x, 1);
+        let mut p = Periodic::with_limit(3);
+        let mut x = 0;
+        p.maybe_run(|| x += 1);
+        p.maybe_run(|| x += 1);
+        p.maybe_run(|| x += 1);
+        assert_eq!(x, 1);
     }
 
     #[test]
     fn test2() {
-        let mut x = Periodic::with_limit(0, 0);
+        let mut p = Periodic::with_limit(0);
+        let mut x = 0;
         for _ in 0..100 {
-            x.maybe_run(|x| *x += 1);
+            p.maybe_run(|| x += 1);
         }
-        assert_eq!(*x, 100);
+        assert_eq!(x, 100);
     }
 
     #[test]
     fn test3() {
-        let mut x = Periodic::with_limit(0, 1);
+        let mut p = Periodic::with_limit(1);
+        let mut x = 0;
         for _ in 0..100 {
-            x.maybe_run(|x| *x += 1);
+            p.maybe_run(|| x += 1);
         }
-        assert_eq!(*x, 100);
+        assert_eq!(x, 100);
     }
 
     #[test]
     fn test4() {
-        let mut x = Periodic::with_limit(0, 2);
+        let mut p = Periodic::with_limit(2);
+        let mut x = 0;
         for _ in 0..100 {
-            x.maybe_run(|x| *x += 1);
+            p.maybe_run(|| x += 1);
         }
-        assert_eq!(*x, 50);
+        assert_eq!(x, 50);
     }
 
     #[test]
     fn test5() {
-        let mut x = Periodic::with_limit(0, 10);
+        let mut p = Periodic::with_limit(10);
+        let mut x = 0;
         for _ in 0..100 {
-            x.maybe_run(|x| *x += 1);
+            p.maybe_run(|| x += 1);
         }
-        assert_eq!(*x, 10);
+        assert_eq!(x, 10);
     }
 }

@@ -55,42 +55,29 @@ jobs:
   build:
     runs-on: ubuntu-latest
     needs: test
-    continue-on-error: true
     strategy:
-      fail-fast: false
       matrix:
-        include:
-          - target: aarch64-unknown-linux-gnu
-            build-essential: crossbuild-essential-arm64
-            cargoflags: --config=target.aarch64-unknown-linux-gnu.linker=\"aarch64-linux-gnu-gcc\"
-            cross: true
-          - target: riscv64gc-unknown-linux-gnu
-            build-essential: crossbuild-essential-riscv64
-            cargoflags: --config=target.riscv64gc-unknown-linux-gnu.linker=\"riscv64-linux-gnu-gcc\"
-            cross: true
+        platform:
           - target: x86_64-unknown-linux-gnu
-            cross: false
+          - target: aarch64-unknown-linux-gnu
+          - target: riscv64gc-unknown-linux-gnu
     steps:
       - uses: actions/checkout@v4
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: houseabsolute/actions-rust-cross@v1
         with:
-          target: ${{ matrix.target }}
-          cache-key: compile-release-${{ matrix.target }}
-      - if: ${{ matrix.cross }}
-        run: |
-          sudo apt-get update
-          sudo apt-get install ${{ matrix.build-essential }}
-      - run: cargo b --workspace --release --target=${{ matrix.target }} ${{ matrix.cargoflags }}
+            target: ${{ matrix.platform.target }}
+            args: "--locked --release --workspace"
+            strip: true
       - run: |
           mkdir -p staging/ artifacts/
           cp master/config/default.toml staging/config.toml
-          find target/${{ matrix.target }}/release -maxdepth 1 -type f -executable -exec cp {} staging/ ';'
+          find target/${{ matrix.platform.target }}/release -maxdepth 1 -type f -executable -exec cp {} staging/ ';'
           pushd staging/
-            tar --zstd -cvf ../artifacts/xash3d-master-${{ matrix.target }}.tar.zst *
+            tar --zstd -cvf ../artifacts/xash3d-master-${{ matrix.platform.target }}.tar.zst *
           popd
       - uses: actions/upload-artifact@v4
         with:
-          name: artifact-${{ matrix.target }}
+          name: artifact-${{ matrix.platform.target }}
           path: artifacts/*
 
   release:

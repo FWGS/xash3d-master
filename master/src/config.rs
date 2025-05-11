@@ -10,8 +10,8 @@ use thiserror::Error;
 use xash3d_protocol::{admin, filter::Version};
 
 pub const DEFAULT_MASTER_SERVER_IP: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
-
 pub const DEFAULT_MASTER_SERVER_PORT: u16 = 27010;
+
 pub const DEFAULT_CHALLENGE_TIMEOUT: u32 = 10;
 pub const DEFAULT_SERVER_TIMEOUT: u32 = 300;
 pub const DEFAULT_ADMIN_TIMEOUT: u32 = 10;
@@ -19,6 +19,9 @@ pub const DEFAULT_ADMIN_TIMEOUT: u32 = 10;
 pub const DEFAULT_MAX_SERVERS_PER_IP: u16 = 14;
 
 pub const DEFAULT_HASH_LEN: usize = admin::HASH_LEN;
+
+pub const DEFAULT_SERVER_MIN_VERSION: Version = Version::with_patch(0, 19, 2);
+pub const DEFAULT_CLIENT_MIN_VERSION: Version = Version::new(0, 19);
 
 // Disabled if zero.
 pub const DEFAULT_MIN_ENGINE_BUILDNUM: u32 = 0;
@@ -29,19 +32,6 @@ pub const DEFAULT_MIN_ENGINE_BUILDNUM: u32 = 0;
 //
 // Disabled if zero.
 pub const DEFAULT_MIN_OLD_ENGINE_BUILDNUM: u32 = 3500;
-
-macro_rules! impl_helpers {
-    ($($f:ident: $t:ty),+$(,)?) => (
-        $(const fn $f<const N: $t>() -> $t { N })+
-    );
-}
-
-impl_helpers! {
-    default_bool: bool,
-    default_u16: u16,
-    default_u32: u32,
-    default_usize: usize,
-}
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -54,45 +44,40 @@ pub enum Error {
 #[derive(Clone, Default, Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "kebab-case")]
+#[serde(default)]
 pub struct Config {
-    #[serde(default)]
     pub log: LogConfig,
     #[serde(flatten)]
     pub master: MasterConfig,
-    #[serde(default)]
     pub stat: StatConfig,
 }
 
 #[derive(Clone, Default, Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "kebab-case")]
+#[serde(default)]
 pub struct MasterConfig {
-    #[serde(default)]
     pub server: ServerConfig,
-    #[serde(default)]
     pub client: ClientConfig,
-    #[serde(default)]
     pub hash: HashConfig,
     #[serde(rename = "admin")]
-    #[serde(default)]
     pub admin_list: Box<[AdminConfig]>,
 }
 
 #[derive(Clone, Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "kebab-case")]
+#[serde(default)]
 pub struct LogConfig {
-    #[serde(default = "default_log_level")]
     #[serde(deserialize_with = "deserialize_log_level")]
     pub level: LevelFilter,
-    #[serde(default = "default_bool::<true>")]
     pub time: bool,
 }
 
 impl Default for LogConfig {
     fn default() -> Self {
         Self {
-            level: default_log_level(),
+            level: LevelFilter::Info,
             time: true,
         }
     }
@@ -101,27 +86,23 @@ impl Default for LogConfig {
 #[derive(Clone, Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "kebab-case")]
+#[serde(default)]
 pub struct ServerConfig {
-    #[serde(default = "default_server_ip")]
     pub ip: IpAddr,
-    #[serde(default = "default_u16::<DEFAULT_MASTER_SERVER_PORT>")]
     pub port: u16,
-    #[serde(default = "default_u16::<DEFAULT_MAX_SERVERS_PER_IP>")]
     pub max_servers_per_ip: u16,
-    #[serde(default = "default_server_version")]
     #[serde(deserialize_with = "deserialize_version")]
     pub min_version: Version,
-    #[serde(default)]
     pub timeout: TimeoutConfig,
 }
 
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
-            ip: default_server_ip(),
+            ip: DEFAULT_MASTER_SERVER_IP,
             port: DEFAULT_MASTER_SERVER_PORT,
             max_servers_per_ip: DEFAULT_MAX_SERVERS_PER_IP,
-            min_version: default_server_version(),
+            min_version: DEFAULT_SERVER_MIN_VERSION,
             timeout: Default::default(),
         }
     }
@@ -130,12 +111,10 @@ impl Default for ServerConfig {
 #[derive(Clone, Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "kebab-case")]
+#[serde(default)]
 pub struct TimeoutConfig {
-    #[serde(default = "default_u32::<DEFAULT_CHALLENGE_TIMEOUT>")]
     pub challenge: u32,
-    #[serde(default = "default_u32::<DEFAULT_SERVER_TIMEOUT>")]
     pub server: u32,
-    #[serde(default = "default_u32::<DEFAULT_ADMIN_TIMEOUT>")]
     pub admin: u32,
 }
 
@@ -152,30 +131,25 @@ impl Default for TimeoutConfig {
 #[derive(Clone, Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "kebab-case")]
+#[serde(default)]
 pub struct ClientConfig {
-    #[serde(default = "default_client_version")]
     #[serde(deserialize_with = "deserialize_version")]
     pub min_version: Version,
-    #[serde(default = "default_u32::<DEFAULT_MIN_ENGINE_BUILDNUM>")]
     pub min_engine_buildnum: u32,
-    #[serde(default = "default_u32::<DEFAULT_MIN_OLD_ENGINE_BUILDNUM>")]
     pub min_old_engine_buildnum: u32,
-    #[serde(default = "default_client_update_map")]
     pub update_map: Box<str>,
-    #[serde(default = "default_client_update_title")]
     pub update_title: Box<str>,
-    #[serde(default)]
     pub update_addr: Option<Box<str>>,
 }
 
 impl Default for ClientConfig {
     fn default() -> Self {
         Self {
-            min_version: default_client_version(),
+            min_version: DEFAULT_CLIENT_MIN_VERSION,
             min_engine_buildnum: DEFAULT_MIN_ENGINE_BUILDNUM,
             min_old_engine_buildnum: DEFAULT_MIN_OLD_ENGINE_BUILDNUM,
-            update_map: default_client_update_map(),
-            update_title: default_client_update_title(),
+            update_map: Box::from("Update please"),
+            update_title: Box::from("https://github.com/FWGS/xash3d-fwgs"),
             update_addr: None,
         }
     }
@@ -184,12 +158,10 @@ impl Default for ClientConfig {
 #[derive(Clone, Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "kebab-case")]
+#[serde(default)]
 pub struct HashConfig {
-    #[serde(default = "default_usize::<DEFAULT_HASH_LEN>")]
     pub len: usize,
-    #[serde(default = "default_hash_key")]
     pub key: Box<str>,
-    #[serde(default = "default_hash_personal")]
     pub personal: Box<str>,
 }
 
@@ -197,8 +169,8 @@ impl Default for HashConfig {
     fn default() -> Self {
         Self {
             len: DEFAULT_HASH_LEN,
-            key: default_hash_key(),
-            personal: default_hash_personal(),
+            key: Box::from(admin::HASH_KEY),
+            personal: Box::from(admin::HASH_PERSONAL),
         }
     }
 }
@@ -214,10 +186,9 @@ pub struct AdminConfig {
 #[derive(Clone, Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "kebab-case")]
+#[serde(default)]
 pub struct StatConfig {
-    #[serde(default = "default_u32::<0>")]
     pub interval: u32,
-    #[serde(default = "default_stats_format")]
     pub format: Box<str>,
 }
 
@@ -225,45 +196,9 @@ impl Default for StatConfig {
     fn default() -> Self {
         Self {
             interval: 0,
-            format: default_stats_format(),
+            format: Box::from("stats: %s servers, %a add/s, %d del/s, %q query/s, %e error/s"),
         }
     }
-}
-
-fn default_log_level() -> LevelFilter {
-    LevelFilter::Info
-}
-
-fn default_server_ip() -> IpAddr {
-    DEFAULT_MASTER_SERVER_IP
-}
-
-fn default_client_version() -> Version {
-    Version::new(0, 19)
-}
-
-fn default_server_version() -> Version {
-    Version::with_patch(0, 19, 2)
-}
-
-fn default_client_update_map() -> Box<str> {
-    Box::from("Update please")
-}
-
-fn default_client_update_title() -> Box<str> {
-    Box::from("https://github.com/FWGS/xash3d-fwgs")
-}
-
-fn default_hash_key() -> Box<str> {
-    Box::from(admin::HASH_KEY)
-}
-
-fn default_hash_personal() -> Box<str> {
-    Box::from(admin::HASH_PERSONAL)
-}
-
-fn default_stats_format() -> Box<str> {
-    Box::from("stats: %s servers, %a add/s, %d del/s, %q query/s, %e error/s")
 }
 
 fn deserialize_log_level<'de, D>(de: D) -> Result<LevelFilter, D::Error>

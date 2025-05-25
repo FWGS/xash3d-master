@@ -94,6 +94,7 @@ pub struct ServerConfig {
     #[serde(deserialize_with = "deserialize_version")]
     pub min_version: Version,
     pub timeout: TimeoutConfig,
+    pub client_rate_limit: u32,
 }
 
 impl Default for ServerConfig {
@@ -104,6 +105,7 @@ impl Default for ServerConfig {
             max_servers_per_ip: DEFAULT_MAX_SERVERS_PER_IP,
             min_version: DEFAULT_SERVER_MIN_VERSION,
             timeout: Default::default(),
+            client_rate_limit: 0,
         }
     }
 }

@@ -1,4 +1,9 @@
-use std::{borrow::Borrow, collections::hash_map::Entry, hash::Hash, ops::Deref};
+use std::{
+    borrow::Borrow,
+    collections::hash_map::Entry,
+    hash::Hash,
+    ops::{Deref, DerefMut},
+};
 
 use ahash::AHashMap;
 
@@ -24,11 +29,23 @@ impl<T> Timed<T> {
     }
 }
 
+impl<T: Default> Default for Timed<T> {
+    fn default() -> Self {
+        Self::new(T::default())
+    }
+}
+
 impl<T> Deref for Timed<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
         &self.value
+    }
+}
+
+impl<T> DerefMut for Timed<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.value
     }
 }
 
@@ -85,14 +102,14 @@ impl<K: Eq + Hash, V> TimedHashMap<K, V> {
         self.cleanup();
     }
 
-    pub fn remove<Q>(&mut self, k: &Q) -> Option<V>
+    pub fn remove<Q>(&mut self, k: &Q) -> Option<Timed<V>>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         self.map.remove(k).and_then(|i| {
             if i.is_valid(RelativeTime::now(), self.timeout) {
-                Some(i.value)
+                Some(i)
             } else {
                 None
             }
@@ -100,14 +117,25 @@ impl<K: Eq + Hash, V> TimedHashMap<K, V> {
     }
 
     pub fn entry(&mut self, key: K) -> Entry<'_, K, Timed<V>> {
+        // not optimal but HashMap::entry API does not allow to replace
+        // an occupied entry with vacant
+        if let Some(v) = self.map.get(&key) {
+            // try to remove the requested outdated entry
+            if !v.is_valid(RelativeTime::now(), self.timeout) {
+                self.map.remove(&key);
+            }
+        } else {
+            // or try to remove other outdated entries
+            self.cleanup();
+        }
         self.map.entry(key)
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&K, &V)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&K, &Timed<V>)> {
         let now = RelativeTime::now();
         self.map.iter().filter_map(move |(k, i)| {
             if i.is_valid(now, self.timeout) {
-                Some((k, &i.value))
+                Some((k, i))
             } else {
                 None
             }
@@ -118,14 +146,14 @@ impl<K: Eq + Hash, V> TimedHashMap<K, V> {
         self.iter().map(|(k, _)| k)
     }
 
-    pub fn get<Q>(&self, k: &Q) -> Option<&V>
+    pub fn get<Q>(&self, k: &Q) -> Option<&Timed<V>>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         self.map.get(k).and_then(|i| {
             if i.is_valid(RelativeTime::now(), self.timeout) {
-                Some(&i.value)
+                Some(i)
             } else {
                 None
             }

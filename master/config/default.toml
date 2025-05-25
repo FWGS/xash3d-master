@@ -14,6 +14,11 @@
 # Minimal accepted server version
 #min-version = "0.19.2"
 
+# Set maximum allowed client requests from an IP address per second.
+#
+# Set 0 to disable.
+#client-rate-limit = 0
+
 [server.timeout]
 # Time in seconds while challenge is valid
 #challenge = 10

@@ -190,6 +190,7 @@ pub struct MasterServer<Addr: AddrExt> {
 
     update_addr: SocketAddr,
     update_gamedir: TimedHashMap<Addr, StrArr<GAMEDIR_MAX_SIZE>>,
+    client_rate_limit: TimedHashMap<Addr::Ip, u32>,
 
     blocklist: HashSet<Addr::Ip>,
 
@@ -218,6 +219,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
             rng: Rng::new(),
             update_addr,
             update_gamedir: TimedHashMap::new(5),
+            client_rate_limit: TimedHashMap::new(1),
             admin_challenges: TimedHashMap::new(timeout.challenge),
             admin_limit: TimedHashMap::new(timeout.admin),
             blocklist: Default::default(),
@@ -294,6 +296,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         self.servers.clear();
         self.admin_challenges.clear();
         self.stats.clear();
+        self.client_rate_limit.clear();
     }
 
     fn handle_server_packet(&mut self, from: Addr, p: server::Packet) -> Result<(), Error> {
@@ -310,7 +313,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
             }
             server::Packet::ServerAdd(p) => {
                 let challenge = match self.challenges.get(&from) {
-                    Some(e) => e,
+                    Some(e) => e.value,
                     None => {
                         trace!("{}: Challenge does not exists", from);
                         return Ok(());
@@ -324,7 +327,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
                     );
                     return Ok(());
                 }
-                if p.challenge != *challenge {
+                if p.challenge != challenge {
                     warn!(
                         "{from}: Expected challenge {challenge} but received {}",
                         p.challenge
@@ -484,6 +487,15 @@ impl<Addr: AddrExt> MasterServer<Addr> {
     }
 
     fn handle_game_packet(&mut self, from: Addr, p: game::Packet) -> Result<(), Error> {
+        if self.cfg.server.client_rate_limit > 0 {
+            let counter = self.client_rate_limit.entry(*from.ip()).or_default();
+            counter.value = counter.value.saturating_add(1);
+            if counter.value > self.cfg.server.client_rate_limit {
+                trace!("{from}: client rate limit {}", counter.value);
+                return Ok(());
+            }
+        }
+
         trace!("{from}: recv {p:?}");
         match p {
             game::Packet::QueryServers(p) => {
@@ -608,7 +620,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
     fn add_server(&mut self, addr: Addr, server: ServerInfo) {
         match self.servers.entry(addr) {
             hash_map::Entry::Occupied(mut e) => {
-                trace!("{}: Updated GameServer", addr);
+                trace!("{}: game server update", addr);
                 e.insert(Timed::new(server));
             }
             hash_map::Entry::Vacant(_) => {
@@ -616,7 +628,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
                     trace!("{}: max servers per ip", addr);
                     return;
                 }
-                trace!("{}: New GameServer", addr);
+                trace!("{}: game server add", addr);
                 self.servers.insert(addr, server);
             }
         }

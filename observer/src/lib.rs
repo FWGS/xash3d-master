@@ -56,8 +56,8 @@ impl Connection {
         let packet = proto::game::GetServerInfo {
             protocol: self.protocol,
         };
-        let n = packet.encode(&mut buf[..]).unwrap();
-        sock.send_to(&buf[..n], addr)?;
+        let packet = packet.encode(&mut buf[..]).unwrap();
+        sock.send_to(packet, addr)?;
         Ok(())
     }
 
@@ -191,12 +191,10 @@ impl<T: Handler> Observer<T> {
             last: SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0).into(),
             filter,
         };
-        let n = packet.encode(&mut buf[..]).unwrap(); // TODO: handle error, filter may not fit
-
+        let packet = packet.encode(&mut buf[..]).unwrap(); // TODO: handle error, filter may not fit
         for addr in self.masters.iter() {
-            self.sock.send_to(&buf[..n], addr)?;
+            self.sock.send_to(packet, addr)?;
         }
-
         Ok(())
     }
 

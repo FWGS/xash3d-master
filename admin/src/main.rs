@@ -78,8 +78,8 @@ fn send_command(cli: &cli::Cli) -> Result<(), Error> {
     sock.connect(&cli.address)?;
 
     let mut buf = [0; 512];
-    let n = admin::AdminChallenge.encode(&mut buf)?;
-    sock.send(&buf[..n])?;
+    let packet = admin::AdminChallenge.encode(&mut buf)?;
+    sock.send(packet)?;
 
     let n = sock.recv(&mut buf)?;
     let (master_challenge, hash_challenge) = match master::Packet::decode(&buf[..n])? {
@@ -101,9 +101,9 @@ fn send_command(cli: &cli::Cli) -> Result<(), Error> {
         .update(&hash_challenge.to_le_bytes())
         .finalize();
 
-    let n = admin::AdminCommand::new(master_challenge, hash.as_bytes(), &cli.command)
+    let packet = admin::AdminCommand::new(master_challenge, hash.as_bytes(), &cli.command)
         .encode(&mut buf)?;
-    sock.send(&buf[..n])?;
+    sock.send(packet)?;
 
     Ok(())
 }

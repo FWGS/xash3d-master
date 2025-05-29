@@ -49,14 +49,15 @@ impl ChallengeResponse {
     }
 
     /// Encode packet to `buf`.
-    pub fn encode<const N: usize>(&self, buf: &mut [u8; N]) -> Result<usize, Error> {
+    pub fn encode<'a>(&self, buf: &'a mut [u8]) -> Result<&'a [u8], Error> {
         let mut cur = CursorMut::new(buf);
         cur.put_bytes(Self::HEADER)?;
         cur.put_u32_le(self.master_challenge)?;
         if let Some(server_challenge) = self.server_challenge {
             cur.put_u32_le(server_challenge)?;
         }
-        Ok(cur.pos())
+        let n = cur.pos();
+        Ok(&buf[..n])
     }
 }
 
@@ -169,7 +170,11 @@ impl QueryServersResponse<()> {
     /// Encode packet to `buf`.
     ///
     /// Returns number of bytes written into `buf` and how many items was written.
-    pub fn encode<A>(&mut self, buf: &mut [u8], list: &[A]) -> Result<(usize, usize), Error>
+    pub fn encode<'a, A>(
+        &mut self,
+        buf: &'a mut [u8],
+        list: &[A],
+    ) -> Result<(&'a [u8], usize), Error>
     where
         A: ServerAddress,
     {
@@ -193,7 +198,8 @@ impl QueryServersResponse<()> {
         for _ in 0..A::size() {
             cur.put_u8(0)?;
         }
-        Ok((cur.pos(), count))
+        let n = cur.pos();
+        Ok((&buf[..n], count))
     }
 }
 
@@ -226,11 +232,12 @@ impl ClientAnnounce {
     }
 
     /// Encode packet to `buf`.
-    pub fn encode(&self, buf: &mut [u8]) -> Result<usize, Error> {
-        Ok(CursorMut::new(buf)
+    pub fn encode<'a>(&self, buf: &'a mut [u8]) -> Result<&'a [u8], Error> {
+        let n = CursorMut::new(buf)
             .put_bytes(Self::HEADER)?
             .put_as_str(self.addr)?
-            .pos())
+            .pos();
+        Ok(&buf[..n])
     }
 }
 
@@ -269,12 +276,13 @@ impl AdminChallengeResponse {
     }
 
     /// Encode packet to `buf`.
-    pub fn encode(&self, buf: &mut [u8]) -> Result<usize, Error> {
-        Ok(CursorMut::new(buf)
+    pub fn encode<'a>(&self, buf: &'a mut [u8]) -> Result<&'a [u8], Error> {
+        let n = CursorMut::new(buf)
             .put_bytes(Self::HEADER)?
             .put_u32_le(self.master_challenge)?
             .put_u32_le(self.hash_challenge)?
-            .pos())
+            .pos();
+        Ok(&buf[..n])
     }
 }
 
@@ -317,11 +325,8 @@ mod tests {
     fn challenge_response() {
         let p = ChallengeResponse::new(0x12345678, Some(0x87654321));
         let mut buf = [0; 512];
-        let n = p.encode(&mut buf).unwrap();
-        assert_eq!(
-            Packet::decode(&buf[..n]),
-            Ok(Some(Packet::ChallengeResponse(p)))
-        );
+        let t = p.encode(&mut buf).unwrap();
+        assert_eq!(Packet::decode(t), Ok(Some(Packet::ChallengeResponse(p))));
     }
 
     #[test]
@@ -334,11 +339,8 @@ mod tests {
 
         let p = ChallengeResponse::new(0x12345678, None);
         let mut buf = [0; 512];
-        let n = p.encode(&mut buf).unwrap();
-        assert_eq!(
-            Packet::decode(&buf[..n]),
-            Ok(Some(Packet::ChallengeResponse(p)))
-        );
+        let t = p.encode(&mut buf).unwrap();
+        assert_eq!(Packet::decode(t), Ok(Some(Packet::ChallengeResponse(p))));
     }
 
     #[test]
@@ -352,10 +354,10 @@ mod tests {
         ];
         let mut p = QueryServersResponse::new(Some(0xdeadbeef));
         let mut buf = [0; 512];
-        let (n, c) = p.encode(&mut buf, servers).unwrap();
+        let (t, c) = p.encode(&mut buf, servers).unwrap();
         assert_eq!(c, servers.len());
-        assert_eq!(n, 12 + Addr::size() * (servers.len() + 1));
-        let e = QueryServersResponse::decode(&buf[..n]).unwrap();
+        assert_eq!(t.len(), 12 + Addr::size() * (servers.len() + 1));
+        let e = QueryServersResponse::decode(t).unwrap();
         assert_eq!(e.iter::<Addr>().collect::<Vec<_>>(), servers);
     }
 
@@ -370,10 +372,10 @@ mod tests {
         ];
         let mut p = QueryServersResponse::new(Some(0xdeadbeef));
         let mut buf = [0; 512];
-        let (n, c) = p.encode(&mut buf, servers).unwrap();
+        let (t, c) = p.encode(&mut buf, servers).unwrap();
         assert_eq!(c, servers.len());
-        assert_eq!(n, 12 + Addr::size() * (servers.len() + 1));
-        let e = QueryServersResponse::decode(&buf[..n]).unwrap();
+        assert_eq!(t.len(), 12 + Addr::size() * (servers.len() + 1));
+        let e = QueryServersResponse::decode(t).unwrap();
         assert_eq!(e.iter::<Addr>().collect::<Vec<_>>(), servers);
     }
 
@@ -381,20 +383,17 @@ mod tests {
     fn client_announce() {
         let p = ClientAnnounce::new("1.2.3.4:12345".parse().unwrap());
         let mut buf = [0; 512];
-        let n = p.encode(&mut buf).unwrap();
-        assert_eq!(
-            Packet::decode(&buf[..n]),
-            Ok(Some(Packet::ClientAnnounce(p)))
-        );
+        let t = p.encode(&mut buf).unwrap();
+        assert_eq!(Packet::decode(t), Ok(Some(Packet::ClientAnnounce(p))));
     }
 
     #[test]
     fn admin_challenge_response() {
         let p = AdminChallengeResponse::new(0x12345678, 0x87654321);
         let mut buf = [0; 64];
-        let n = p.encode(&mut buf).unwrap();
+        let t = p.encode(&mut buf).unwrap();
         assert_eq!(
-            Packet::decode(&buf[..n]),
+            Packet::decode(t),
             Ok(Some(Packet::AdminChallengeResponse(p)))
         );
     }

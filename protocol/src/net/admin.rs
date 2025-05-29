@@ -32,8 +32,9 @@ impl AdminChallenge {
     }
 
     /// Encode packet to `buf`.
-    pub fn encode(&self, buf: &mut [u8]) -> Result<usize, Error> {
-        Ok(CursorMut::new(buf).put_bytes(Self::HEADER)?.pos())
+    pub fn encode<'a>(&self, buf: &'a mut [u8]) -> Result<&'a [u8], Error> {
+        let n = CursorMut::new(buf).put_bytes(Self::HEADER)?.pos();
+        Ok(&buf[..n])
     }
 }
 
@@ -83,13 +84,14 @@ impl<'a> AdminCommand<'a> {
     }
 
     /// Encode packet to `buf`.
-    pub fn encode(&self, buf: &mut [u8]) -> Result<usize, Error> {
-        Ok(CursorMut::new(buf)
+    pub fn encode<'b>(&self, buf: &'b mut [u8]) -> Result<&'b [u8], Error> {
+        let n = CursorMut::new(buf)
             .put_bytes(Self::HEADER)?
             .put_u32_le(self.master_challenge)?
             .put_bytes(&self.hash)?
             .put_str(self.command)?
-            .pos())
+            .pos();
+        Ok(&buf[..n])
     }
 }
 
@@ -124,9 +126,9 @@ mod tests {
     fn admin_challenge() {
         let p = AdminChallenge;
         let mut buf = [0; 512];
-        let n = p.encode(&mut buf).unwrap();
+        let t = p.encode(&mut buf).unwrap();
         assert_eq!(
-            Packet::decode(HASH_LEN, &buf[..n]),
+            Packet::decode(HASH_LEN, t),
             Ok(Some(Packet::AdminChallenge))
         );
     }
@@ -135,9 +137,9 @@ mod tests {
     fn admin_command() {
         let p = AdminCommand::new(0x12345678, &[1; HASH_LEN], "foo bar baz");
         let mut buf = [0; 512];
-        let n = p.encode(&mut buf).unwrap();
+        let t = p.encode(&mut buf).unwrap();
         assert_eq!(
-            Packet::decode(HASH_LEN, &buf[..n]),
+            Packet::decode(HASH_LEN, t),
             Ok(Some(Packet::AdminCommand(p)))
         );
     }

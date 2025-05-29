@@ -353,13 +353,10 @@ impl<'a> Scan<'a> {
             last: SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0)),
             filter: self.cli.filter.as_str(),
         };
-        let n = packet.encode(&mut buf)?;
-        let packet = &buf[..n];
-
+        let packet = packet.encode(&mut buf)?;
         for i in &self.masters {
             self.sock.send_to(packet, i)?;
         }
-
         Ok(())
     }
 
@@ -425,10 +422,9 @@ impl<'a> Scan<'a> {
             self.query_servers()?;
         } else {
             let mut buf = [0; 512];
-            let n = game::GetServerInfo::new(self.cli.protocol[0]).encode(&mut buf)?;
-
+            let packet = game::GetServerInfo::new(self.cli.protocol[0]).encode(&mut buf)?;
             for addr in list.iter().filter(|i| set.insert(**i)) {
-                match self.sock.send_to(&buf[..n], addr) {
+                match self.sock.send_to(packet, addr) {
                     Ok(_) => {
                         let query = ServerQuery::new(0);
                         server_end = query.start + server_timeout;
@@ -468,10 +464,9 @@ impl<'a> Scan<'a> {
                     if self.check_key(&from, packet.key) {
                         for addr in packet.iter().filter(|i| set.insert(*i)) {
                             let mut buf = [0; 512];
-                            let n =
+                            let packet =
                                 game::GetServerInfo::new(self.cli.protocol[0]).encode(&mut buf)?;
-
-                            match self.sock.send_to(&buf[..n], addr) {
+                            match self.sock.send_to(packet, addr) {
                                 Ok(_) => {
                                     let query = ServerQuery::new(0);
                                     server_end = query.start + server_timeout;
@@ -500,9 +495,8 @@ impl<'a> Scan<'a> {
                         let next_protocol = query.protocol + 1;
                         if let Some(protocol) = self.cli.protocol.get(next_protocol) {
                             let mut buf = [0; 512];
-                            let n = game::GetServerInfo::new(*protocol).encode(&mut buf)?;
-
-                            match self.sock.send_to(&buf[..n], from) {
+                            let packet = game::GetServerInfo::new(*protocol).encode(&mut buf)?;
+                            match self.sock.send_to(packet, from) {
                                 Ok(_) => {
                                     active.insert(from, ServerQuery::new(next_protocol));
                                 }

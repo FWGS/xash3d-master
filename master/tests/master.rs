@@ -56,8 +56,8 @@ impl Test {
         let challenge = Some(0xdeadbeef);
         let p = server::Challenge::new(challenge);
         let mut buf = [0; 512];
-        let l = p.encode(&mut buf).unwrap();
-        sock.send_to(&buf[..l], self.master_addr).unwrap();
+        let p = p.encode(&mut buf).unwrap();
+        sock.send_to(p, self.master_addr).unwrap();
 
         let (l, _) = sock.recv_from(&mut buf).unwrap();
         let r = master::ChallengeResponse::decode(&buf[..l]).unwrap();
@@ -76,8 +76,8 @@ impl Test {
             max: 32,
             flags: server::ServerFlags::empty(),
         };
-        let l = p.encode(&mut buf).unwrap();
-        sock.send_to(&buf[..l], self.master_addr).unwrap();
+        let p = p.encode(&mut buf).unwrap();
+        sock.send_to(p, self.master_addr).unwrap();
     }
 }
 
@@ -104,8 +104,8 @@ fn server_add() {
             ..Filter::default()
         },
     };
-    let l = p.encode(&mut buf).unwrap();
-    sock.send_to(&buf[..l], test.master_addr).unwrap();
+    let p = p.encode(&mut buf).unwrap();
+    sock.send_to(p, test.master_addr).unwrap();
 
     let (l, _) = sock.recv_from(&mut buf).unwrap();
     let r = master::QueryServersResponse::decode(&buf[..l]).unwrap();
@@ -150,9 +150,9 @@ fn client_rate_limit() {
             },
         };
         let mut buf = [0; 512];
-        let l = p.encode(&mut buf).unwrap();
+        let p = p.encode(&mut buf).unwrap();
         for _ in 0..queries {
-            sock.send_to(&buf[..l], test.master_addr).unwrap();
+            sock.send_to(p, test.master_addr).unwrap();
         }
         let mut n = 0;
         while n < queries {

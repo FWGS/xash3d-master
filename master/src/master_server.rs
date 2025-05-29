@@ -306,10 +306,10 @@ impl<Addr: AddrExt> MasterServer<Addr> {
             server::Packet::Challenge(p) => {
                 let master_challenge = self.add_challenge(from);
                 let mut buf = [0; MAX_PACKET_SIZE];
-                let p = master::ChallengeResponse::new(master_challenge, p.server_challenge);
-                trace!("{from}: send {p:?}");
-                let n = p.encode(&mut buf)?;
-                self.sock.send_to(&buf[..n], from)?;
+                let resp = master::ChallengeResponse::new(master_challenge, p.server_challenge);
+                trace!("{from}: send {resp:?}");
+                let packet = resp.encode(&mut buf)?;
+                self.sock.send_to(packet, from)?;
             }
             server::Packet::ServerAdd(p) => {
                 let challenge = match self.challenges.get(&from) {
@@ -470,7 +470,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
 
     fn send_update_info(&mut self, from: Addr, protocol: u8) -> Result<(), Error> {
         let gamedir = self.update_gamedir.remove(&from);
-        let p = server::GetServerInfoResponse {
+        let resp = server::GetServerInfoResponse {
             map: self.cfg.client.update_map.as_ref(),
             host: self.cfg.client.update_title.as_ref(),
             protocol,
@@ -479,10 +479,10 @@ impl<Addr: AddrExt> MasterServer<Addr> {
             gamedir: gamedir.as_ref().map_or("valve", |i| i.as_str()),
             ..Default::default()
         };
-        trace!("{from}: send {p:?}");
+        trace!("{from}: send {resp:?}");
         let mut buf = [0; MAX_PACKET_SIZE];
-        let n = p.encode(&mut buf[..Addr::mtu()])?;
-        self.sock.send_to(&buf[..n], from)?;
+        let packet = resp.encode(&mut buf[..Addr::mtu()])?;
+        self.sock.send_to(packet, from)?;
         Ok(())
     }
 
@@ -521,11 +521,11 @@ impl<Addr: AddrExt> MasterServer<Addr> {
             admin::Packet::AdminChallenge => {
                 let (master_challenge, hash_challenge) = self.admin_challenge_add(from);
 
-                let p = master::AdminChallengeResponse::new(master_challenge, hash_challenge);
-                trace!("{from}: send {p:?}");
+                let resp = master::AdminChallengeResponse::new(master_challenge, hash_challenge);
+                trace!("{from}: send {resp:?}");
                 let mut buf = [0; 64];
-                let n = p.encode(&mut buf)?;
-                self.sock.send_to(&buf[..n], from)?;
+                let packet = resp.encode(&mut buf)?;
+                self.sock.send_to(packet, from)?;
             }
             admin::Packet::AdminCommand(p) => {
                 let entry = *self
@@ -642,20 +642,22 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         let mut buf = [0; MAX_PACKET_SIZE];
         let mut offset = 0;
         let mut list = master::QueryServersResponse::new(key);
-        while offset < servers.len() {
-            let (n, c) = list.encode(&mut buf[..Addr::mtu()], &servers[offset..])?;
-            offset += c;
-            self.sock.send_to(&buf[..n], &to)?;
+        loop {
+            let (packet, count) = list.encode(&mut buf[..Addr::mtu()], &servers[offset..])?;
+            self.sock.send_to(packet, &to)?;
+            offset += count;
+            if offset >= servers.len() {
+                break;
+            }
         }
         Ok(())
     }
 
     fn send_client_to_nat_servers(&self, to: Addr, servers: &[Addr]) -> Result<(), Error> {
         let mut buf = [0; 64];
-        let n = master::ClientAnnounce::new(to.wrap()).encode(&mut buf)?;
-        let buf = &buf[..n];
+        let packet = master::ClientAnnounce::new(to.wrap()).encode(&mut buf)?;
         for i in servers {
-            self.sock.send_to(buf, i)?;
+            self.sock.send_to(packet, i)?;
         }
         Ok(())
     }

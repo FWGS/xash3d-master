@@ -56,15 +56,16 @@ where
     for<'b> &'b T: fmt::Display,
 {
     /// Encode packet to `buf`.
-    pub fn encode(&self, buf: &mut [u8]) -> Result<usize, Error> {
-        Ok(CursorMut::new(buf)
+    pub fn encode<'a>(&self, buf: &'a mut [u8]) -> Result<&'a [u8], Error> {
+        let n = CursorMut::new(buf)
             .put_bytes(QueryServers::HEADER)?
             .put_u8(self.region as u8)?
             .put_as_str(self.last)?
             .put_u8(0)?
             .put_as_str(&self.filter)?
             .put_u8(0)?
-            .pos())
+            .pos();
+        Ok(&buf[..n])
     }
 }
 
@@ -96,11 +97,12 @@ impl GetServerInfo {
     }
 
     /// Encode packet to `buf`.
-    pub fn encode(&self, buf: &mut [u8]) -> Result<usize, Error> {
-        Ok(CursorMut::new(buf)
+    pub fn encode<'a>(&self, buf: &'a mut [u8]) -> Result<&'a [u8], Error> {
+        let n = CursorMut::new(buf)
             .put_bytes(Self::HEADER)?
             .put_as_str(self.protocol)?
-            .pos())
+            .pos();
+        Ok(&buf[..n])
     }
 }
 
@@ -155,8 +157,8 @@ mod tests {
             },
         };
         let mut buf = [0; 512];
-        let n = p.encode(&mut buf).unwrap();
-        assert_eq!(Packet::decode(&buf[..n]), Ok(Some(Packet::QueryServers(p))));
+        let t = p.encode(&mut buf).unwrap();
+        assert_eq!(Packet::decode(t), Ok(Some(Packet::QueryServers(p))));
     }
 
     #[test]
@@ -187,10 +189,7 @@ mod tests {
     fn get_server_info() {
         let p = GetServerInfo::new(49);
         let mut buf = [0; 512];
-        let n = p.encode(&mut buf).unwrap();
-        assert_eq!(
-            Packet::decode(&buf[..n]),
-            Ok(Some(Packet::GetServerInfo(p)))
-        );
+        let t = p.encode(&mut buf).unwrap();
+        assert_eq!(Packet::decode(t), Ok(Some(Packet::GetServerInfo(p))));
     }
 }

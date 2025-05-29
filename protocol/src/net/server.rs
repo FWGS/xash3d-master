@@ -52,13 +52,14 @@ impl Challenge {
     }
 
     /// Encode packet to `buf`.
-    pub fn encode<const N: usize>(&self, buf: &mut [u8; N]) -> Result<usize, Error> {
+    pub fn encode<'a>(&self, buf: &'a mut [u8]) -> Result<&'a [u8], Error> {
         let mut cur = CursorMut::new(buf);
         cur.put_bytes(Self::HEADER)?;
         if let Some(server_challenge) = self.server_challenge {
             cur.put_u32_le(server_challenge)?;
         }
-        Ok(cur.pos())
+        let n = cur.pos();
+        Ok(&buf[..n])
     }
 }
 
@@ -180,8 +181,8 @@ where
     T: PutKeyValue,
 {
     /// Encode packet to `buf`.
-    pub fn encode(&self, buf: &mut [u8]) -> Result<usize, Error> {
-        Ok(CursorMut::new(buf)
+    pub fn encode<'a>(&self, buf: &'a mut [u8]) -> Result<&'a [u8], Error> {
+        let n = CursorMut::new(buf)
             .put_bytes(ServerAdd::HEADER)?
             .put_key("protocol", self.protocol)?
             .put_key("challenge", self.challenge)?
@@ -198,7 +199,8 @@ where
             .put_key("secure", self.flags.contains(ServerFlags::SECURE))?
             .put_key("lan", self.flags.contains(ServerFlags::LAN))?
             .put_key("nat", self.flags.contains(ServerFlags::NAT))?
-            .pos())
+            .pos();
+        Ok(&buf[..n])
     }
 }
 
@@ -219,8 +221,9 @@ impl ServerRemove {
     }
 
     /// Encode packet to `buf`.
-    pub fn encode<const N: usize>(&self, buf: &mut [u8; N]) -> Result<usize, Error> {
-        Ok(CursorMut::new(buf).put_bytes(Self::HEADER)?.pos())
+    pub fn encode<'a>(&self, buf: &'a mut [u8]) -> Result<&'a [u8], Error> {
+        let n = CursorMut::new(buf).put_bytes(Self::HEADER)?.pos();
+        Ok(&buf[..n])
     }
 }
 
@@ -328,8 +331,8 @@ where
     T: PutKeyValue,
 {
     /// Encode packet to `buf`.
-    pub fn encode(&self, buf: &mut [u8]) -> Result<usize, Error> {
-        Ok(CursorMut::new(buf)
+    pub fn encode<'a>(&self, buf: &'a mut [u8]) -> Result<&'a [u8], Error> {
+        let n = CursorMut::new(buf)
             .put_bytes(GetServerInfoResponse::HEADER)?
             .put_key("p", self.protocol)?
             .put_key("map", &self.map)?
@@ -342,7 +345,8 @@ where
             .put_key("password", self.password)?
             .put_key("dedicated", self.dedicated)?
             .put_key("host", &self.host)?
-            .pos())
+            .pos();
+        Ok(&buf[..n])
     }
 }
 
@@ -385,8 +389,8 @@ mod tests {
     fn challenge() {
         let p = Challenge::new(Some(0x12345678));
         let mut buf = [0; 128];
-        let n = p.encode(&mut buf).unwrap();
-        assert_eq!(Packet::decode(&buf[..n]), Ok(Some(Packet::Challenge(p))));
+        let t = p.encode(&mut buf).unwrap();
+        assert_eq!(Packet::decode(t), Ok(Some(Packet::Challenge(p))));
     }
 
     #[test]
@@ -399,8 +403,8 @@ mod tests {
 
         let p = Challenge::new(None);
         let mut buf = [0; 128];
-        let n = p.encode(&mut buf).unwrap();
-        assert_eq!(&buf[..n], b"q\xff");
+        let t = p.encode(&mut buf).unwrap();
+        assert_eq!(t, b"q\xff");
     }
 
     #[test]
@@ -419,16 +423,16 @@ mod tests {
             flags: ServerFlags::all(),
         };
         let mut buf = [0; 512];
-        let n = p.encode(&mut buf).unwrap();
-        assert_eq!(Packet::decode(&buf[..n]), Ok(Some(Packet::ServerAdd(p))));
+        let t = p.encode(&mut buf).unwrap();
+        assert_eq!(Packet::decode(t), Ok(Some(Packet::ServerAdd(p))));
     }
 
     #[test]
     fn server_remove() {
         let p = ServerRemove;
         let mut buf = [0; 64];
-        let n = p.encode(&mut buf).unwrap();
-        assert_eq!(Packet::decode(&buf[..n]), Ok(Some(Packet::ServerRemove)));
+        let t = p.encode(&mut buf).unwrap();
+        assert_eq!(Packet::decode(t), Ok(Some(Packet::ServerRemove)));
     }
 
     #[test]
@@ -447,9 +451,9 @@ mod tests {
             host: Str("Test".as_bytes()),
         };
         let mut buf = [0; 512];
-        let n = p.encode(&mut buf).unwrap();
+        let t = p.encode(&mut buf).unwrap();
         assert_eq!(
-            Packet::decode(&buf[..n]),
+            Packet::decode(t),
             Ok(Some(Packet::GetServerInfoResponse(p)))
         );
     }

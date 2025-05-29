@@ -35,16 +35,28 @@ type ServerInfo = xash3d_protocol::ServerInfo<Box<[u8]>>;
 
 pub trait AddrExt: Sized + Eq + Hash + Display + Copy + ToSocketAddrs + ServerAddress {
     type Ip: Eq + Hash + Display + Copy + FromStr;
+    type MtuBuffer: AsMut<[u8]>;
 
     fn extract(addr: SocketAddr) -> Result<Self, SocketAddr>;
     fn ip(&self) -> &Self::Ip;
     fn wrap(self) -> SocketAddr;
+    fn mtu_buffer() -> Self::MtuBuffer;
 
-    fn mtu() -> usize;
+    // /// Returns an uninitialized buffer with MTU length.
+    // #[inline(always)]
+    // fn mtu_buffer_uninit() -> Self::MtuBuffer {
+    //     let buf = std::mem::MaybeUninit::uninit();
+    //     // SAFETY: used only to encode packets
+    //     #[allow(unsafe_code)]
+    //     unsafe {
+    //         buf.assume_init()
+    //     }
+    // }
 }
 
 impl AddrExt for SocketAddrV4 {
     type Ip = Ipv4Addr;
+    type MtuBuffer = [u8; 512];
 
     fn extract(addr: SocketAddr) -> Result<Self, SocketAddr> {
         if let SocketAddr::V4(addr) = addr {
@@ -63,13 +75,14 @@ impl AddrExt for SocketAddrV4 {
     }
 
     #[inline(always)]
-    fn mtu() -> usize {
-        512
+    fn mtu_buffer() -> Self::MtuBuffer {
+        [0; 512]
     }
 }
 
 impl AddrExt for SocketAddrV6 {
     type Ip = Ipv6Addr;
+    type MtuBuffer = [u8; 1280];
 
     fn extract(addr: SocketAddr) -> Result<Self, SocketAddr> {
         if let SocketAddr::V6(addr) = addr {
@@ -88,13 +101,10 @@ impl AddrExt for SocketAddrV6 {
     }
 
     #[inline(always)]
-    fn mtu() -> usize {
-        MAX_PACKET_SIZE
+    fn mtu_buffer() -> Self::MtuBuffer {
+        [0; 1280]
     }
 }
-
-/// The maximum size of UDP packets.
-const MAX_PACKET_SIZE: usize = 1280;
 
 const GAMEDIR_MAX_SIZE: usize = 31;
 
@@ -265,9 +275,9 @@ impl<Addr: AddrExt> MasterServer<Addr> {
     }
 
     pub fn run(&mut self, sig_flag: &AtomicBool) -> Result<(), Error> {
-        let mut buf = [0; MAX_PACKET_SIZE];
+        let mut buf = [0; 2048];
         while !sig_flag.load(Ordering::Relaxed) {
-            let (n, from) = match self.sock.recv_from(&mut buf[..Addr::mtu()]) {
+            let (n, from) = match self.sock.recv_from(&mut buf) {
                 Ok(x) => x,
                 Err(e) => match e.kind() {
                     io::ErrorKind::Interrupted => break,
@@ -305,9 +315,9 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         match p {
             server::Packet::Challenge(p) => {
                 let master_challenge = self.add_challenge(from);
-                let mut buf = [0; MAX_PACKET_SIZE];
                 let resp = master::ChallengeResponse::new(master_challenge, p.server_challenge);
                 trace!("{from}: send {resp:?}");
+                let mut buf = [0; 32];
                 let packet = resp.encode(&mut buf)?;
                 self.sock.send_to(packet, from)?;
             }
@@ -480,8 +490,8 @@ impl<Addr: AddrExt> MasterServer<Addr> {
             ..Default::default()
         };
         trace!("{from}: send {resp:?}");
-        let mut buf = [0; MAX_PACKET_SIZE];
-        let packet = resp.encode(&mut buf[..Addr::mtu()])?;
+        let mut buf = Addr::mtu_buffer();
+        let packet = resp.encode(buf.as_mut())?;
         self.sock.send_to(packet, from)?;
         Ok(())
     }
@@ -639,11 +649,11 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         A: ToSocketAddrs,
         S: ServerAddress,
     {
-        let mut buf = [0; MAX_PACKET_SIZE];
-        let mut offset = 0;
         let mut list = master::QueryServersResponse::new(key);
+        let mut buf = Addr::mtu_buffer();
+        let mut offset = 0;
         loop {
-            let (packet, count) = list.encode(&mut buf[..Addr::mtu()], &servers[offset..])?;
+            let (packet, count) = list.encode(buf.as_mut(), &servers[offset..])?;
             self.sock.send_to(packet, &to)?;
             offset += count;
             if offset >= servers.len() {

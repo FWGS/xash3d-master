@@ -129,7 +129,7 @@ where
 fn resolve_update_addr(cfg: &MasterConfig, local_addr: SocketAddr) -> SocketAddr {
     if let Some(s) = cfg.client.update_addr.as_deref() {
         let addr = if !s.contains(':') {
-            format!("{}:{}", s, local_addr.port())
+            format!("{s}:{}", local_addr.port())
         } else {
             s.to_owned()
         };
@@ -137,7 +137,7 @@ fn resolve_update_addr(cfg: &MasterConfig, local_addr: SocketAddr) -> SocketAddr
         match resolve_socket_addr(&addr, local_addr.is_ipv4()) {
             Ok(Some(x)) => return x,
             Ok(None) => error!("Update address: failed to resolve IP for \"{}\"", addr),
-            Err(e) => error!("Update address: {}", e),
+            Err(e) => error!("Update address: {e}"),
         }
     }
     local_addr
@@ -203,7 +203,7 @@ pub struct MasterServer<Addr: AddrExt> {
 
 impl<Addr: AddrExt> MasterServer<Addr> {
     pub fn new(cfg: Config, addr: Addr) -> Result<Self, Error> {
-        info!("Listen address: {}", addr);
+        info!("Listen address: {addr}");
 
         let sock = UdpSocket::bind(addr).map_err(Error::BindSocket)?;
         // make socket interruptable by singals
@@ -242,7 +242,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         if local_addr.is_ipv4() != addr.is_ipv4() {
             return Ok(Some(cfg));
         } else if local_addr != addr {
-            info!("Listen address: {}", addr);
+            info!("Listen address: {addr}");
             self.sock = UdpSocket::bind(addr).map_err(Error::BindSocket)?;
             // make socket interruptible by signals
             let timeout = Duration::from_secs(u32::MAX as u64);
@@ -300,14 +300,14 @@ impl<Addr: AddrExt> MasterServer<Addr> {
     }
 
     fn handle_server_packet(&mut self, from: Addr, p: server::Packet) -> Result<(), Error> {
-        trace!("{}: recv {:?}", from, p);
+        trace!("{from}: recv {p:?}");
 
         match p {
             server::Packet::Challenge(p) => {
                 let master_challenge = self.add_challenge(from);
                 let mut buf = [0; MAX_PACKET_SIZE];
                 let p = master::ChallengeResponse::new(master_challenge, p.server_challenge);
-                trace!("{}: send {:?}", from, p);
+                trace!("{from}: send {p:?}");
                 let n = p.encode(&mut buf)?;
                 self.sock.send_to(&buf[..n], from)?;
             }
@@ -315,7 +315,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
                 let challenge = match self.challenges.get(&from) {
                     Some(e) => e.value,
                     None => {
-                        trace!("{}: Challenge does not exists", from);
+                        trace!("{from}: challenge does not exists");
                         return Ok(());
                     }
                 };
@@ -329,7 +329,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
                 }
                 if p.challenge != challenge {
                     warn!(
-                        "{from}: Expected challenge {challenge} but received {}",
+                        "{from}: expected challenge {challenge} but received {}",
                         p.challenge
                     );
                     return Ok(());
@@ -510,10 +510,10 @@ impl<Addr: AddrExt> MasterServer<Addr> {
     }
 
     fn handle_admin_packet(&mut self, from: Addr, p: admin::Packet) -> Result<(), Error> {
-        trace!("{}: recv {:?}", from, p);
+        trace!("{from}: recv {p:?}");
 
         if self.admin_limit.get(from.ip()).is_some() {
-            trace!("{}: rate limit", from);
+            trace!("{from}: admin rate limit");
             return Ok(());
         }
 
@@ -522,7 +522,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
                 let (master_challenge, hash_challenge) = self.admin_challenge_add(from);
 
                 let p = master::AdminChallengeResponse::new(master_challenge, hash_challenge);
-                trace!("{}: send {:?}", from, p);
+                trace!("{from}: send {p:?}");
                 let mut buf = [0; 64];
                 let n = p.encode(&mut buf)?;
                 self.sock.send_to(&buf[..n], from)?;
@@ -534,7 +534,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
                     .ok_or(Error::AdminChallengeNotFound)?;
 
                 if entry.0 != p.master_challenge {
-                    trace!("{}: master challenge is not valid", from);
+                    trace!("{from}: master challenge is not valid");
                     return Ok(());
                 }
 
@@ -555,12 +555,12 @@ impl<Addr: AddrExt> MasterServer<Addr> {
 
                 match admin {
                     Some(admin) => {
-                        info!("{}: admin({}), command: {:?}", from, &admin.name, p.command);
+                        info!("{from}: admin({}), command: {:?}", &admin.name, p.command);
                         self.admin_command(p.command);
                         self.admin_challenge_remove(from);
                     }
                     None => {
-                        warn!("{}: invalid admin hash, command: {:?}", from, p.command);
+                        warn!("{from}: invalid admin hash, command: {:?}", p.command);
                         self.admin_limit.insert(*from.ip(), ());
                     }
                 }
@@ -620,15 +620,15 @@ impl<Addr: AddrExt> MasterServer<Addr> {
     fn add_server(&mut self, addr: Addr, server: ServerInfo) {
         match self.servers.entry(addr) {
             hash_map::Entry::Occupied(mut e) => {
-                trace!("{}: game server update", addr);
+                trace!("{addr}: game server updated");
                 e.insert(Timed::new(server));
             }
             hash_map::Entry::Vacant(_) => {
                 if self.count_servers(addr.ip()) >= self.cfg.server.max_servers_per_ip {
-                    trace!("{}: max servers per ip", addr);
+                    trace!("{addr}: game server rejected, max servers per ip");
                     return;
                 }
-                trace!("{}: game server add", addr);
+                trace!("{addr}: game server added");
                 self.servers.insert(addr, server);
             }
         }
@@ -677,7 +677,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
             for (i, ip) in iter {
                 match ip {
                     Ok(ip) => op(i, ip),
-                    Err(_) => warn!("invalid ip: {}", i),
+                    Err(_) => warn!("invalid ip: {i}"),
                 }
             }
         }
@@ -686,19 +686,19 @@ impl<Addr: AddrExt> MasterServer<Addr> {
             "ban" => {
                 helper::<Addr, _>(&args[1..], |_, ip| {
                     if self.blocklist.insert(ip) {
-                        info!("ban ip: {}", ip);
+                        info!("ban ip: {ip}");
                     }
                 });
             }
             "unban" => {
                 helper::<Addr, _>(&args[1..], |_, ip| {
                     if self.blocklist.remove(&ip) {
-                        info!("unban ip: {}", ip);
+                        info!("unban ip: {ip}");
                     }
                 });
             }
             _ => {
-                warn!("invalid command: {}", args[0]);
+                warn!("invalid admin command: {}", args[0]);
             }
         }
     }

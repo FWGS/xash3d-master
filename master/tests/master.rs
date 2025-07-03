@@ -33,12 +33,21 @@ struct Test {
 }
 
 impl Test {
-    fn new(cfg: &Config) -> Test {
-        let mut test = Test {
+    fn new() -> Test {
+        Test {
             master_addr: UNSPECIFIED.into(),
             server_addr: UNSPECIFIED.into(),
-        };
+        }
+    }
+
+    fn with_master(cfg: &Config) -> Test {
+        let mut test = Self::new();
         test.create_master(cfg);
+        test
+    }
+
+    fn with_master_and_server(cfg: &Config) -> Test {
+        let mut test = Self::with_master(cfg);
         test.add_server(cfg);
         test
     }
@@ -87,7 +96,7 @@ fn server_add() {
     log::set_max_level(log::LevelFilter::Trace);
 
     let cfg = Config::default();
-    let test = Test::new(&cfg);
+    let test = Test::with_master_and_server(&cfg);
     let mut buf = [0; 1024];
     let sock = UdpSocket::bind(UNSPECIFIED).unwrap();
     let game_key = Some(0xbeefdead);
@@ -116,6 +125,30 @@ fn server_add() {
 }
 
 #[test]
+fn server_reuse_challenge() {
+    log::set_logger(&LOGGER).ok();
+    log::set_max_level(log::LevelFilter::Trace);
+
+    let test = Test::with_master(&Config::default());
+    let sock = UdpSocket::bind(UNSPECIFIED).unwrap();
+    let mut challenges = [0; 3];
+    for (i, j) in challenges.iter_mut().enumerate() {
+        let challenge = Some(i as u32);
+        let packet = server::Challenge::new(challenge);
+        let mut buf = [0; 512];
+        let p = packet.encode(&mut buf).unwrap();
+        sock.send_to(p, test.master_addr).unwrap();
+
+        let (len, _) = sock.recv_from(&mut buf).unwrap();
+        let resp = master::ChallengeResponse::decode(&buf[..len]).unwrap();
+        assert_eq!(resp.server_challenge, challenge);
+        *j = resp.master_challenge;
+    }
+
+    assert!(challenges.iter().all(|i| *i == challenges[0]));
+}
+
+#[test]
 fn client_rate_limit() {
     log::set_logger(&LOGGER).ok();
     log::set_max_level(log::LevelFilter::Trace);
@@ -124,7 +157,7 @@ fn client_rate_limit() {
     cfg.master.server.client_rate_limit = 10;
     info!("client rate limit {}", cfg.master.server.client_rate_limit);
 
-    let test = Test::new(&cfg);
+    let test = Test::with_master_and_server(&cfg);
     let sock = UdpSocket::bind(UNSPECIFIED).unwrap();
     sock.set_read_timeout(Some(Duration::from_millis(100)))
         .unwrap();

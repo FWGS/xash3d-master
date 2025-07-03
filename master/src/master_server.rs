@@ -314,21 +314,14 @@ impl<Addr: AddrExt> MasterServer<Addr> {
 
         match p {
             server::Packet::Challenge(p) => {
-                let master_challenge = self.add_challenge(from);
-                let resp = master::ChallengeResponse::new(master_challenge, p.server_challenge);
+                let challenge = self.server_challenge_add(from);
+                let resp = master::ChallengeResponse::new(challenge, p.server_challenge);
                 trace!("{from}: send {resp:?}");
                 let mut buf = [0; 32];
                 let packet = resp.encode(&mut buf)?;
                 self.sock.send_to(packet, from)?;
             }
             server::Packet::ServerAdd(p) => {
-                let challenge = match self.challenges.get(&from) {
-                    Some(e) => e.value,
-                    None => {
-                        trace!("{from}: challenge does not exists");
-                        return Ok(());
-                    }
-                };
                 if p.version < self.cfg.server.min_version {
                     let min = self.cfg.server.min_version;
                     warn!(
@@ -337,6 +330,10 @@ impl<Addr: AddrExt> MasterServer<Addr> {
                     );
                     return Ok(());
                 }
+                let Some(challenge) = self.server_challenge_get(&from) else {
+                    trace!("{from}: challenge does not exist");
+                    return Ok(());
+                };
                 if p.challenge != challenge {
                     warn!(
                         "{from}: expected challenge {challenge} but received {}",
@@ -606,10 +603,15 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         Err(Error::UndefinedPacket)
     }
 
-    fn add_challenge(&mut self, addr: Addr) -> u32 {
-        let x = self.rng.u32(..);
-        self.challenges.insert(addr, x);
-        x
+    fn server_challenge_add(&mut self, addr: Addr) -> u32 {
+        self.challenges
+            .entry(addr)
+            .or_insert_with(|| Timed::new(self.rng.u32(..)))
+            .value
+    }
+
+    fn server_challenge_get(&self, addr: &Addr) -> Option<u32> {
+        self.challenges.get(addr).map(|i| i.value)
     }
 
     fn admin_challenge_add(&mut self, addr: Addr) -> (u32, u32) {

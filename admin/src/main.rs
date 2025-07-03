@@ -112,7 +112,7 @@ fn main() {
     let cli = cli::parse();
 
     if let Err(e) = send_command(&cli) {
-        eprintln!("error: {}", e);
+        eprintln!("error: {e}");
         std::process::exit(1);
     }
 }

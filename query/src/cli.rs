@@ -15,8 +15,11 @@ const BIN_NAME: &str = env!("CARGO_BIN_NAME");
 const PKG_NAME: &str = env!("CARGO_PKG_NAME");
 const PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-const DEFAULT_HOST: &str = "mentality.rip";
-const DEFAULT_PORT: u16 = 27010;
+#[rustfmt::skip]
+const DEFAULT_MASTERS: &[&str] = &[
+    "mentality.rip:27010",
+    "mentality.rip:27011",
+];
 
 const DEFAULT_CLIENT_BUILDNUM: u32 = 4000;
 
@@ -127,10 +130,10 @@ pub struct Cli {
 impl Default for Cli {
     fn default() -> Cli {
         Cli {
-            masters: vec![
-                format!("{}:{}", DEFAULT_HOST, DEFAULT_PORT).into_boxed_str(),
-                format!("{}:{}", DEFAULT_HOST, DEFAULT_PORT + 1).into_boxed_str(),
-            ],
+            masters: DEFAULT_MASTERS
+                .iter()
+                .map(|i| i.to_string().into_boxed_str())
+                .collect(),
             args: Default::default(),
             master_timeout: 2,
             server_timeout: 2,
@@ -147,21 +150,20 @@ impl Default for Cli {
 fn print_usage(opts: Options) {
     let brief = format!(
         "\
-Usage: {} [options] <COMMAND> [ARGS]
+Usage: {BIN_NAME} [options] <COMMAND> [ARGS]
 
 COMMANDS:
     all                 fetch servers from all masters and fetch info for each server
     info hosts...       fetch info for each server
     list                fetch servers from all masters and print server addresses
     monitor             live monitoring for server updates\
-        ",
-        BIN_NAME
+        "
     );
     print!("{}", opts.usage(&brief));
 }
 
 fn print_version() {
-    println!("{} v{}", PKG_NAME, PKG_VERSION);
+    println!("{PKG_NAME} v{PKG_VERSION}");
 }
 
 pub fn parse() -> Cli {
@@ -189,10 +191,10 @@ pub fn parse() -> Cli {
     let protocols = cli
         .protocol
         .iter()
-        .map(|&i| format!("{}", i))
+        .map(|&i| format!("{i}"))
         .collect::<Vec<_>>()
         .join(",");
-    let help = format!("protocol version [default: {}]", protocols);
+    let help = format!("protocol version [default: {protocols}]");
     opts.optopt("p", "protocol", &help, "VERSION");
     opts.optflag("j", "json", "output JSON");
     opts.optflag("d", "debug", "output debug");
@@ -217,7 +219,7 @@ pub fn parse() -> Cli {
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => m,
         Err(e) => {
-            eprintln!("{}", e);
+            eprintln!("{e}");
             process::exit(1);
         }
     };
@@ -285,7 +287,7 @@ pub fn parse() -> Cli {
     if matches.opt_present("key") {
         let key = fastrand::u32(..);
         cli.key = Some(key);
-        cli.filter.push_str(&format!("\\key\\{:x}", key));
+        cli.filter.push_str(&format!("\\key\\{key:x}"));
     }
 
     cli.json = matches.opt_present("json");

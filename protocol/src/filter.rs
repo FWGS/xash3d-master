@@ -302,42 +302,42 @@ impl fmt::Display for &Filter<'_> {
         display_flag!("dedicated", FilterFlags::DEDICATED);
         display_flag!("secure", FilterFlags::SECURE);
         if let Some(s) = self.gamedir {
-            write!(fmt, "\\gamedir\\{}", s)?;
+            write!(fmt, "\\gamedir\\{s}")?;
         }
         display_flag!("secure", FilterFlags::SECURE);
         if let Some(s) = self.map {
-            write!(fmt, "\\map\\{}", s)?;
+            write!(fmt, "\\map\\{s}")?;
         }
         display_flag!("empty", FilterFlags::EMPTY);
         display_flag!("full", FilterFlags::FULL);
         display_flag!("password", FilterFlags::PASSWORD);
         display_flag!("noplayers", FilterFlags::NOPLAYERS);
         if let Some(v) = self.clver {
-            write!(fmt, "\\clver\\{}", v)?;
+            write!(fmt, "\\clver\\{v}")?;
         }
         display_flag!("nat", FilterFlags::NAT);
         display_flag!("lan", FilterFlags::LAN);
         display_flag!("bots", FilterFlags::BOTS);
         if let Some(x) = self.key {
-            write!(fmt, "\\key\\{:x}", x)?;
+            write!(fmt, "\\key\\{x:x}")?;
         }
         if let Some(x) = self.protocol {
-            write!(fmt, "\\protocol\\{}", x)?;
+            write!(fmt, "\\protocol\\{x}")?;
         }
         if let Some(x) = self.client_buildnum {
-            write!(fmt, "\\buildnum\\{}", x)?;
+            write!(fmt, "\\buildnum\\{x}")?;
         }
         if let Some(x) = self.client_os {
-            write!(fmt, "\\os\\{}", x)?;
+            write!(fmt, "\\os\\{x}")?;
         }
         if let Some(x) = self.client_arch {
-            write!(fmt, "\\arch\\{}", x)?;
+            write!(fmt, "\\arch\\{x}")?;
         }
         if let Some(x) = self.client_branch {
-            write!(fmt, "\\branch\\{}", x)?;
+            write!(fmt, "\\branch\\{x}")?;
         }
         if let Some(x) = self.client_commit {
-            write!(fmt, "\\commit\\{}", x)?;
+            write!(fmt, "\\commit\\{x}")?;
         }
         Ok(())
     }

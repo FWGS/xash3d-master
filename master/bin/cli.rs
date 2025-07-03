@@ -36,12 +36,12 @@ pub struct Cli {
 }
 
 fn print_usage(opts: Options) {
-    let brief = format!("Usage: {} [options]", BIN_NAME);
+    let brief = format!("Usage: {BIN_NAME} [options]");
     print!("{}", opts.usage(&brief));
 }
 
 fn print_version() {
-    println!("{} v{}", PKG_NAME, PKG_VERSION);
+    println!("{PKG_NAME} v{PKG_VERSION}");
 }
 
 pub fn parse() -> Result<Cli, Error> {
@@ -87,7 +87,7 @@ pub fn parse() -> Result<Cli, Error> {
         match config::parse_log_level(value.as_ref()) {
             Some(level) => cli.log_level = Some(level),
             None => {
-                eprintln!("Invalid value for log option: \"{}\"", value);
+                eprintln!("Invalid value for log option: \"{value}\"");
                 process::exit(1);
             }
         }

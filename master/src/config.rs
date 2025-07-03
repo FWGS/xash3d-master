@@ -208,7 +208,7 @@ where
     D: Deserializer<'de>,
 {
     let s = <&str>::deserialize(de)?;
-    parse_log_level(s).ok_or_else(|| D::Error::custom(format!("Invalid log level: \"{}\"", s)))
+    parse_log_level(s).ok_or_else(|| D::Error::custom(format!("Invalid log level: \"{s}\"")))
 }
 
 pub fn parse_log_level(s: &str) -> Option<LevelFilter> {
@@ -240,7 +240,7 @@ where
 {
     let s = <&str>::deserialize(de)?;
     s.parse()
-        .map_err(|_| D::Error::custom(format!("Invalid version: \"{}\"", s)))
+        .map_err(|_| D::Error::custom(format!("Invalid version: \"{s}\"")))
 }
 
 pub fn load<P: AsRef<Path>>(path: P) -> Result<Config, Error> {

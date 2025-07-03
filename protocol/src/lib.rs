@@ -72,14 +72,10 @@ impl fmt::Display for Error {
             Self::InvalidProtocolVersion => "Invalid protocol version".fmt(fmt),
             Self::CursorError(source) => source.fmt(fmt),
             Self::InvalidServerValue(key, source) => {
-                write!(
-                    fmt,
-                    "Invalid value for server add key `{}`: {}",
-                    key, source
-                )
+                write!(fmt, "Invalid value for server add key `{key}`: {source}")
             }
             Self::InvalidFilterValue(key, source) => {
-                write!(fmt, "Invalid value for filter key `{}`: {}", key, source)
+                write!(fmt, "Invalid value for filter key `{key}`: {source}")
             }
         }
     }

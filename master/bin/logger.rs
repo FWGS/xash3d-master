@@ -47,7 +47,7 @@ static LOGGER: Logger = Logger::new();
 
 pub fn init() -> &'static Logger {
     if let Err(e) = log::set_logger(&LOGGER) {
-        eprintln!("Failed to initialize logger: {}", e);
+        eprintln!("Failed to initialize logger: {e}");
     }
     &LOGGER
 }

@@ -127,7 +127,7 @@ impl<'a> ObserverBuilder<'a> {
         fn append<T: fmt::Display>(out: &mut String, key: &str, value: Option<T>) {
             use fmt::Write;
             if let Some(value) = value {
-                write!(out, "\\{}\\{}", key, value).unwrap();
+                write!(out, "\\{key}\\{value}").unwrap();
             }
         }
 

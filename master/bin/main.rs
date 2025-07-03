@@ -52,7 +52,7 @@ fn load_config(cli: &Cli, logger: &Logger) -> Result<Config, config::Error> {
 
 fn run() -> Result<(), Error> {
     let cli = cli::parse().unwrap_or_else(|e| {
-        eprintln!("{}", e);
+        eprintln!("{e}");
         std::process::exit(1);
     });
 
@@ -60,8 +60,8 @@ fn run() -> Result<(), Error> {
 
     let cfg = load_config(&cli, logger).unwrap_or_else(|e| {
         match cli.config_path.as_deref() {
-            Some(p) => eprintln!("Failed to load config \"{}\": {}", p, e),
-            None => eprintln!("{}", e),
+            Some(p) => eprintln!("Failed to load config \"{p}\": {e}"),
+            None => eprintln!("{e}"),
         }
         process::exit(1);
     });

@@ -282,7 +282,7 @@ impl fmt::Display for Colored<'_> {
         if let Some(w) = fmt.width() {
             let c = fmt.fill();
             for _ in width..w {
-                write!(fmt, "{}", c)?;
+                write!(fmt, "{c}")?;
             }
         }
 
@@ -300,7 +300,7 @@ fn get_socket_addrs<'a>(iter: impl Iterator<Item = &'a str>) -> Result<Vec<Socke
             .find(|i| matches!(i, SocketAddr::V4(_)))
         {
             Some(SocketAddr::V4(addr)) => out.push(addr),
-            _ => eprintln!("warn: failed to resolve address for {}", i),
+            _ => eprintln!("warn: failed to resolve address for {i}"),
         }
     }
 
@@ -533,7 +533,7 @@ impl<'a> Scan<'a> {
             _ => false,
         };
         if !res {
-            eprintln!("error: invalid key from master({})", from);
+            eprintln!("error: invalid key from master({from})");
         }
         res
     }
@@ -560,7 +560,7 @@ fn query_server_info(cli: &Cli, servers: &[String]) -> Result<(), Error> {
         if cli.json {
             println!("{}", serde_json::to_string_pretty(&result).unwrap());
         } else if cli.debug {
-            println!("{:#?}", result);
+            println!("{result:#?}");
         } else {
             todo!()
         }
@@ -568,7 +568,7 @@ fn query_server_info(cli: &Cli, servers: &[String]) -> Result<(), Error> {
         for i in servers {
             print!("server: {}", i.address);
             if let Some(ping) = i.ping {
-                print!(" [{:.3} ms]", ping);
+                print!(" [{ping:.3} ms]");
             }
             println!();
 
@@ -642,13 +642,13 @@ fn list_servers(cli: &Cli) -> Result<(), Error> {
         if cli.json {
             println!("{}", serde_json::to_string_pretty(&result).unwrap());
         } else if cli.debug {
-            println!("{:#?}", result);
+            println!("{result:#?}");
         } else {
             todo!()
         }
     } else {
         for i in servers {
-            println!("{}", i);
+            println!("{i}");
         }
     }
 
@@ -691,12 +691,12 @@ impl Handler for Monitor<'_> {
                     let p = e.get().printer(self.cli);
                     println!("{:24?} --- {:>7.1} {}", addr, ' ', p,);
                     let p = info.printer(self.cli);
-                    println!("{:24?} +++ {:>7.1?} {}", addr, ping, p);
+                    println!("{addr:24?} +++ {ping:>7.1?} {p}");
                     e.insert(info);
                 }
                 Entry::Vacant(e) => {
                     let p = info.printer(self.cli);
-                    println!("{:24?} +++ {:>7.1?} {}", addr, ping, p);
+                    println!("{addr:24?} +++ {ping:>7.1?} {p}");
                     e.insert(info);
                 }
             }
@@ -759,7 +759,7 @@ fn main() {
     }
 
     if let Err(e) = execute(cli) {
-        eprintln!("error: {}", e);
+        eprintln!("error: {e}");
         process::exit(1);
     }
 }

@@ -111,7 +111,7 @@ impl fmt::Display for ServerType {
             E::Unknown => "unknown",
         };
 
-        write!(fmt, "{}", s)
+        write!(fmt, "{s}")
     }
 }
 
@@ -168,7 +168,7 @@ impl fmt::Display for Os {
             Os::Mac => "Mac",
             Os::Unknown => "Unknown",
         };
-        write!(fmt, "{}", s)
+        write!(fmt, "{s}")
     }
 }
 

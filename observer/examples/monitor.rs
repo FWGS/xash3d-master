@@ -102,11 +102,11 @@ impl Handler for Monitor {
         match self.servers.entry(addr) {
             Entry::Occupied(mut e) => {
                 println!("{:24?} --- {:>7.1} {}", addr, ' ', e.get());
-                println!("{:24?} +++ {:>7.1?} {}", addr, ping, info);
+                println!("{addr:24?} +++ {ping:>7.1?} {info}");
                 e.insert(info);
             }
             Entry::Vacant(e) => {
-                println!("{:24?} +++ {:>7.1?} {}", addr, ping, info);
+                println!("{addr:24?} +++ {ping:>7.1?} {info}");
                 e.insert(info);
             }
         }

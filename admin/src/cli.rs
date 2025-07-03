@@ -25,7 +25,7 @@ pub struct Cli {
 impl Default for Cli {
     fn default() -> Cli {
         Cli {
-            address: format!("{}:{}", DEFAULT_HOST, DEFAULT_PORT),
+            address: format!("{DEFAULT_HOST}:{DEFAULT_PORT}"),
             command: String::new(),
             hash_len: admin::HASH_LEN,
             hash_key: admin::HASH_KEY.to_owned(),
@@ -35,12 +35,12 @@ impl Default for Cli {
 }
 
 fn print_usage(opts: Options) {
-    let brief = format!("Usage: {} [options]", BIN_NAME);
+    let brief = format!("Usage: {BIN_NAME} [options]");
     print!("{}", opts.usage(&brief));
 }
 
 fn print_version() {
-    println!("{} v{}", PKG_NAME, PKG_VERSION);
+    println!("{PKG_NAME} v{PKG_VERSION}");
 }
 
 pub fn parse() -> Cli {
@@ -62,7 +62,7 @@ pub fn parse() -> Cli {
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => m,
         Err(e) => {
-            eprintln!("{}", e);
+            eprintln!("{e}");
             process::exit(1);
         }
     };

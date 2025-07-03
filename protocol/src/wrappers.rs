@@ -39,7 +39,7 @@ where
     T: AsRef<[u8]>,
 {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        write!(fmt, "\"{}\"", self)
+        write!(fmt, "\"{self}\"")
     }
 }
 
@@ -56,7 +56,7 @@ where
                 _ if c.is_ascii_graphic() || c == b' ' => {
                     write!(fmt, "{}", c as char)?;
                 }
-                _ => write!(fmt, "\\x{:02x}", c)?,
+                _ => write!(fmt, "\\x{c:02x}")?,
             }
         }
         Ok(())

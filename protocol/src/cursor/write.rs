@@ -189,7 +189,7 @@ impl<'a> CursorMut<'a> {
     }
 
     pub fn put_as_str<T: fmt::Display>(&mut self, value: T) -> Result<&mut Self> {
-        write!(self, "{}", value).map_err(|_| CursorError::UnexpectedEnd)?;
+        write!(self, "{value}").map_err(|_| CursorError::UnexpectedEnd)?;
         Ok(self)
     }
 

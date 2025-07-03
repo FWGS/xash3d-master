@@ -32,19 +32,19 @@ impl Counters {
             match format.find('%').map(|i| format.split_at(i)) {
                 Some((head, tail)) => {
                     format = &tail[1..];
-                    write!(buf, "{}", head)?;
+                    write!(buf, "{head}")?;
                     let mut chars = format.char_indices();
                     match chars.next().map(|(_, c)| c) {
-                        Some('s') => write!(buf, "{}", servers)?,
-                        Some('A') => write!(buf, "{}", server_add)?,
-                        Some('D') => write!(buf, "{}", server_del)?,
-                        Some('Q') => write!(buf, "{}", query_servers)?,
-                        Some('E') => write!(buf, "{}", errors)?,
+                        Some('s') => write!(buf, "{servers}")?,
+                        Some('A') => write!(buf, "{server_add}")?,
+                        Some('D') => write!(buf, "{server_del}")?,
+                        Some('Q') => write!(buf, "{query_servers}")?,
+                        Some('E') => write!(buf, "{errors}")?,
                         Some('a') => write!(buf, "{:.1}", server_add as f64 / time)?,
                         Some('d') => write!(buf, "{:.1}", server_del as f64 / time)?,
                         Some('q') => write!(buf, "{:.1}", query_servers as f64 / time)?,
                         Some('e') => write!(buf, "{:.1}", errors as f64 / time)?,
-                        Some(c) => write!(buf, "%{}", c)?,
+                        Some(c) => write!(buf, "%{c}")?,
                         None => write!(buf, "%")?,
                     }
                     match chars.next() {
@@ -53,7 +53,7 @@ impl Counters {
                     }
                 }
                 None => {
-                    write!(buf, "{}", format)?;
+                    write!(buf, "{format}")?;
                     break;
                 }
             }

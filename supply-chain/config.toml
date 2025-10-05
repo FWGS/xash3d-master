@@ -31,18 +31,10 @@ audit-as-crates-io = true
 [policy.xash3d-query]
 audit-as-crates-io = true
 
-[[exemptions.chrono]]
-version = "0.4.40"
-criteria = "safe-to-deploy"
-
 [[exemptions.mio]]
 version = "0.8.10"
 criteria = "safe-to-deploy"
 
 [[exemptions.redox_syscall]]
 version = "0.5.10"
-criteria = "safe-to-deploy"
-
-[[exemptions.windows-link]]
-version = "0.1.0"
 criteria = "safe-to-deploy"

@@ -13,7 +13,8 @@ repository.workspace = true
 
 [features]
 default = ["logtime"]
-logtime = ["chrono"]
+# unused in this version
+logtime = []
 stats = []
 
 [[bin]]
@@ -34,9 +35,3 @@ xash3d-protocol.workspace = true
 
 [target.'cfg(not(windows))'.dependencies]
 signal-hook = { version = "0.3.17", default-features = false }
-
-[dependencies.chrono]
-version = "0.4.26"
-optional = true
-default-features = false
-features = ["clock"]

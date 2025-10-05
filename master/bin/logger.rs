@@ -29,12 +29,13 @@ impl log::Log for Logger {
 
     fn log(&self, record: &Record) {
         if self.enabled(record.metadata()) {
-            #[cfg(feature = "logtime")]
-            if self.print_time.load(Ordering::Relaxed) {
-                let dt = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
-                println!("[{}] {} - {}", dt, record.level(), record.args());
-                return;
-            }
+            // chrono dependency was removed
+            // #[cfg(feature = "logtime")]
+            // if self.print_time.load(Ordering::Relaxed) {
+            //     let dt = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+            //     println!("[{}] {} - {}", dt, record.level(), record.args());
+            //     return;
+            // }
 
             println!("{} - {}", record.level(), record.args());
         }

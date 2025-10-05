@@ -3,7 +3,7 @@
 [log]
 # Possible values: 0-5, off, error, warn, info, debug, trace
 #level = "info"
-# Print time (require build with `logtime` feature flag)
+# Print time (unused in this version, require build with `logtime` feature flag)
 #time = true
 
 [server]

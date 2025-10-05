@@ -83,6 +83,7 @@ impl Test {
             protocol: xash3d_protocol::PROTOCOL_VERSION,
             players: 8,
             max: 32,
+            bots: 0,
             flags: server::ServerFlags::empty(),
         };
         let p = p.encode(&mut buf).unwrap();

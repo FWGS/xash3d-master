@@ -94,6 +94,8 @@ pub struct ServerAdd<T> {
     pub players: u8,
     /// Maximum number of players on the server.
     pub max: u8,
+    /// Current number of bots on the server.
+    pub bots: u8,
     /// See `ServerFalgs`.
     pub flags: ServerFlags,
 }
@@ -151,9 +153,10 @@ where
                         .unwrap_or_default()
                 }
                 b"region" => ret.region = cur.get("region")?,
-                b"bots" => ret
-                    .flags
-                    .set(ServerFlags::BOTS, cur.get::<u8>("bots")? != 0),
+                b"bots" => {
+                    ret.bots = cur.get("bots")?;
+                    ret.flags.set(ServerFlags::BOTS, ret.bots != 0);
+                }
                 b"password" => ret.flags.set(ServerFlags::PASSWORD, cur.get("password")?),
                 b"secure" => ret.flags.set(ServerFlags::SECURE, cur.get("secure")?),
                 b"lan" => ret.flags.set(ServerFlags::LAN, cur.get("lan")?),
@@ -194,7 +197,7 @@ where
             .put_key("os", self.os)?
             .put_key("version", self.version)?
             .put_key("region", self.region as u8)?
-            .put_key("bots", self.flags.contains(ServerFlags::BOTS))?
+            .put_key("bots", self.bots)?
             .put_key("password", self.flags.contains(ServerFlags::PASSWORD))?
             .put_key("secure", self.flags.contains(ServerFlags::SECURE))?
             .put_key("lan", self.flags.contains(ServerFlags::LAN))?
@@ -420,6 +423,7 @@ mod tests {
             protocol: 49,
             players: 4,
             max: 32,
+            bots: 8,
             flags: ServerFlags::all(),
         };
         let mut buf = [0; 512];

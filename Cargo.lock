@@ -666,7 +666,6 @@ dependencies = [
 name = "xash3d-protocol"
 version = "0.2.0"
 dependencies = [
- "autocfg",
  "bitflags",
  "log",
 ]

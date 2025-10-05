@@ -20,6 +20,3 @@ net = ["std"]
 [dependencies]
 log.workspace = true
 bitflags.workspace = true
-
-[build-dependencies]
-autocfg = "1.3"

@@ -12,7 +12,7 @@
 # How many servers with the same ip can be registred
 #max-servers-per-ip = 14
 # Minimal accepted server version
-#min-version = "0.19.2"
+#min-version = "0.21"
 
 # Set maximum allowed client requests from an IP address per second.
 #

@@ -20,8 +20,8 @@ pub const DEFAULT_MAX_SERVERS_PER_IP: u16 = 14;
 
 pub const DEFAULT_HASH_LEN: usize = admin::HASH_LEN;
 
-pub const DEFAULT_SERVER_MIN_VERSION: Version = Version::with_patch(0, 19, 2);
-pub const DEFAULT_CLIENT_MIN_VERSION: Version = Version::new(0, 19);
+pub const DEFAULT_SERVER_MIN_VERSION: Version = Version::new(0, 21);
+pub const DEFAULT_CLIENT_MIN_VERSION: Version = Version::new(0, 21);
 
 // Disabled if zero.
 pub const DEFAULT_MIN_ENGINE_BUILDNUM: u32 = 0;

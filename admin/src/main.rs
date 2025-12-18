@@ -3,9 +3,9 @@
 
 mod cli;
 
+use std::env;
 use std::io::{self, Write};
 use std::net::UdpSocket;
-use std::env;
 
 use blake2b_simd::Params;
 use thiserror::Error;

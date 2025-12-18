@@ -44,7 +44,6 @@ pub enum Region {
     RestOfTheWorld = 0xff,
 }
 
-
 impl TryFrom<u8> for Region {
     type Error = CursorError;
 
@@ -79,7 +78,6 @@ pub enum ServerType {
     #[default]
     Unknown,
 }
-
 
 impl TryFrom<&[u8]> for ServerType {
     type Error = CursorError;

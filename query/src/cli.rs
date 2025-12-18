@@ -18,6 +18,8 @@ const PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
 #[rustfmt::skip]
 const DEFAULT_MASTERS: &[&str] = &[
     "mentality.rip:27010",
+    "ms2.mentality.rip:27010",
+    "ms3.mentality.rip:27010",
     "mentality.rip:27011",
 ];
 

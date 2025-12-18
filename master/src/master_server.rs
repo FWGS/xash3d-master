@@ -640,7 +640,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         // have to create a copy to not mutate while iterating
         for (addr, _) in self.servers.iter() {
             if addr.ip() == ip {
-                servers_to_remove.push(addr.clone());
+                servers_to_remove.push(*addr);
             }
         }
 

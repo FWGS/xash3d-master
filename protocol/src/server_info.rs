@@ -21,6 +21,7 @@ use crate::{net::server::ServerAdd, wrappers::Str};
 /// The region of the world in which the server is located.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 #[repr(u8)]
+#[derive(Default)]
 pub enum Region {
     /// US East coast.
     USEastCoast = 0x00,
@@ -39,14 +40,10 @@ pub enum Region {
     /// Africa.
     Africa = 0x07,
     /// Rest of the world.
+    #[default]
     RestOfTheWorld = 0xff,
 }
 
-impl Default for Region {
-    fn default() -> Self {
-        Self::RestOfTheWorld
-    }
-}
 
 impl TryFrom<u8> for Region {
     type Error = CursorError;
@@ -70,6 +67,7 @@ impl TryFrom<u8> for Region {
 /// Game server type.
 #[derive(Copy, Clone, Debug, PartialEq)]
 #[repr(u8)]
+#[derive(Default)]
 pub enum ServerType {
     /// Dedicated server.
     Dedicated,
@@ -78,14 +76,10 @@ pub enum ServerType {
     /// Spectator proxy.
     Proxy,
     /// Unknown.
+    #[default]
     Unknown,
 }
 
-impl Default for ServerType {
-    fn default() -> Self {
-        Self::Unknown
-    }
-}
 
 impl TryFrom<&[u8]> for ServerType {
     type Error = CursorError;

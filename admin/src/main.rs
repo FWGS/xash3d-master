@@ -5,6 +5,7 @@ mod cli;
 
 use std::io::{self, Write};
 use std::net::UdpSocket;
+use std::env;
 
 use blake2b_simd::Params;
 use thiserror::Error;
@@ -23,6 +24,10 @@ enum Error {
 fn read_password() -> Result<Option<String>, Error> {
     use crossterm::event::{read, Event, KeyCode, KeyEventKind, KeyModifiers};
     use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
+
+    if let Ok(password) = env::var("XASH3D_ADMIN_PASSWORD") {
+        return Ok(Some(password));
+    }
 
     print!("Password: ");
     io::stdout().flush().unwrap();

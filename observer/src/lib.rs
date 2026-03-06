@@ -9,7 +9,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use xash3d_protocol as proto;
+use xash3d_protocol::{self as proto, filter::Version};
 
 pub type GetServerInfoResponse<'a, T = &'a [u8]> =
     xash3d_protocol::server::GetServerInfoResponse<T>;
@@ -87,14 +87,49 @@ pub trait Handler {
     fn server_timeout(&mut self, addr: &SocketAddr) {}
 }
 
-#[derive(Default)]
 pub struct ObserverBuilder<'a> {
+    client_version: Option<Version>,
+    client_build_number: Option<u32>,
     gamedir: Option<&'a str>,
     nat: Option<bool>,
     filter: Option<&'a str>,
 }
 
+impl<'a> Default for ObserverBuilder<'a> {
+    fn default() -> Self {
+        Self {
+            client_version: Some(xash3d_protocol::CLIENT_VERSION),
+            client_build_number: None,
+            gamedir: None,
+            nat: None,
+            filter: None,
+        }
+    }
+}
+
 impl<'a> ObserverBuilder<'a> {
+    // Sets a client version for requests sent to master servers.
+    //
+    // # Note
+    //
+    // The master server may respond with a fake server if the client version is lower than
+    // what is specified in the master server's configuration file.
+    pub fn client_version(mut self, version: Version) -> Self {
+        self.client_version = Some(version);
+        self
+    }
+
+    // Sets a client build number for requests sent to master servers.
+    //
+    // # Note
+    //
+    // The master server may respond with a fake server if the client build number is lower than
+    // what is specified in the master server's configuration file.
+    pub fn client_build_number(mut self, build_number: u32) -> Self {
+        self.client_build_number = Some(build_number);
+        self
+    }
+
     pub fn gamedir(mut self, value: &'a str) -> Self {
         self.gamedir = Some(value);
         self
@@ -132,6 +167,8 @@ impl<'a> ObserverBuilder<'a> {
         }
 
         let mut filter = String::new();
+        append(&mut filter, "clver", self.client_version);
+        append(&mut filter, "buildnum", self.client_build_number);
         append(&mut filter, "nat", self.nat.map(|i| i as u8));
         append(&mut filter, "gamedir", self.gamedir);
         if let Some(s) = self.filter {
@@ -277,7 +314,13 @@ impl<T: Handler> Observer<T> {
                     }
                 }
             }
-            Err(err) => warn!("invalid packet from master {}: {}", from, err),
+            Err(err) => {
+                // The master server can respond with a fake server at same address. It's used
+                // for update messages.
+                if self.handle_server_packet(buf, from).is_err() {
+                    warn!("invalid packet from master {}: {}", from, err);
+                }
+            }
         }
         Ok(())
     }

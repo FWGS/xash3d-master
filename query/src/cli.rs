@@ -126,6 +126,7 @@ pub struct Cli {
     pub debug: bool,
     pub force_color: bool,
     pub filter: String,
+    // TODO: remove and implement in observer
     pub key: Option<u32>,
 }
 

@@ -112,8 +112,8 @@ impl Handler for Monitor {
         }
     }
 
-    fn server_remove(&mut self, addr: &SocketAddr) {
-        self.servers.remove(addr);
+    fn server_remove(&mut self, addr: SocketAddr) {
+        self.servers.remove(&addr);
     }
 }
 

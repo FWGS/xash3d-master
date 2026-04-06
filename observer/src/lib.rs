@@ -9,7 +9,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use xash3d_protocol::{self as proto, filter::Version};
+use xash3d_protocol::{self as proto, filter::Version, Error as ProtocolError};
 
 pub type GetServerInfoResponse<'a, T = &'a [u8]> =
     xash3d_protocol::server::GetServerInfoResponse<T>;
@@ -69,10 +69,43 @@ impl Connection {
             false
         }
     }
+
+    fn ping(&self, now: Instant) -> Duration {
+        now.duration_since(self.time)
+    }
 }
 
 #[allow(unused_variables)]
 pub trait Handler {
+    /// Returns `true` if observer's main loop should stop.
+    fn stop_observer(&mut self) -> bool {
+        false
+    }
+
+    /// Returns `true` if observer should query server list from a given master server.
+    fn query_servers_from_master(&mut self, master: SocketAddr) -> bool {
+        true
+    }
+
+    /// Returns extra servers for which observer should query info.
+    fn extra_servers(&mut self) -> &[SocketAddr] {
+        &[]
+    }
+
+    /// Return `true` if observer should query info for this server.
+    ///
+    /// Observer calls this method every time it receives a server address from a master server.
+    fn query_info_for_server(&mut self, master: SocketAddr, server: SocketAddr) -> bool {
+        true
+    }
+
+    /// Called if an invalid packet received from a master server.
+    fn master_invalid_packet(&mut self, addr: SocketAddr, packet: &[u8], error: ProtocolError) {
+        let data = proto::wrappers::Str(packet);
+        warn!("invalid packet from master {addr}: {error} \"{data}\"");
+    }
+
+    /// Called if a server info changed.
     fn server_update(
         &mut self,
         addr: SocketAddr,
@@ -82,9 +115,28 @@ pub trait Handler {
     ) {
     }
 
-    fn server_remove(&mut self, addr: &SocketAddr) {}
+    /// Called if a server removed from a query list.
+    fn server_remove(&mut self, addr: SocketAddr) {}
 
-    fn server_timeout(&mut self, addr: &SocketAddr) {}
+    /// Called if a server does not respond.
+    fn server_timeout(&mut self, addr: SocketAddr) {}
+
+    /// Called if failed to detect a protocol version for a server.
+    fn server_invalid_protocol(&mut self, addr: SocketAddr, ping: Duration) {
+        debug!("failed to detect protocol for server {addr}");
+    }
+
+    /// Called if an invalid packet received from a master server.
+    fn server_invalid_packet(
+        &mut self,
+        addr: SocketAddr,
+        ping: Duration,
+        packet: &[u8],
+        error: ProtocolError,
+    ) {
+        let data = proto::wrappers::Str(packet);
+        debug!("invalid packet from server {addr}: {error} \"{data}\"");
+    }
 }
 
 pub struct ObserverBuilder<'a> {
@@ -97,17 +149,32 @@ pub struct ObserverBuilder<'a> {
 
 impl<'a> Default for ObserverBuilder<'a> {
     fn default() -> Self {
+        Self::with_default_client_version()
+    }
+}
+
+impl<'a> ObserverBuilder<'a> {
+    /// Creates a new observer builder with the default client version.
+    ///
+    /// See [Self::client_version] for more information.
+    pub fn with_default_client_version() -> Self {
         Self {
             client_version: Some(xash3d_protocol::CLIENT_VERSION),
+            ..Self::new()
+        }
+    }
+
+    /// Creates a new observer builder.
+    pub fn new() -> Self {
+        Self {
+            client_version: None,
             client_build_number: None,
             gamedir: None,
             nat: None,
             filter: None,
         }
     }
-}
 
-impl<'a> ObserverBuilder<'a> {
     // Sets a client version for requests sent to master servers.
     //
     // # Note
@@ -145,13 +212,17 @@ impl<'a> ObserverBuilder<'a> {
         self
     }
 
-    pub fn build<T: Handler>(self, handler: T, masters: &[&str]) -> io::Result<Observer<T>> {
+    pub fn build<T: Handler>(
+        self,
+        handler: T,
+        masters: &[impl AsRef<str>],
+    ) -> io::Result<Observer<T>> {
         let sock = UdpSocket::bind("0.0.0.0:0")?;
         let local_addr = sock.local_addr()?;
 
         let mut vec = Vec::with_capacity(masters.len());
         for i in masters {
-            for addr in i.to_socket_addrs()? {
+            for addr in i.as_ref().to_socket_addrs()? {
                 if local_addr.is_ipv4() == addr.is_ipv4() {
                     vec.push(addr);
                     break;
@@ -209,6 +280,21 @@ impl<T: Handler> Observer<T> {
         ObserverBuilder::default()
     }
 
+    /// Returns a shared reference to a user handler.
+    pub fn handler_ref(&self) -> &T {
+        &self.handler
+    }
+
+    /// Returns a mutable reference to a user handler.
+    pub fn handler_mut(&mut self) -> &mut T {
+        &mut self.handler
+    }
+
+    /// Destroy this observer and returns a user handler.
+    pub fn into_handler(self) -> T {
+        self.handler
+    }
+
     fn is_master(&self, addr: &SocketAddr) -> bool {
         self.masters.iter().any(|i| i == addr)
     }
@@ -221,16 +307,17 @@ impl<T: Handler> Observer<T> {
         self.now = Instant::now();
     }
 
-    fn query_servers(&self, filter: &str) -> io::Result<()> {
-        let mut buf = [0; 512];
+    fn query_servers(&mut self, buf: &mut [u8]) -> io::Result<()> {
         let packet = proto::game::QueryServers {
             region: proto::server::Region::RestOfTheWorld,
             last: SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0).into(),
-            filter,
+            filter: self.filter.as_str(),
         };
         let packet = packet.encode(&mut buf[..]).unwrap(); // TODO: handle error, filter may not fit
         for addr in self.masters.iter() {
-            self.sock.send_to(packet, addr)?;
+            if self.handler.query_servers_from_master(*addr) {
+                self.sock.send_to(packet, addr)?;
+            }
         }
         Ok(())
     }
@@ -238,22 +325,28 @@ impl<T: Handler> Observer<T> {
     fn query_info_all(&mut self) -> io::Result<()> {
         use ConnectionState as S;
 
+        for &i in self.handler.extra_servers() {
+            if let Entry::Vacant(e) = self.connections.entry(i) {
+                e.insert(Connection::new(self.now));
+            }
+        }
+
         let iter = self
             .connections
             .iter_mut()
             .filter(|(_, i)| i.is_valid(self.now));
-        for (addr, con) in iter {
+        for (&addr, con) in iter {
             match con.state {
                 S::Idle | S::WaitingInfo => {
                     if con.state == S::WaitingInfo {
                         self.handler.server_timeout(addr);
                     }
                     con.time = self.now;
-                    con.query_info(&self.sock, *addr)?;
+                    con.query_info(&self.sock, addr)?;
                     con.state = ConnectionState::WaitingInfo;
                 }
                 S::ProtocolDetection => {
-                    con.query_info(&self.sock, *addr)?;
+                    con.query_info(&self.sock, addr)?;
                 }
             }
         }
@@ -267,7 +360,7 @@ impl<T: Handler> Observer<T> {
             .iter()
             .filter(|(_, conn)| !conn.is_valid(self.now));
 
-        for (addr, _) in iter {
+        for (&addr, _) in iter {
             self.handler.server_remove(addr);
         }
 
@@ -276,13 +369,17 @@ impl<T: Handler> Observer<T> {
         Ok(())
     }
 
-    fn receive(&mut self) -> io::Result<()> {
-        let mut buf = [0; 512];
+    fn receive(&mut self, buf: &mut [u8]) -> io::Result<bool> {
         let time = self.first_event_time();
         while self.now < time {
+            if self.handler.stop_observer() {
+                // stop the main loop
+                return Ok(false);
+            }
+
             let dur = time.duration_since(self.now);
             self.sock.set_read_timeout(Some(dur))?;
-            match self.sock.recv_from(&mut buf) {
+            match self.sock.recv_from(buf) {
                 Ok((n, from)) => self.handle_packet(&buf[..n], from)?,
                 Err(e) => match e.kind() {
                     io::ErrorKind::AddrInUse | io::ErrorKind::WouldBlock => break,
@@ -290,7 +387,7 @@ impl<T: Handler> Observer<T> {
                 },
             }
         }
-        Ok(())
+        Ok(true)
     }
 
     fn handle_packet(&mut self, buf: &[u8], from: SocketAddr) -> io::Result<()> {
@@ -303,14 +400,36 @@ impl<T: Handler> Observer<T> {
         }
     }
 
+    fn handle_server_from_master(
+        &mut self,
+        master: SocketAddr,
+        server: SocketAddr,
+    ) -> io::Result<()> {
+        if !self.handler.query_info_for_server(master, server) {
+            // User handler do not want to query info for this server.
+            self.connections.remove(&server);
+            return Ok(());
+        }
+
+        if let Entry::Vacant(e) = self.connections.entry(server) {
+            let mut c = Connection::new(self.now);
+            c.query_info(&self.sock, server)?;
+            e.insert(c);
+        }
+
+        Ok(())
+    }
+
     fn handle_master_packet(&mut self, buf: &[u8], from: SocketAddr) -> io::Result<()> {
         match proto::master::QueryServersResponse::decode(buf) {
             Ok(packet) => {
-                for addr in packet.iter().map(SocketAddr::V4) {
-                    if let Entry::Vacant(e) = self.connections.entry(addr) {
-                        let mut conn = Connection::new(self.now);
-                        conn.query_info(&self.sock, addr)?;
-                        e.insert(conn);
+                if from.is_ipv6() {
+                    for addr in packet.iter().map(SocketAddr::V6) {
+                        self.handle_server_from_master(from, addr)?;
+                    }
+                } else {
+                    for addr in packet.iter().map(SocketAddr::V4) {
+                        self.handle_server_from_master(from, addr)?;
                     }
                 }
             }
@@ -318,7 +437,7 @@ impl<T: Handler> Observer<T> {
                 // The master server can respond with a fake server at same address. It's used
                 // for update messages.
                 if self.handle_server_packet(buf, from).is_err() {
-                    warn!("invalid packet from master {}: {}", from, err);
+                    self.handler.master_invalid_packet(from, buf, err);
                 }
             }
         }
@@ -335,7 +454,7 @@ impl<T: Handler> Observer<T> {
                         S::ProtocolDetection | S::WaitingInfo => {
                             if con.is_changed(buf) {
                                 let is_new = con.state == S::ProtocolDetection;
-                                let ping = self.now.duration_since(con.time);
+                                let ping = con.ping(self.now);
                                 self.handler.server_update(from, &packet, is_new, ping);
                             }
                             con.state = S::Idle;
@@ -347,28 +466,37 @@ impl<T: Handler> Observer<T> {
                 }
             }
             Err(proto::Error::InvalidProtocolVersion) => {
-                if let Some(c) = self.connections.get_mut(&from) {
-                    if c.state == S::ProtocolDetection && c.protocol == proto::PROTOCOL_VERSION {
+                if let Some(con) = self.connections.get_mut(&from) {
+                    if con.state == S::ProtocolDetection && con.protocol == proto::PROTOCOL_VERSION
+                    {
                         // try previous protocol version
-                        c.protocol -= 1;
-                        c.query_info(&self.sock, from)?;
+                        con.protocol -= 1;
+                        con.query_info(&self.sock, from)?;
                     } else {
-                        trace!("invalid protocol {}", from);
+                        let ping = con.ping(self.now);
+                        self.handler.server_invalid_protocol(from, ping);
                         self.connections.remove(&from);
                     }
                 }
             }
-            Err(err) => debug!("server {}: {} \"{}\"", from, err, proto::wrappers::Str(buf)),
+            Err(err) => {
+                if let Some(con) = self.connections.get_mut(&from) {
+                    let ping = con.ping(self.now);
+                    self.handler.server_invalid_packet(from, ping, buf, err);
+                }
+            }
         }
         Ok(())
     }
 
     pub fn run(&mut self) -> io::Result<()> {
+        let mut buffer = [0; 2048];
+
         loop {
             self.update_now();
 
             if self.master_time <= self.now {
-                self.query_servers(&self.filter)?;
+                self.query_servers(&mut buffer)?;
                 self.master_time = update_time(self.now, self.master_time, MASTER_INTERVAL);
             }
 
@@ -383,8 +511,18 @@ impl<T: Handler> Observer<T> {
                     update_time(self.now, self.server_clean_time, SERVER_CLEAN_INTERVAL);
             }
 
-            self.receive()?;
+            if !self.receive(&mut buffer)? {
+                break;
+            }
         }
+
+        for (&addr, connection) in self.connections.iter() {
+            if connection.state == ConnectionState::ProtocolDetection {
+                self.handler.server_timeout(addr);
+            }
+        }
+
+        Ok(())
     }
 }
 

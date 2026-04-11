@@ -142,6 +142,47 @@ pub trait Handler {
     }
 }
 
+struct Master {
+    addr: SocketAddr,
+    key: u32,
+}
+
+impl Master {
+    fn new(addr: SocketAddr) -> Self {
+        Self { addr, key: 0 }
+    }
+
+    fn encode_query_servers_packet<'a>(&mut self, filter: &str, buf: &'a mut [u8]) -> &'a [u8] {
+        struct FilterKey<'b> {
+            filter: &'b str,
+            key: u32,
+        }
+
+        impl fmt::Display for FilterKey<'_> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "{}", self.filter)?;
+                write!(f, "\\key\\{:x}", self.key)?;
+                Ok(())
+            }
+        }
+
+        // generate a fresh key for each request
+        self.key = fastrand::u32(..);
+
+        let packet = proto::game::QueryServers {
+            region: proto::server::Region::RestOfTheWorld,
+            last: SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0).into(),
+            filter: FilterKey {
+                filter,
+                key: self.key,
+            },
+        };
+
+        // TODO: handle error, filter may not fit
+        packet.encode(buf).unwrap()
+    }
+}
+
 pub struct ObserverBuilder<'a> {
     client_version: Option<Version>,
     client_build_number: Option<u32>,
@@ -227,7 +268,7 @@ impl<'a> ObserverBuilder<'a> {
         for i in masters {
             for addr in i.as_ref().to_socket_addrs()? {
                 if local_addr.is_ipv4() == addr.is_ipv4() {
-                    vec.push(addr);
+                    vec.push(Master::new(addr));
                     break;
                 }
             }
@@ -269,7 +310,7 @@ impl<'a> ObserverBuilder<'a> {
 pub struct Observer<T> {
     sock: UdpSocket,
     filter: String,
-    masters: Vec<SocketAddr>,
+    masters: Vec<Master>,
     master_time: Instant,
     server_time: Instant,
     server_clean_time: Instant,
@@ -298,8 +339,8 @@ impl<T: Handler> Observer<T> {
         self.handler
     }
 
-    fn is_master(&self, addr: &SocketAddr) -> bool {
-        self.masters.iter().any(|i| i == addr)
+    fn get_master(&self, addr: SocketAddr) -> Option<&Master> {
+        self.masters.iter().find(|master| master.addr == addr)
     }
 
     fn first_event_time(&self) -> Instant {
@@ -311,15 +352,10 @@ impl<T: Handler> Observer<T> {
     }
 
     fn query_servers(&mut self, buf: &mut [u8]) -> io::Result<()> {
-        let packet = proto::game::QueryServers {
-            region: proto::server::Region::RestOfTheWorld,
-            last: SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0).into(),
-            filter: self.filter.as_str(),
-        };
-        let packet = packet.encode(&mut buf[..]).unwrap(); // TODO: handle error, filter may not fit
-        for addr in self.masters.iter() {
-            if self.handler.query_servers_from_master(*addr) {
-                self.sock.send_to(packet, addr)?;
+        for master in self.masters.iter_mut() {
+            if self.handler.query_servers_from_master(master.addr) {
+                let packet = master.encode_query_servers_packet(&self.filter, buf);
+                self.sock.send_to(packet, master.addr)?;
             }
         }
         Ok(())
@@ -396,8 +432,8 @@ impl<T: Handler> Observer<T> {
     fn handle_packet(&mut self, buf: &[u8], from: SocketAddr) -> io::Result<()> {
         self.update_now();
 
-        if self.is_master(&from) {
-            self.handle_master_packet(buf, from)
+        if let Some(master) = self.get_master(from) {
+            self.handle_master_packet(buf, from, master.key)
         } else {
             self.handle_server_packet(buf, from)
         }
@@ -423,9 +459,14 @@ impl<T: Handler> Observer<T> {
         Ok(())
     }
 
-    fn handle_master_packet(&mut self, buf: &[u8], from: SocketAddr) -> io::Result<()> {
+    fn handle_master_packet(&mut self, buf: &[u8], from: SocketAddr, key: u32) -> io::Result<()> {
         match proto::master::QueryServersResponse::decode(buf) {
             Ok(packet) => {
+                if packet.key != Some(key) {
+                    // ignore if invalid or missing challenge key in the response
+                    return Ok(());
+                }
+
                 if from.is_ipv6() {
                     for addr in packet.iter().map(SocketAddr::V6) {
                         self.handle_server_from_master(from, addr)?;

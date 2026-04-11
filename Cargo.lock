@@ -482,6 +482,7 @@ dependencies = [
 name = "xash3d-observer"
 version = "0.1.0"
 dependencies = [
+ "fastrand",
  "log",
  "xash3d-protocol",
 ]

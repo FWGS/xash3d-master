@@ -127,8 +127,6 @@ pub struct Cli {
     pub debug: bool,
     pub force_color: bool,
     pub filter: String,
-    // TODO: remove and implement in observer
-    pub key: Option<u32>,
 }
 
 impl Default for Cli {
@@ -146,7 +144,6 @@ impl Default for Cli {
             debug: false,
             force_color: false,
             filter: String::new(),
-            key: None,
         }
     }
 }
@@ -287,13 +284,6 @@ pub fn parse() -> Cli {
     }
 
     cli.filter = filter.opt_get(&matches);
-
-    if matches.opt_present("key") {
-        let key = fastrand::u32(..);
-        cli.key = Some(key);
-        cli.filter.push_str(&format!("\\key\\{key:x}"));
-    }
-
     cli.json = matches.opt_present("json");
     cli.debug = matches.opt_present("debug");
     cli.force_color = matches.opt_present("force-color");

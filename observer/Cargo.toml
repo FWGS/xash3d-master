@@ -13,4 +13,5 @@ repository.workspace = true
 
 [dependencies]
 log.workspace = true
+fastrand.workspace = true
 xash3d-protocol.workspace = true

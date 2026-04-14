@@ -512,6 +512,9 @@ impl<Addr: AddrExt> MasterServer<Addr> {
             game::Packet::GetServerInfo(p) => {
                 self.send_update_info(from, p.protocol)?;
             }
+            _ => {
+                // ignore other packets
+            }
         }
         Ok(())
     }
@@ -572,6 +575,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
                     }
                 }
             }
+            _ => unreachable!(),
         }
 
         Ok(())

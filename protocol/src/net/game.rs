@@ -106,13 +106,41 @@ impl GetServerInfo {
     }
 }
 
+/// Request player list from a game server.
+///
+/// See [GetPlayersResponse](super::server::GetPlayersResponse).
+#[derive(Clone, Debug, PartialEq)]
+pub struct GetPlayers;
+
+impl GetPlayers {
+    /// Packet header.
+    pub const HEADER: &'static [u8] = b"\xff\xff\xff\xffU ";
+
+    /// Decode packet from `src`.
+    pub fn decode(src: &[u8]) -> Result<Self, Error> {
+        let mut cur = Cursor::new(src);
+        cur.expect(Self::HEADER)?;
+        cur.expect_empty()?;
+        Ok(Self)
+    }
+
+    /// Encode packet to `buf`.
+    pub fn encode<'a>(&self, buf: &'a mut [u8]) -> Result<&'a [u8], Error> {
+        let n = CursorMut::new(buf).put_bytes(Self::HEADER)?.pos();
+        Ok(&buf[..n])
+    }
+}
+
 /// Game client packets.
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum Packet<'a> {
     /// Request a list of server addresses from master servers.
     QueryServers(QueryServers<Filter<'a>>),
     /// Request an information from a game server.
     GetServerInfo(GetServerInfo),
+    /// Request player list from a game server.
+    GetPlayers(GetPlayers),
 }
 
 impl<'a> Packet<'a> {
@@ -122,6 +150,8 @@ impl<'a> Packet<'a> {
             QueryServers::decode(src).map(Self::QueryServers)
         } else if src.starts_with(GetServerInfo::HEADER) {
             GetServerInfo::decode(src).map(Self::GetServerInfo)
+        } else if src.starts_with(GetPlayers::HEADER) {
+            GetPlayers::decode(src).map(Self::GetPlayers)
         } else {
             return Ok(None);
         }
@@ -191,5 +221,13 @@ mod tests {
         let mut buf = [0; 512];
         let t = p.encode(&mut buf).unwrap();
         assert_eq!(Packet::decode(t), Ok(Some(Packet::GetServerInfo(p))));
+    }
+
+    #[test]
+    fn get_players() {
+        let p = GetPlayers;
+        let mut buf = [0; 32];
+        let t = p.encode(&mut buf).unwrap();
+        assert_eq!(Packet::decode(t), Ok(Some(Packet::GetPlayers(p))));
     }
 }

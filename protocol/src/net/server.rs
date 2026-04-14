@@ -353,8 +353,109 @@ where
     }
 }
 
+/// A player info.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct PlayerInfo<'a> {
+    /// The player id.
+    pub id: u8,
+    /// The player name.
+    pub name: Str<&'a [u8]>,
+    /// Frags made by the player.
+    pub frags: i32,
+    /// The player time.
+    pub time: f32,
+}
+
+impl<'a> PlayerInfo<'a> {
+    /// Creates a `PlayerInfo`.
+    pub fn new(id: u8, name: &'a str, frags: i32, time: f32) -> Self {
+        Self {
+            id,
+            name: Str(name.as_bytes()),
+            frags,
+            time,
+        }
+    }
+}
+
+/// Response to [GetPlayers](super::game::GetPlayers) request.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GetPlayersResponse<T> {
+    count: u8,
+    players: T,
+}
+
+impl GetPlayersResponse<()> {
+    /// Packet header.
+    pub const HEADER: &'static [u8] = b"\xff\xff\xff\xffD";
+}
+
+impl<'a> GetPlayersResponse<&'a [u8]> {
+    /// Decode packet from `src`.
+    pub fn decode(src: &'a [u8]) -> Result<Self, Error> {
+        let mut cur = Cursor::new(src);
+        cur.expect(GetPlayersResponse::HEADER)?;
+        let count = cur.get_u8()?;
+        let players = cur.end();
+        Ok(Self { count, players })
+    }
+
+    /// Returns the number of players.
+    pub fn players_count(&self) -> u8 {
+        self.count
+    }
+
+    /// Returns an iterator over players.
+    pub fn players(&self) -> impl Iterator<Item = Result<PlayerInfo<'a>, Error>> {
+        let mut cur = Cursor::new(self.players);
+        (0..self.count).map(move |_| {
+            Ok(PlayerInfo {
+                id: cur.get_u8()?,
+                name: cur.get_cstr()?,
+                frags: cur.get_i32_le()?,
+                time: cur.get_f32_le()?,
+            })
+        })
+    }
+}
+
+impl<'a, I> GetPlayersResponse<I>
+where
+    I: IntoIterator<Item = PlayerInfo<'a>>,
+{
+    /// Creates a new `GetPlayersResponse`.
+    pub fn new(players: I) -> Self {
+        Self { count: 0, players }
+    }
+
+    /// Encode packet to `buf`.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if players count is greater than 255.
+    pub fn encode(self, buf: &mut [u8]) -> Result<&[u8], Error> {
+        let mut cur = CursorMut::new(buf);
+        cur.put_bytes(GetPlayersResponse::HEADER)?;
+        let (mut head, mut tail) = cur.split(1)?;
+        let mut count = 0;
+        for info in self.players {
+            assert!(count != 255);
+            count += 1;
+            tail.put_u8(info.id)?
+                .put_cstr(info.name.as_ref())?
+                .put_i32_le(info.frags)?
+                .put_f32_le(info.time)?;
+        }
+        head.put_u8(count)?;
+        head.expect_full().expect("must be filled with data");
+        let n = tail.pos();
+        Ok(&buf[..n])
+    }
+}
+
 /// Game server packet.
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum Packet<'a> {
     /// Sended to a master server before `ServerAdd` packet.
     Challenge(Challenge),
@@ -364,6 +465,8 @@ pub enum Packet<'a> {
     ServerRemove,
     /// Game server information to game clients.
     GetServerInfoResponse(GetServerInfoResponse<Str<&'a [u8]>>),
+    /// Player list to game clients.
+    GetPlayersResponse(GetPlayersResponse<&'a [u8]>),
 }
 
 impl<'a> Packet<'a> {
@@ -377,6 +480,8 @@ impl<'a> Packet<'a> {
             ServerRemove::decode(src).map(|_| Self::ServerRemove)
         } else if src.starts_with(GetServerInfoResponse::HEADER) {
             GetServerInfoResponse::decode(src).map(Self::GetServerInfoResponse)
+        } else if src.starts_with(GetPlayersResponse::HEADER) {
+            GetPlayersResponse::decode(src).map(Self::GetPlayersResponse)
         } else {
             return Ok(None);
         }
@@ -481,5 +586,24 @@ mod tests {
     fn server_add_legacy() {
         let s = b"0\n\\protocol\\48\\challenge\\1680337211\\players\\1\\max\\8\\bots\\0\\gamedir\\cstrike\\map\\cs_assault\\type\\d\\password\\0\\os\\l\\secure\\0\\lan\\0\\version\\0.17.1\\region\\255\\product\\cstrike\n";
         ServerAdd::<&[u8]>::decode(s).unwrap();
+    }
+
+    #[test]
+    fn get_players_response() {
+        let players = [
+            PlayerInfo::new(0, "freeman", 999, 999.0),
+            PlayerInfo::new(1, "crab", 0, 888.0),
+        ];
+        let packet = GetPlayersResponse::new(players.into_iter());
+        let mut buf = [0; 512];
+        let encoded = packet.encode(&mut buf).unwrap();
+        let decoded = Packet::decode(encoded).unwrap().unwrap();
+        let Packet::GetPlayersResponse(response) = decoded else {
+            panic!();
+        };
+        assert_eq!(response.players_count(), 2);
+        for (a, b) in players.iter().zip(response.players()) {
+            assert_eq!(Ok(a), b.as_ref());
+        }
     }
 }

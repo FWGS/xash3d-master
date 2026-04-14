@@ -288,6 +288,7 @@ impl AdminChallengeResponse {
 
 /// Master server packet.
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum Packet<'a> {
     /// Master server challenge response packet.
     ChallengeResponse(ChallengeResponse),

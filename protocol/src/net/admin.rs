@@ -97,6 +97,7 @@ impl<'a> AdminCommand<'a> {
 
 /// Admin packet.
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum Packet<'a> {
     /// Admin challenge request.
     AdminChallenge,

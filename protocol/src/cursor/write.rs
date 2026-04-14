@@ -91,6 +91,7 @@ impl_put_key_value! {
 pub struct CursorMut<'a> {
     buffer: &'a mut [u8],
     pos: usize,
+    offset: usize,
 }
 
 macro_rules! impl_put {
@@ -104,16 +105,57 @@ macro_rules! impl_put {
 
 impl<'a> CursorMut<'a> {
     pub fn new(buffer: &'a mut [u8]) -> Self {
-        Self { buffer, pos: 0 }
+        Self {
+            buffer,
+            pos: 0,
+            offset: 0,
+        }
     }
 
-    pub fn pos(&mut self) -> usize {
+    fn with_offset(buffer: &'a mut [u8], offset: usize) -> Self {
+        Self {
+            buffer,
+            pos: 0,
+            offset,
+        }
+    }
+
+    /// Returns the position in the original buffer.
+    pub fn pos(&self) -> usize {
+        self.offset + self.pos
+    }
+
+    /// Returns the position in the current chunk of original buffer.
+    pub fn current_pos(&self) -> usize {
         self.pos
     }
 
     #[inline(always)]
     pub fn available(&self) -> usize {
         self.buffer.len() - self.pos
+    }
+
+    pub fn expect_full(&self) -> Result<()> {
+        if self.available() == 0 {
+            Ok(())
+        } else {
+            Err(CursorError::ExpectFull)
+        }
+    }
+
+    /// Splits this cursor into two parts after `len` bytes.
+    ///
+    /// The first returned cursor have `len` capacity. The second returned cursor have all
+    /// remaining capacity in the original buffer.
+    pub fn split(mut self, len: usize) -> Result<(Self, Self)> {
+        if self.available() < len {
+            return Err(CursorError::UnexpectedEnd);
+        }
+        let offset = self.pos + len;
+        let (head, tail) = self.buffer.split_at_mut(offset);
+        let tail = CursorMut::with_offset(tail, self.offset + offset);
+        self.buffer = head;
+        Ok((self, tail))
     }
 
     pub fn advance<F>(&mut self, count: usize, mut f: F) -> Result<&mut Self>
@@ -145,8 +187,8 @@ impl<'a> CursorMut<'a> {
         self.put_bytes(s.as_bytes())
     }
 
-    pub fn put_cstr(&mut self, s: &str) -> Result<&mut Self> {
-        self.put_str(s)?.put_u8(0)
+    pub fn put_cstr(&mut self, s: impl AsRef<[u8]>) -> Result<&mut Self> {
+        self.put_bytes(s.as_ref())?.put_u8(0)
     }
 
     #[inline(always)]
@@ -217,5 +259,32 @@ impl fmt::Write for CursorMut<'_> {
         self.put_bytes(s.as_bytes())
             .map(|_| ())
             .map_err(|_| fmt::Error)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn split() {
+        let mut buf = [0; 8];
+        let cur = CursorMut::new(&mut buf);
+        assert_eq!(cur.pos(), 0);
+
+        let (mut head, mut tail) = cur.split(4).unwrap();
+        assert_eq!(head.pos(), 0);
+        assert_eq!(tail.pos(), 4);
+
+        head.put_u8(1).unwrap();
+        assert_eq!(head.pos(), 1);
+
+        tail.put_u8(2).unwrap();
+        assert_eq!(tail.pos(), 5);
+
+        assert_eq!(buf[0], 1);
+        assert_eq!(buf[1], 0);
+        assert_eq!(buf[4], 2);
+        assert_eq!(buf[5], 0);
     }
 }

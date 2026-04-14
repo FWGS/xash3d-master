@@ -28,6 +28,8 @@ pub enum CursorError {
     Expect,
     /// An unexpected data found.
     ExpectEmpty,
+    /// Buffer must be full.
+    ExpectFull,
     /// Buffer size is no enougth to decode or encode a packet.
     UnexpectedEnd,
 }
@@ -43,6 +45,7 @@ impl fmt::Display for CursorError {
             Self::TableEnd => "Table end",
             Self::Expect => "Expected data not found",
             Self::ExpectEmpty => "Unexpected data",
+            Self::ExpectFull => "Unexpected free space in buffer",
             Self::UnexpectedEnd => "Unexpected end of buffer",
         };
         s.fmt(fmt)

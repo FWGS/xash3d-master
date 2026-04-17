@@ -200,7 +200,7 @@ fn run(cli: &Cli, mut observer: Observer<CollectServerInfo>) -> Result<(), Query
     let handler = observer.into_handler();
 
     let mut servers: Vec<_> = handler.servers.values().collect();
-    servers.sort_by(|a, b| a.address.cmp(&b.address));
+    servers.sort_by_key(|a| a.address);
     print_server_info(cli, &servers);
 
     Ok(())

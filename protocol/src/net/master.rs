@@ -3,7 +3,10 @@
 
 //! Master server packets.
 
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
+use std::{
+    marker::PhantomData,
+    net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
+};
 
 use crate::{
     cursor::{Cursor, CursorMut},
@@ -141,23 +144,37 @@ impl<'a> QueryServersResponse<&'a [u8]> {
     }
 
     /// Iterator over game server addresses.
-    pub fn iter<A>(&self) -> impl 'a + Iterator<Item = A>
+    pub fn iter<A>(&self) -> QueryServersResponseIter<'a, A>
     where
         A: ServerAddress,
     {
-        let mut cur = Cursor::new(self.inner);
-        core::iter::from_fn(move || {
-            if cur.remaining() == A::size() && cur.end().ends_with(&[0; 2]) {
-                // skip last address with port 0
-                return None;
-            }
-            A::get(&mut cur).ok()
-        })
+        QueryServersResponseIter {
+            cur: Cursor::new(self.inner),
+            phantom: PhantomData,
+        }
     }
 
     /// Returns `true` if game server addresses list is empty.
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
+    }
+}
+
+/// An iterator over server addresses.
+pub struct QueryServersResponseIter<'a, A> {
+    cur: Cursor<'a>,
+    phantom: PhantomData<A>,
+}
+
+impl<'a, A: ServerAddress> Iterator for QueryServersResponseIter<'a, A> {
+    type Item = A;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.cur.remaining() == A::size() && self.cur.end().ends_with(&[0; 2]) {
+            // skip last address with port 0
+            return None;
+        }
+        A::get(&mut self.cur).ok()
     }
 }
 

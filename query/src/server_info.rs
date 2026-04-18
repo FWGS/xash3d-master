@@ -1,9 +1,60 @@
-use std::fmt;
+use std::{
+    fmt,
+    ops::{Deref, DerefMut},
+};
 
 use serde::{Serialize, Serializer};
-use xash3d_protocol::{color, server::GetServerInfoResponse};
+use xash3d_protocol::color;
 
 use crate::{cli::Cli, color::Colored};
+
+#[derive(Clone, Debug, Serialize)]
+pub struct PlayerInfo {
+    pub id: u8,
+    pub name: String,
+    pub frags: i32,
+    pub time: f32,
+}
+
+impl From<xash3d_observer::event::PlayerInfo<'_>> for PlayerInfo {
+    fn from(info: xash3d_observer::event::PlayerInfo) -> Self {
+        Self {
+            id: info.id,
+            name: String::from_utf8_lossy(info.name.0).to_string(),
+            frags: info.frags,
+            time: info.time,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct Players {
+    players: Vec<PlayerInfo>,
+}
+
+impl Deref for Players {
+    type Target = Vec<PlayerInfo>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.players
+    }
+}
+
+impl DerefMut for Players {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.players
+    }
+}
+
+impl From<xash3d_observer::event::ServerPlayers<'_>> for Players {
+    fn from(value: xash3d_observer::event::ServerPlayers<'_>) -> Self {
+        let mut players = Vec::with_capacity(value.len());
+        for i in value.iter().filter_map(|i| i.ok()) {
+            players.push(i.into());
+        }
+        Self { players }
+    }
+}
 
 #[derive(Clone, Debug, Serialize)]
 pub struct ServerInfo {
@@ -19,29 +70,13 @@ pub struct ServerInfo {
     pub coop: bool,
     pub password: bool,
     pub dedicated: bool,
+    #[serde(flatten)]
+    pub players: Players,
 }
 
 impl ServerInfo {
     pub fn printer<'a>(&'a self, cli: &'a Cli) -> ServerInfoPrinter<'a> {
         ServerInfoPrinter { info: self, cli }
-    }
-}
-
-impl From<&GetServerInfoResponse<&[u8]>> for ServerInfo {
-    fn from(other: &GetServerInfoResponse<&[u8]>) -> Self {
-        ServerInfo {
-            gamedir: String::from_utf8_lossy(other.gamedir).to_string(),
-            map: String::from_utf8_lossy(other.map).to_string(),
-            host: String::from_utf8_lossy(other.host).to_string(),
-            protocol: other.protocol,
-            numcl: other.numcl,
-            maxcl: other.maxcl,
-            dm: other.dm,
-            team: other.team,
-            coop: other.coop,
-            password: other.password,
-            dedicated: other.dedicated,
-        }
     }
 }
 
@@ -59,24 +94,7 @@ impl From<&xash3d_observer::event::ServerInfo<'_>> for ServerInfo {
             coop: other.is_coop(),
             password: other.has_password(),
             dedicated: other.is_dedicated(),
-        }
-    }
-}
-
-impl From<GetServerInfoResponse<&str>> for ServerInfo {
-    fn from(other: GetServerInfoResponse<&str>) -> Self {
-        Self {
-            gamedir: other.gamedir.to_owned(),
-            map: other.map.to_owned(),
-            host: other.host.to_owned(),
-            protocol: other.protocol,
-            numcl: other.numcl,
-            maxcl: other.maxcl,
-            dm: other.dm,
-            team: other.team,
-            coop: other.coop,
-            password: other.password,
-            dedicated: other.dedicated,
+            players: Players::default(),
         }
     }
 }

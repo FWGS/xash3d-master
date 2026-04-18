@@ -7,7 +7,7 @@ use std::{
 use xash3d_observer::{
     event::{Event, ServerInfo},
     filter::Filter,
-    Buffer, Master, ObserverNew,
+    Buffer, Master, ObserverNew, Server,
 };
 use xash3d_protocol::color::trim_color;
 
@@ -112,7 +112,8 @@ fn main() -> io::Result<()> {
         match observer.wait_event(&mut buffer, None)? {
             Event::ServerList(servers) => {
                 for addr in servers.iter() {
-                    observer.insert_server(addr);
+                    let server = Server::new(addr);
+                    observer.insert_server(server);
                 }
             }
             Event::ServerInfo(server_info) => {

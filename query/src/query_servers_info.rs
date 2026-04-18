@@ -5,12 +5,13 @@ use std::{
 };
 
 use serde::Serialize;
-use xash3d_observer::{event::Event, Buffer, ObserverNew};
+use xash3d_observer::{event::Event, Buffer, ObserverNew, Server};
+use xash3d_protocol::PROTOCOL_VERSION;
 
 use crate::{
     cli::Cli,
     color::Colored,
-    server_info::ServerInfo,
+    server_info::{PlayerInfo, Players, ServerInfo},
     server_result::{ServerResult, ServerResultKind},
     utils::{self, print_json},
     QueryError,
@@ -23,21 +24,31 @@ struct InfoResult<'a> {
     server_timeout: u64,
     masters: &'a [Box<str>],
     filter: &'a str,
-    servers: &'a [&'a ServerResult],
+    servers: &'a [ServerResult],
 }
 
-fn print_server_info(cli: &Cli, servers: &HashMap<SocketAddr, ServerResult>) {
-    let mut servers: Vec<_> = servers.values().collect();
-    servers.sort_by_key(|a| a.address);
+struct Printer<'a> {
+    servers: &'a [ServerResult],
+    /// Temporary storage for players.
+    players: Vec<&'a PlayerInfo>,
+}
 
-    if cli.json || cli.debug {
+impl<'a> Printer<'a> {
+    fn new(servers: &'a [ServerResult]) -> Self {
+        Self {
+            servers,
+            players: Vec::new(),
+        }
+    }
+
+    fn print_json(&self, cli: &Cli) {
         let result = InfoResult {
             protocol: &cli.protocol,
             master_timeout: cli.master_timeout.as_secs(),
             server_timeout: cli.server_timeout.as_secs(),
             masters: &cli.masters,
             filter: &cli.filter,
-            servers: &servers,
+            servers: self.servers,
         };
 
         if cli.json {
@@ -45,65 +56,81 @@ fn print_server_info(cli: &Cli, servers: &HashMap<SocketAddr, ServerResult>) {
         } else if cli.debug {
             println!("{result:#?}");
         } else {
-            todo!()
+            unreachable!()
         }
-    } else {
-        for i in servers {
-            print!("server: {}", i.address);
-            if let Some(ping) = i.ping {
-                print!(" [{ping:.3} ms]");
-            }
-            println!();
+    }
 
-            macro_rules! p {
-                ($($key:ident: $value:expr),+ $(,)?) => {
-                    $(println!("    {}: \"{}\"", stringify!($key), $value);)+
-                };
-            }
+    fn print_server(&mut self, cli: &Cli, i: usize, server: &'a ServerResult) {
+        let ServerResultKind::Ok { info } = &server.kind else {
+            return;
+        };
 
-            match &i.kind {
-                ServerResultKind::Ok { info } => {
-                    p! {
-                        status: "ok",
-                        host: Colored::new(&info.host, cli.force_color),
-                        gamedir: info.gamedir,
-                        map: info.map,
-                        protocol: info.protocol,
-                        numcl: info.numcl,
-                        maxcl: info.maxcl,
-                        dm: info.dm,
-                        team: info.team,
-                        coop: info.coop,
-                        password: info.password,
-                    }
-                }
-                ServerResultKind::Ping => unreachable!(),
-                ServerResultKind::Timeout => {
-                    p! {
-                        status: "timeout",
-                    }
-                }
-                ServerResultKind::InvalidProtocol => {
-                    p! {
-                        status: "protocol",
-                    }
-                }
-                ServerResultKind::InvalidPacket { message, response } => {
-                    p! {
-                        status: "invalid",
-                        message: message,
-                        response: response,
-                    }
-                }
-                ServerResultKind::Remove => unreachable!(),
-            }
+        if i > 0 {
             println!();
+        }
+
+        let w = 10;
+        print!("{:>w$}: {}", "server", server.address);
+        if let Some(ping) = server.ping_millis_f32() {
+            print!(" [ping {ping:.0}ms]");
+        }
+        if info.protocol != PROTOCOL_VERSION {
+            print!(" [protocol {}]", info.protocol);
+        }
+        if info.password {
+            print!(" [password]");
+        }
+        println!();
+
+        let host = Colored::new(&info.host, cli.force_color);
+        println!("{:>w$}: {}", "name", host);
+        println!("{:>w$}: {}", "game", info.gamedir);
+        println!("{:>w$}: {}", "map", info.map);
+
+        print!("{:>w$}:", "mode");
+        if info.coop || info.team || info.dm {
+            if info.coop {
+                print!(" coop");
+            }
+            if info.team {
+                print!(" team");
+            }
+            if info.dm {
+                print!(" deathmatch");
+            }
+        } else {
+            print!(" unknown");
+        }
+        println!();
+
+        println!("{:>w$}: {}/{}", "players", info.numcl, info.maxcl);
+
+        if !info.players.is_empty() {
+            self.players.clear();
+            self.players.extend(info.players.iter());
+            self.players.sort_by_key(|i| i.frags);
+            for (i, player) in self.players.iter().rev().enumerate() {
+                let name = Colored::new(&player.name, cli.force_color);
+                println!("{i:w$}: {} {name}", player.frags);
+            }
+        }
+    }
+
+    fn print(&mut self, cli: &Cli) {
+        if cli.json || cli.debug {
+            self.print_json(cli);
+            return;
+        }
+
+        for (i, server) in self.servers.iter().enumerate() {
+            self.print_server(cli, i, server);
         }
     }
 }
 
 struct QueryServersInfo {
     custom: bool,
+    players: bool,
     timeout_master: bool,
     timeout: Duration,
     servers: HashMap<SocketAddr, ServerResult>,
@@ -122,6 +149,7 @@ impl QueryServersInfo {
 
         Self {
             custom,
+            players: cli.players,
             timeout_master,
             timeout,
             servers: HashMap::new(),
@@ -136,11 +164,12 @@ impl QueryServersInfo {
     }
 
     fn insert_server(&mut self, addr: SocketAddr) {
-        self.observer.insert_server(addr);
+        let server = Server::new(addr).with_players(self.players);
+        self.observer.insert_server(server);
 
         // Set default result to timeout for all new servers.
         if let Entry::Vacant(e) = self.servers.entry(addr) {
-            e.insert(ServerResult::timeout(addr));
+            e.insert(ServerResult::new_timeout(addr));
         }
     }
 
@@ -151,7 +180,26 @@ impl QueryServersInfo {
         self.servers.insert(addr, result);
     }
 
-    fn run(&mut self, cli: &Cli) -> Result<(), QueryError> {
+    fn set_server_result_ok(&mut self, addr: SocketAddr, ping: Duration, info: ServerInfo) {
+        let e = self
+            .servers
+            .entry(addr)
+            .or_insert_with(|| ServerResult::new_timeout(addr));
+        if self.custom && (!self.players || e.has_players()) {
+            self.servers_custom.remove(&addr);
+        }
+        e.set_ok(ping, info);
+    }
+
+    fn set_server_players(&mut self, addr: SocketAddr, players: Players) {
+        let e = self.servers.get_mut(&addr).expect("server");
+        if self.custom && (!self.players || e.is_ok()) {
+            self.servers_custom.remove(&addr);
+        }
+        e.set_players(players);
+    }
+
+    fn run(mut self, cli: &Cli) -> Result<(), QueryError> {
         let mut buffer = Buffer::new();
         let mut remaining = Some(self.timeout);
         let start_time = Instant::now();
@@ -176,17 +224,19 @@ impl QueryServersInfo {
                 Event::ServerInfo(server_info) => {
                     let addr = *server_info.address();
                     let info = ServerInfo::from(&server_info);
-                    let result = ServerResult::ok(addr, server_info.ping(), info);
-                    self.set_server_result(addr, result);
+                    self.set_server_result_ok(addr, server_info.ping(), info);
+                }
+                Event::ServerPlayers(addr, players) => {
+                    self.set_server_players(addr, players.into());
                 }
                 Event::ServerInvalidProtocol(addr) => {
-                    let result = ServerResult::invalid_protocol(addr);
+                    let result = ServerResult::new_invalid_protocol(addr);
                     self.set_server_result(addr, result);
                 }
                 Event::ServerInvalidPacket(addr, data) => {
                     let result = self.servers.get(&addr);
                     if result.is_none() || result.is_some_and(|i| i.kind.is_timeout()) {
-                        let result = ServerResult::invalid_packet(addr, data);
+                        let result = ServerResult::new_invalid_packet(addr, data);
                         self.set_server_result(addr, result);
                     }
                 }
@@ -196,7 +246,9 @@ impl QueryServersInfo {
             remaining = self.timeout.checked_sub(start_time.elapsed());
         }
 
-        print_server_info(cli, &self.servers);
+        let mut servers: Vec<_> = self.servers.into_values().collect();
+        servers.sort_by_key(|a| a.address);
+        Printer::new(&servers).print(cli);
 
         Ok(())
     }
@@ -204,7 +256,7 @@ impl QueryServersInfo {
 
 pub(crate) fn run(cli: &Cli) -> Result<(), QueryError> {
     let observer = utils::create_observer_with_masters(cli)?;
-    let mut query = QueryServersInfo::new(cli, observer, false);
+    let query = QueryServersInfo::new(cli, observer, false);
     query.run(cli)
 }
 

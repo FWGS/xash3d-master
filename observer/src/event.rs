@@ -5,7 +5,7 @@ use std::{
 
 use xash3d_protocol::{
     master::{QueryServersResponse, QueryServersResponseIter},
-    server::GetServerInfoResponse,
+    server::{GetPlayersResponse, GetServerInfoResponse},
     Error as ProtocolError,
 };
 
@@ -123,12 +123,42 @@ impl<'a> ServerInfo<'a> {
     }
 }
 
+pub use xash3d_protocol::server::PlayerInfo;
+
+pub struct PlayerError(());
+
+pub struct ServerPlayers<'a> {
+    response: GetPlayersResponse<&'a [u8]>,
+}
+
+impl<'a> ServerPlayers<'a> {
+    pub(crate) fn new(response: GetPlayersResponse<&'a [u8]>) -> Self {
+        Self { response }
+    }
+
+    pub fn len(&self) -> usize {
+        self.response.players_count() as usize
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Returns an iterator over players.
+    pub fn iter(&self) -> impl Iterator<Item = Result<PlayerInfo<'a>, PlayerError>> {
+        self.response
+            .players()
+            .map(|i| i.map_err(|_| PlayerError(())))
+    }
+}
+
 #[non_exhaustive]
 pub enum Event<'a> {
     Timeout,
     ServerList(ServerList<'a>),
     ServerInfo(ServerInfo<'a>),
     ServerInfoTimeout(SocketAddr),
+    ServerPlayers(SocketAddr, ServerPlayers<'a>),
     ServerRemove(SocketAddr),
     MasterInvalidPacket(SocketAddr, &'a [u8]),
     ServerInvalidProtocol(SocketAddr),

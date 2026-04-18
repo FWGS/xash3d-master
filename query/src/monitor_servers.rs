@@ -3,7 +3,7 @@ use std::{
     net::SocketAddr,
 };
 
-use xash3d_observer::{event::Event, Buffer};
+use xash3d_observer::{event::Event, Buffer, Server};
 
 use crate::{
     cli::Cli,
@@ -21,7 +21,8 @@ pub(crate) fn run(cli: &Cli, servers: Vec<SocketAddr>) -> Result<(), QueryError>
     };
 
     for addr in servers {
-        observer.insert_server(addr);
+        let server = Server::new(addr);
+        observer.insert_server(server);
     }
 
     let mut servers = HashMap::<SocketAddr, ServerInfo>::new();
@@ -30,7 +31,8 @@ pub(crate) fn run(cli: &Cli, servers: Vec<SocketAddr>) -> Result<(), QueryError>
         match observer.wait_event(&mut buffer, None)? {
             Event::ServerList(list) => {
                 for addr in list.iter() {
-                    observer.insert_server(addr);
+                    let server = Server::new(addr);
+                    observer.insert_server(server);
                 }
             }
             Event::ServerInfo(server_info) if server_info.is_changed() => {
@@ -38,7 +40,8 @@ pub(crate) fn run(cli: &Cli, servers: Vec<SocketAddr>) -> Result<(), QueryError>
                 let ping = server_info.ping();
                 let info = ServerInfo::from(&server_info);
                 if cli.json {
-                    let result = ServerResult::ok(addr, ping, info);
+                    let mut result = ServerResult::new_timeout(addr);
+                    result.set_ok(ping, info);
                     print_json(cli, &result);
                 } else {
                     match servers.entry(addr) {
@@ -58,11 +61,11 @@ pub(crate) fn run(cli: &Cli, servers: Vec<SocketAddr>) -> Result<(), QueryError>
                 }
             }
             Event::ServerInfo(server_info) if cli.json && !server_info.is_changed() => {
-                let result = ServerResult::ping(*server_info.address(), server_info.ping());
+                let result = ServerResult::new_ping(*server_info.address(), server_info.ping());
                 print_json(cli, &result);
             }
             Event::ServerInfoTimeout(addr) if cli.json => {
-                let result = ServerResult::timeout(addr);
+                let result = ServerResult::new_timeout(addr);
                 print_json(cli, &result);
             }
             Event::ServerRemove(addr) => {

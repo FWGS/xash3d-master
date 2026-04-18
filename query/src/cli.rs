@@ -123,6 +123,7 @@ pub struct Cli {
     pub master_timeout: Duration,
     pub server_timeout: Duration,
     pub protocol: Vec<u8>,
+    pub players: bool,
     pub compact: bool,
     pub json: bool,
     pub debug: bool,
@@ -141,6 +142,7 @@ impl Default for Cli {
             master_timeout: Duration::from_secs(2),
             server_timeout: Duration::from_secs(2),
             protocol: vec![proto::PROTOCOL_VERSION, proto::PROTOCOL_VERSION - 1],
+            players: true,
             compact: false,
             json: false,
             debug: false,
@@ -204,6 +206,7 @@ pub fn parse() -> Cli {
         "compact-output",
         "compact instead of pretty-printed output",
     );
+    opts.optflag("P", "no-players", "do not print players list");
     opts.optflag("j", "json", "output JSON");
     opts.optflag("d", "debug", "output debug");
     opts.optflag("F", "force-color", "force colored output");
@@ -292,6 +295,7 @@ pub fn parse() -> Cli {
 
     cli.filter = filter.opt_get(&matches);
     cli.compact = matches.opt_present("compact-output");
+    cli.players = !matches.opt_present("no-players");
     cli.json = matches.opt_present("json");
     cli.debug = matches.opt_present("debug");
     cli.force_color = matches.opt_present("force-color");

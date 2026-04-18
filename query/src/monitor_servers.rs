@@ -1,101 +1,79 @@
 use std::{
     collections::{hash_map::Entry, HashMap},
     net::SocketAddr,
-    time::Duration,
 };
 
-use xash3d_observer::{GetServerInfoResponse, Handler};
+use xash3d_observer::{event::Event, Buffer};
 
 use crate::{
     cli::Cli,
-    print_json,
     server_info::ServerInfo,
     server_result::{ServerResult, ServerResultKind},
+    utils::{self, print_json},
     QueryError,
 };
 
-struct Monitor<'a> {
-    cli: &'a Cli,
-    custom_servers: Vec<SocketAddr>,
-    servers: HashMap<SocketAddr, ServerInfo>,
-}
+pub(crate) fn run(cli: &Cli, servers: Vec<SocketAddr>) -> Result<(), QueryError> {
+    let mut observer = if servers.is_empty() {
+        utils::create_observer_with_masters(cli)?
+    } else {
+        utils::create_observer(cli)?
+    };
 
-impl<'a> Monitor<'a> {
-    fn new(cli: &'a Cli, custom_servers: Vec<SocketAddr>) -> Self {
-        Self {
-            cli,
-            custom_servers,
-            servers: Default::default(),
-        }
-    }
-}
-
-impl Handler for Monitor<'_> {
-    fn extra_servers(&mut self) -> &[SocketAddr] {
-        &self.custom_servers
+    for addr in servers {
+        observer.insert_server(addr);
     }
 
-    fn server_update(
-        &mut self,
-        addr: SocketAddr,
-        info: &GetServerInfoResponse,
-        _: bool,
-        ping: Duration,
-    ) {
-        let info = ServerInfo::from(info);
-        if self.cli.json {
-            let result = ServerResult::ok(addr, ping, info);
-            print_json(self.cli, &result);
-        } else {
-            match self.servers.entry(addr) {
-                Entry::Occupied(mut e) => {
-                    let p = e.get().printer(self.cli);
-                    println!("{:24?} --- {:>7.1} {}", addr, ' ', p,);
-                    let p = info.printer(self.cli);
-                    println!("{addr:24?} +++ {ping:>7.1?} {p}");
-                    e.insert(info);
-                }
-                Entry::Vacant(e) => {
-                    let p = info.printer(self.cli);
-                    println!("{addr:24?} +++ {ping:>7.1?} {p}");
-                    e.insert(info);
+    let mut servers = HashMap::<SocketAddr, ServerInfo>::new();
+    let mut buffer = Buffer::new();
+    loop {
+        match observer.wait_event(&mut buffer, None)? {
+            Event::ServerList(list) => {
+                for addr in list.iter() {
+                    observer.insert_server(addr);
                 }
             }
+            Event::ServerInfo(server_info) if server_info.is_changed() => {
+                let addr = *server_info.address();
+                let ping = server_info.ping();
+                let info = ServerInfo::from(&server_info);
+                if cli.json {
+                    let result = ServerResult::ok(addr, ping, info);
+                    print_json(cli, &result);
+                } else {
+                    match servers.entry(addr) {
+                        Entry::Occupied(mut e) => {
+                            let p = e.get().printer(cli);
+                            println!("{:24?} --- {:>7.1} {}", addr, ' ', p,);
+                            let p = info.printer(cli);
+                            println!("{addr:24?} +++ {ping:>7.1?} {p}");
+                            e.insert(info);
+                        }
+                        Entry::Vacant(e) => {
+                            let p = info.printer(cli);
+                            println!("{addr:24?} +++ {ping:>7.1?} {p}");
+                            e.insert(info);
+                        }
+                    }
+                }
+            }
+            Event::ServerInfo(server_info) if cli.json && !server_info.is_changed() => {
+                let result = ServerResult::ping(*server_info.address(), server_info.ping());
+                print_json(cli, &result);
+            }
+            Event::ServerInfoTimeout(addr) if cli.json => {
+                let result = ServerResult::timeout(addr);
+                print_json(cli, &result);
+            }
+            Event::ServerRemove(addr) => {
+                if cli.json {
+                    let result = ServerResult::new(addr, None, ServerResultKind::Remove);
+                    print_json(cli, &result);
+                } else {
+                    servers.remove(&addr);
+                }
+            }
+            _ => {}
         }
     }
-
-    fn server_update_ping(&mut self, addr: SocketAddr, ping: Duration) {
-        if self.cli.json {
-            let result = ServerResult::ping(addr, ping);
-            print_json(self.cli, &result);
-        }
-    }
-
-    fn server_timeout(&mut self, addr: SocketAddr) {
-        if self.cli.json {
-            let result = ServerResult::timeout(addr);
-            print_json(self.cli, &result);
-        }
-    }
-
-    fn server_remove(&mut self, addr: SocketAddr) {
-        if self.cli.json {
-            let result = ServerResult::new(addr, None, ServerResultKind::Remove);
-            print_json(self.cli, &result);
-        } else {
-            self.servers.remove(&addr);
-        }
-    }
-}
-
-pub(crate) fn run(cli: &Cli, servers: Vec<SocketAddr>) -> Result<(), QueryError> {
-    let is_custom_servers = !servers.is_empty();
-    let handler = Monitor::new(cli, servers);
-    let mut observer = if is_custom_servers {
-        crate::create_observer_no_masters(cli, handler)?
-    } else {
-        crate::create_observer(cli, handler)?
-    };
-    observer.run()?;
-    Ok(())
 }

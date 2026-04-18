@@ -1,5 +1,4 @@
 use std::{
-    fmt,
     net::SocketAddr,
     time::{Duration, SystemTime},
 };
@@ -19,12 +18,19 @@ pub enum ServerResultKind {
     },
     Ping,
     InvalidPacket {
+        // TODO: remove me
         message: String,
         response: String,
     },
     Timeout,
     InvalidProtocol,
     Remove,
+}
+
+impl ServerResultKind {
+    pub fn is_timeout(&self) -> bool {
+        matches!(self, ServerResultKind::Timeout)
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -61,24 +67,16 @@ impl ServerResult {
         Self::new(address, None, ServerResultKind::Timeout)
     }
 
-    pub fn invalid_protocol(address: SocketAddr, ping: Duration) -> Self {
-        Self::new(address, Some(ping), ServerResultKind::InvalidProtocol)
+    pub fn invalid_protocol(address: SocketAddr) -> Self {
+        Self::new(address, None, ServerResultKind::InvalidProtocol)
     }
 
-    pub fn invalid_packet<T>(
-        address: SocketAddr,
-        ping: Duration,
-        message: T,
-        response: &[u8],
-    ) -> Self
-    where
-        T: fmt::Display,
-    {
+    pub fn invalid_packet(address: SocketAddr, response: &[u8]) -> Self {
         Self::new(
             address,
-            Some(ping),
+            None,
             ServerResultKind::InvalidPacket {
-                message: message.to_string(),
+                message: String::new(),
                 response: Str(response).to_string(),
             },
         )

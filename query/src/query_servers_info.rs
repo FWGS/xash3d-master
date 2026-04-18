@@ -1,20 +1,19 @@
 use std::{
-    cmp,
-    collections::{HashMap, HashSet},
+    collections::{hash_map::Entry, HashMap, HashSet},
     net::SocketAddr,
     time::{Duration, Instant},
 };
 
 use serde::Serialize;
-use xash3d_observer::{Handler, Observer};
+use xash3d_observer::{event::Event, Buffer, ObserverNew};
 
 use crate::{
     cli::Cli,
     color::Colored,
-    print_json,
     server_info::ServerInfo,
     server_result::{ServerResult, ServerResultKind},
-    ProtocolError, QueryError,
+    utils::{self, print_json},
+    QueryError,
 };
 
 #[derive(Clone, Debug, Serialize)]
@@ -27,103 +26,10 @@ struct InfoResult<'a> {
     servers: &'a [&'a ServerResult],
 }
 
-struct CollectServerInfo {
-    start_time: Instant,
-    master_timeout: Duration,
-    server_timeout: Duration,
-    is_custom_servers: bool,
-    custom_servers: Vec<SocketAddr>,
-    servers: HashMap<SocketAddr, ServerResult>,
-    pending: HashSet<SocketAddr>,
-}
+fn print_server_info(cli: &Cli, servers: &HashMap<SocketAddr, ServerResult>) {
+    let mut servers: Vec<_> = servers.values().collect();
+    servers.sort_by_key(|a| a.address);
 
-impl CollectServerInfo {
-    fn new(cli: &Cli, custom_servers: Vec<SocketAddr>) -> Self {
-        let pending = custom_servers.iter().copied().collect();
-
-        Self {
-            start_time: Instant::now(),
-            master_timeout: cli.master_timeout,
-            server_timeout: cli.server_timeout,
-            is_custom_servers: !custom_servers.is_empty(),
-            custom_servers,
-            servers: HashMap::new(),
-            pending,
-        }
-    }
-
-    fn insert(&mut self, addr: SocketAddr, result: ServerResult) {
-        // do not fetch info for this server again
-        self.custom_servers.retain(|i| *i != addr);
-
-        self.pending.remove(&addr);
-        self.servers.insert(addr, result);
-    }
-}
-
-impl Handler for CollectServerInfo {
-    fn stop_observer(&mut self) -> bool {
-        // early exit if received results for all custom servers
-        if self.is_custom_servers && !self.servers.is_empty() && self.pending.is_empty() {
-            return true;
-        }
-
-        let mut timeout = self.server_timeout;
-        if !self.is_custom_servers {
-            timeout = cmp::max(timeout, self.master_timeout);
-        }
-
-        timeout < self.start_time.elapsed()
-    }
-
-    fn extra_servers(&mut self) -> &[SocketAddr] {
-        self.custom_servers.as_slice()
-    }
-
-    fn query_info_for_server(&mut self, _: SocketAddr, server: SocketAddr) -> bool {
-        if self.servers.contains_key(&server) {
-            return false;
-        }
-
-        self.pending.insert(server);
-        true
-    }
-
-    fn server_update(
-        &mut self,
-        addr: SocketAddr,
-        info: &xash3d_observer::GetServerInfoResponse,
-        _: bool,
-        ping: Duration,
-    ) {
-        let info = ServerInfo::from(info);
-        let res = ServerResult::ok(addr, ping, info);
-        self.insert(addr, res);
-    }
-
-    fn server_timeout(&mut self, addr: SocketAddr) {
-        let res = ServerResult::timeout(addr);
-        self.insert(addr, res);
-    }
-
-    fn server_invalid_protocol(&mut self, addr: SocketAddr, ping: Duration) {
-        let res = ServerResult::invalid_protocol(addr, ping);
-        self.insert(addr, res);
-    }
-
-    fn server_invalid_packet(
-        &mut self,
-        addr: SocketAddr,
-        ping: Duration,
-        packet: &[u8],
-        error: ProtocolError,
-    ) {
-        let res = ServerResult::invalid_packet(addr, ping, error.to_string(), packet);
-        self.insert(addr, res);
-    }
-}
-
-fn print_server_info(cli: &Cli, servers: &[&ServerResult]) {
     if cli.json || cli.debug {
         let result = InfoResult {
             protocol: &cli.protocol,
@@ -131,7 +37,7 @@ fn print_server_info(cli: &Cli, servers: &[&ServerResult]) {
             server_timeout: cli.server_timeout.as_secs(),
             masters: &cli.masters,
             filter: &cli.filter,
-            servers,
+            servers: &servers,
         };
 
         if cli.json {
@@ -196,28 +102,121 @@ fn print_server_info(cli: &Cli, servers: &[&ServerResult]) {
     }
 }
 
-fn run(cli: &Cli, mut observer: Observer<CollectServerInfo>) -> Result<(), QueryError> {
-    observer.run()?;
-    let handler = observer.into_handler();
-
-    let mut servers: Vec<_> = handler.servers.values().collect();
-    servers.sort_by_key(|a| a.address);
-    print_server_info(cli, &servers);
-
-    Ok(())
+struct QueryServersInfo {
+    custom: bool,
+    timeout_master: bool,
+    timeout: Duration,
+    servers: HashMap<SocketAddr, ServerResult>,
+    servers_custom: HashSet<SocketAddr>,
+    observer: ObserverNew,
 }
 
-pub(crate) fn run_all(cli: &Cli) -> Result<(), QueryError> {
-    let handler = CollectServerInfo::new(cli, Vec::new());
-    let observer = crate::create_observer(cli, handler)?;
-    run(cli, observer)
+impl QueryServersInfo {
+    fn new(cli: &Cli, observer: ObserverNew, custom: bool) -> Self {
+        let (timeout, timeout_master) = if !custom {
+            // Wait a response from any master server and then change to game server timeout.
+            (cli.master_timeout, true)
+        } else {
+            (cli.server_timeout, false)
+        };
+
+        Self {
+            custom,
+            timeout_master,
+            timeout,
+            servers: HashMap::new(),
+            servers_custom: HashSet::new(),
+            observer,
+        }
+    }
+
+    fn insert_custom_server(&mut self, addr: SocketAddr) {
+        self.servers_custom.insert(addr);
+        self.insert_server(addr);
+    }
+
+    fn insert_server(&mut self, addr: SocketAddr) {
+        self.observer.insert_server(addr);
+
+        // Set default result to timeout for all new servers.
+        if let Entry::Vacant(e) = self.servers.entry(addr) {
+            e.insert(ServerResult::timeout(addr));
+        }
+    }
+
+    fn set_server_result(&mut self, addr: SocketAddr, result: ServerResult) {
+        if self.custom {
+            self.servers_custom.remove(&addr);
+        }
+        self.servers.insert(addr, result);
+    }
+
+    fn run(&mut self, cli: &Cli) -> Result<(), QueryError> {
+        let mut buffer = Buffer::new();
+        let mut remaining = Some(self.timeout);
+        let start_time = Instant::now();
+        while remaining.is_some() {
+            // TODO: Do same trick for servers recevied from master servers?
+            if self.custom && self.servers_custom.is_empty() {
+                break;
+            }
+
+            match self.observer.wait_event(&mut buffer, remaining)? {
+                Event::Timeout => break,
+                Event::ServerList(list) => {
+                    if self.timeout_master {
+                        self.timeout_master = false;
+                        self.timeout = cli.server_timeout;
+                    }
+
+                    for addr in list.iter() {
+                        self.insert_server(addr);
+                    }
+                }
+                Event::ServerInfo(server_info) => {
+                    let addr = *server_info.address();
+                    let info = ServerInfo::from(&server_info);
+                    let result = ServerResult::ok(addr, server_info.ping(), info);
+                    self.set_server_result(addr, result);
+                }
+                Event::ServerInvalidProtocol(addr) => {
+                    let result = ServerResult::invalid_protocol(addr);
+                    self.set_server_result(addr, result);
+                }
+                Event::ServerInvalidPacket(addr, data) => {
+                    let result = self.servers.get(&addr);
+                    if result.is_none() || result.is_some_and(|i| i.kind.is_timeout()) {
+                        let result = ServerResult::invalid_packet(addr, data);
+                        self.set_server_result(addr, result);
+                    }
+                }
+                _ => {}
+            }
+
+            remaining = self.timeout.checked_sub(start_time.elapsed());
+        }
+
+        print_server_info(cli, &self.servers);
+
+        Ok(())
+    }
+}
+
+pub(crate) fn run(cli: &Cli) -> Result<(), QueryError> {
+    let observer = utils::create_observer_with_masters(cli)?;
+    let mut query = QueryServersInfo::new(cli, observer, false);
+    query.run(cli)
 }
 
 pub(crate) fn run_custom_servers(cli: &Cli, servers: Vec<SocketAddr>) -> Result<(), QueryError> {
     if servers.is_empty() {
         return Ok(());
     }
-    let handler = CollectServerInfo::new(cli, servers);
-    let observer = crate::create_observer_no_masters(cli, handler)?;
-    run(cli, observer)
+
+    let observer = utils::create_observer(cli)?;
+    let mut query = QueryServersInfo::new(cli, observer, true);
+    for addr in servers {
+        query.insert_custom_server(addr);
+    }
+    query.run(cli)
 }

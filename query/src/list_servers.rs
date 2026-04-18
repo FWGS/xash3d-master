@@ -1,9 +1,13 @@
 use std::{collections::HashSet, net::SocketAddr, time::Instant};
 
 use serde::Serialize;
-use xash3d_observer::Handler;
+use xash3d_observer::{event::Event, Buffer};
 
-use crate::{cli::Cli, print_json, QueryError};
+use crate::{
+    cli::Cli,
+    utils::{self, print_json},
+    QueryError,
+};
 
 #[derive(Clone, Debug, Serialize)]
 struct ListResult<'a> {
@@ -13,38 +17,16 @@ struct ListResult<'a> {
     servers: &'a [SocketAddr],
 }
 
-struct CollectServers {
-    end_time: Instant,
-    servers: HashSet<SocketAddr>,
-}
+fn print_server_list(cli: &Cli, servers: HashSet<SocketAddr>) {
+    let mut servers: Vec<_> = servers.into_iter().collect();
+    servers.sort();
 
-impl CollectServers {
-    fn new(cli: &Cli) -> Self {
-        Self {
-            end_time: Instant::now() + cli.master_timeout,
-            servers: HashSet::with_capacity(256),
-        }
-    }
-}
-
-impl Handler for CollectServers {
-    fn stop_observer(&mut self) -> bool {
-        self.end_time < Instant::now()
-    }
-
-    fn query_info_for_server(&mut self, _: SocketAddr, server: SocketAddr) -> bool {
-        self.servers.insert(server);
-        false
-    }
-}
-
-fn print_server_list(cli: &Cli, servers: &[SocketAddr]) {
     if cli.json || cli.debug {
         let result = ListResult {
             master_timeout: cli.master_timeout.as_secs(),
             masters: &cli.masters,
             filter: &cli.filter,
-            servers,
+            servers: &servers,
         };
 
         if cli.json {
@@ -62,14 +44,26 @@ fn print_server_list(cli: &Cli, servers: &[SocketAddr]) {
 }
 
 pub(crate) fn run(cli: &Cli) -> Result<(), QueryError> {
-    let handler = CollectServers::new(cli);
-    let mut observer = crate::create_observer(cli, handler)?;
-    observer.run()?;
-    let handler = observer.into_handler();
+    let mut observer = utils::create_observer_with_masters(cli)?;
+    let mut servers = HashSet::with_capacity(256);
 
-    let mut servers: Vec<_> = handler.servers.into_iter().collect();
-    servers.sort();
-    print_server_list(cli, &servers);
+    let mut buffer = Buffer::new();
+    let mut remaining = Some(cli.master_timeout);
+    let start_time = Instant::now();
+    while remaining.is_some() {
+        match observer.wait_event(&mut buffer, remaining)? {
+            Event::Timeout => break,
+            Event::ServerList(list) => {
+                for addr in list.iter() {
+                    servers.insert(addr);
+                }
+            }
+            _ => {}
+        }
+        remaining = cli.master_timeout.checked_sub(start_time.elapsed());
+    }
+
+    print_server_list(cli, servers);
 
     Ok(())
 }

@@ -199,7 +199,11 @@ pub fn parse() -> Cli {
         .join(",");
     let help = format!("protocol version [default: {protocols}]");
     opts.optopt("p", "protocol", &help, "VERSION");
-    opts.optflag("c", "compact-output", "compact instead of pretty-printed output");
+    opts.optflag(
+        "c",
+        "compact-output",
+        "compact instead of pretty-printed output",
+    );
     opts.optflag("j", "json", "output JSON");
     opts.optflag("d", "debug", "output debug");
     opts.optflag("F", "force-color", "force colored output");

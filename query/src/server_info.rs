@@ -45,6 +45,24 @@ impl From<&GetServerInfoResponse<&[u8]>> for ServerInfo {
     }
 }
 
+impl From<&xash3d_observer::event::ServerInfo<'_>> for ServerInfo {
+    fn from(other: &xash3d_observer::event::ServerInfo<'_>) -> Self {
+        ServerInfo {
+            gamedir: String::from_utf8_lossy(other.gamedir()).to_string(),
+            map: String::from_utf8_lossy(other.map()).to_string(),
+            host: String::from_utf8_lossy(other.host()).to_string(),
+            protocol: other.protocol(),
+            numcl: other.clients_count(),
+            maxcl: other.clients_max(),
+            dm: other.is_deathmatch(),
+            team: other.has_teams(),
+            coop: other.is_coop(),
+            password: other.has_password(),
+            dedicated: other.is_dedicated(),
+        }
+    }
+}
+
 impl From<GetServerInfoResponse<&str>> for ServerInfo {
     fn from(other: GetServerInfoResponse<&str>) -> Self {
         Self {

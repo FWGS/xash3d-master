@@ -11,6 +11,7 @@ use xash3d_observer::{Handler, Observer};
 use crate::{
     cli::Cli,
     color::Colored,
+    print_json,
     server_info::ServerInfo,
     server_result::{ServerResult, ServerResultKind},
     ProtocolError, QueryError,
@@ -134,7 +135,7 @@ fn print_server_info(cli: &Cli, servers: &[&ServerResult]) {
         };
 
         if cli.json {
-            println!("{}", serde_json::to_string_pretty(&result).unwrap());
+            print_json(cli, &result);
         } else if cli.debug {
             println!("{result:#?}");
         } else {

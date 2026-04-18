@@ -3,7 +3,7 @@ use std::{collections::HashSet, net::SocketAddr, time::Instant};
 use serde::Serialize;
 use xash3d_observer::Handler;
 
-use crate::{cli::Cli, QueryError};
+use crate::{cli::Cli, print_json, QueryError};
 
 #[derive(Clone, Debug, Serialize)]
 struct ListResult<'a> {
@@ -48,7 +48,7 @@ fn print_server_list(cli: &Cli, servers: &[SocketAddr]) {
         };
 
         if cli.json {
-            println!("{}", serde_json::to_string_pretty(&result).unwrap());
+            print_json(cli, &result);
         } else if cli.debug {
             println!("{result:#?}");
         } else {

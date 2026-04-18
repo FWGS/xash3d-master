@@ -11,8 +11,9 @@ mod list_servers;
 mod monitor_servers;
 mod query_servers_info;
 
-use std::{io, net::SocketAddr, process};
+use std::{io::{self, Write}, net::SocketAddr, process};
 
+use serde::Serialize;
 use thiserror::Error;
 use xash3d_observer::{Handler, Observer, ObserverBuilder};
 use xash3d_protocol::Error as ProtocolError;
@@ -56,6 +57,18 @@ fn parse_server_addresses(servers: &[String]) -> Vec<SocketAddr> {
     list.sort_unstable();
     list.dedup();
     list
+}
+
+fn print_json<T: Serialize>(cli: &Cli, value: &T) {
+    let print = if !cli.compact {
+        serde_json::to_writer_pretty
+    } else {
+        serde_json::to_writer
+    };
+    let mut stdout = io::stdout().lock();
+    print(&mut stdout, value).unwrap();
+    stdout.write_all(b"\n").unwrap();
+    stdout.flush().unwrap();
 }
 
 fn execute(cli: Cli) -> Result<(), QueryError> {

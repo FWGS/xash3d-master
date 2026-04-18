@@ -16,17 +16,18 @@ impl<'a> Colored<'a> {
 
 impl fmt::Display for Colored<'_> {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        use xash3d_protocol::color;
+
         #[cfg(feature = "color")]
         use crossterm::{style::Stylize, tty::IsTty};
 
         // TODO: unicode width
         let mut width = 0;
+        let mut iter = color::ColorIter::new(self.inner);
 
         #[cfg(feature = "color")]
         if self.forced || io::stdout().is_tty() {
-            use xash3d_protocol::color;
-
-            for (color, text) in color::ColorIter::new(self.inner) {
+            for (color, text) in iter.by_ref() {
                 width += text.chars().count();
                 let colored = match color::Color::try_from(color) {
                     Ok(color::Color::Black) => text.black(),
@@ -43,8 +44,7 @@ impl fmt::Display for Colored<'_> {
             }
         }
 
-        #[cfg(not(feature = "color"))]
-        for (_, text) in color::ColorIter::new(self.inner) {
+        for (_, text) in iter {
             width += text.chars().count();
             text.fmt(fmt)?;
         }

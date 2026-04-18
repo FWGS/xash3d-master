@@ -12,6 +12,7 @@ use crate::{
     event::{Event, InternalEvent},
     filter::{Filter, Version},
     observer_new::{Buffer, Master, ObserverNew},
+    Server,
 };
 
 pub type GetServerInfoResponse<'a, T = &'a [u8]> =
@@ -202,7 +203,7 @@ impl<T: Handler> Observer<T> {
 
     fn handle_server_from_master(&mut self, master: &SocketAddr, server: SocketAddr) {
         if self.handler.query_info_for_server(*master, server) {
-            self.inner.insert_server(server);
+            self.inner.insert_server(Server::new(server));
         } else {
             self.inner.remove_server(&server);
         }

@@ -7,13 +7,15 @@ use std::{
 };
 
 use xash3d_protocol::{
-    game::QueryServers, master::QueryServersResponse, server::GetServerInfoResponse,
-    server::Region, Error as ProtocolError,
+    game::QueryServers,
+    master::QueryServersResponse,
+    server::{GetPlayersResponse, GetServerInfoResponse, Region},
+    Error as ProtocolError,
 };
 
 use crate::{
     connection::{Connection, ConnectionState},
-    event::{Event, InternalEvent, ServerInfo, ServerList},
+    event::{Event, InternalEvent, ServerInfo, ServerList, ServerPlayers},
     filter::Filter,
     observer_old::Handler,
 };
@@ -56,6 +58,25 @@ impl Master {
 
         // TODO: handle error, filter may not fit
         packet.encode(buf).unwrap()
+    }
+}
+
+pub struct Server {
+    addr: SocketAddr,
+    players: bool,
+}
+
+impl Server {
+    pub fn new(addr: SocketAddr) -> Self {
+        Self {
+            addr,
+            players: false,
+        }
+    }
+
+    pub fn with_players(mut self, players: bool) -> Self {
+        self.players = players;
+        self
     }
 }
 
@@ -186,10 +207,10 @@ impl ObserverNew {
         }
     }
 
-    pub fn insert_server(&mut self, addr: SocketAddr) {
-        if let Entry::Vacant(e) = self.connections.entry(addr) {
-            self.pending.push(Pending::Server(addr));
-            e.insert(Connection::new());
+    pub fn insert_server(&mut self, server: Server) {
+        if let Entry::Vacant(e) = self.connections.entry(server.addr) {
+            self.pending.push(Pending::Server(server.addr));
+            e.insert(Connection::new(server.addr, server.players));
         }
     }
 
@@ -238,14 +259,14 @@ impl ObserverNew {
                 self.delayed_events.push(DelayedEvent::ServerTimeout(*addr));
             }
 
-            con.query_info(&self.sock, addr, buffer)?;
+            con.query(&self.sock, buffer)?;
         }
 
         // Hook for old API.
-        for addr in handler.extra_servers() {
-            if let Entry::Vacant(e) = self.connections.entry(*addr) {
-                let mut con = Connection::new();
-                con.query_info(&self.sock, addr, buffer)?;
+        for &addr in handler.extra_servers() {
+            if let Entry::Vacant(e) = self.connections.entry(addr) {
+                let mut con = Connection::new(addr, false);
+                con.query(&self.sock, buffer)?;
                 e.insert(con);
             }
         }
@@ -297,6 +318,11 @@ impl ObserverNew {
             return Ok(None);
         };
 
+        if let Ok(response) = GetPlayersResponse::decode(data) {
+            let players = ServerPlayers::new(response);
+            return Ok(Some(Event::ServerPlayers(*from, players).into()));
+        }
+
         match GetServerInfoResponse::decode(data) {
             Ok(response) => {
                 con.update_response_time();
@@ -316,7 +342,7 @@ impl ObserverNew {
                     // try legacy protocol version
                     let mut buffer = [0; 512];
                     con.set_legacy_protocol();
-                    con.query_info(&self.sock, from, &mut buffer)?;
+                    con.query(&self.sock, &mut buffer)?;
                     Ok(None)
                 } else {
                     let time = con.request_time().elapsed();
@@ -405,7 +431,7 @@ impl ObserverNew {
                 }
                 Pending::Server(addr) => {
                     if let Some(con) = self.connections.get_mut(&addr) {
-                        con.query_info(&self.sock, &addr, buffer)?;
+                        con.query(&self.sock, buffer)?;
                     }
                 }
             }

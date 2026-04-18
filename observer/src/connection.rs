@@ -20,7 +20,9 @@ pub enum ConnectionState {
 }
 
 pub struct Connection {
+    address: SocketAddr,
     protocol: u8,
+    players: bool,
     state: ConnectionState,
     request_time: Instant,
     response_time: Instant,
@@ -28,10 +30,12 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub fn new() -> Self {
+    pub fn new(address: SocketAddr, players: bool) -> Self {
         let now = Instant::now();
         Self {
+            address,
             protocol: xash3d_protocol::PROTOCOL_VERSION,
+            players,
             state: ConnectionState::ProtocolDetection,
             request_time: now,
             response_time: now,
@@ -77,12 +81,7 @@ impl Connection {
         self.response_time.duration_since(self.request_time)
     }
 
-    pub fn query_info(
-        &mut self,
-        sock: &UdpSocket,
-        addr: &SocketAddr,
-        buf: &mut [u8],
-    ) -> io::Result<()> {
+    fn query_info(&mut self, sock: &UdpSocket, buf: &mut [u8]) -> io::Result<()> {
         let packet = proto::game::GetServerInfo {
             protocol: self.protocol,
         };
@@ -91,7 +90,21 @@ impl Connection {
         if self.state == ConnectionState::Idle {
             self.state = ConnectionState::WaitingInfo;
         }
-        sock.send_to(packet, addr)?;
+        sock.send_to(packet, self.address)?;
+        Ok(())
+    }
+
+    fn query_players(&mut self, sock: &UdpSocket, buf: &mut [u8]) -> io::Result<()> {
+        let packet = proto::game::GetPlayers.encode(buf).unwrap();
+        sock.send_to(packet, self.address)?;
+        Ok(())
+    }
+
+    pub fn query(&mut self, sock: &UdpSocket, buf: &mut [u8]) -> io::Result<()> {
+        self.query_info(sock, buf)?;
+        if self.players {
+            self.query_players(sock, buf)?;
+        }
         Ok(())
     }
 }

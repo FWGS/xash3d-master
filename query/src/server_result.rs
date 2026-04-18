@@ -1,12 +1,12 @@
 use std::{
+    mem,
     net::SocketAddr,
     time::{Duration, SystemTime},
 };
 
 use serde::{Serialize, Serializer};
-use xash3d_protocol::wrappers::Str;
 
-use crate::server_info::ServerInfo;
+use crate::server_info::{Players, ServerInfo};
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "status")]
@@ -18,9 +18,7 @@ pub enum ServerResultKind {
     },
     Ping,
     InvalidPacket {
-        // TODO: remove me
-        message: String,
-        response: String,
+        data: Vec<u8>,
     },
     Timeout,
     InvalidProtocol,
@@ -33,53 +31,87 @@ impl ServerResultKind {
     }
 }
 
+fn make_millis_f32(ping: Duration) -> f32 {
+    ping.as_micros() as f32 / 1000.0
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct ServerResult {
     #[serde(serialize_with = "serialize_unix_time")]
     pub time: SystemTime,
     pub address: SocketAddr,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub ping: Option<f32>,
+    #[serde(serialize_with = "serialize_ping")]
+    pub ping: Option<Duration>,
     #[serde(flatten)]
     pub kind: ServerResultKind,
+    /// Tempopary storage for server players.
+    #[serde(skip)]
+    players: Option<Players>,
 }
 
 impl ServerResult {
     pub fn new(address: SocketAddr, ping: Option<Duration>, kind: ServerResultKind) -> Self {
-        let ping = ping.map(|ping| ping.as_micros() as f32 / 1000.0);
         Self {
             time: SystemTime::now(),
             address,
             ping,
             kind,
+            players: None,
         }
     }
 
-    pub fn ok(address: SocketAddr, ping: Duration, info: ServerInfo) -> Self {
-        Self::new(address, Some(ping), ServerResultKind::Ok { info })
-    }
-
-    pub fn ping(address: SocketAddr, ping: Duration) -> Self {
+    pub fn new_ping(address: SocketAddr, ping: Duration) -> Self {
         Self::new(address, Some(ping), ServerResultKind::Ping)
     }
 
-    pub fn timeout(address: SocketAddr) -> Self {
+    pub fn new_timeout(address: SocketAddr) -> Self {
         Self::new(address, None, ServerResultKind::Timeout)
     }
 
-    pub fn invalid_protocol(address: SocketAddr) -> Self {
+    pub fn new_invalid_protocol(address: SocketAddr) -> Self {
         Self::new(address, None, ServerResultKind::InvalidProtocol)
     }
 
-    pub fn invalid_packet(address: SocketAddr, response: &[u8]) -> Self {
+    pub fn new_invalid_packet(address: SocketAddr, response: &[u8]) -> Self {
         Self::new(
             address,
             None,
             ServerResultKind::InvalidPacket {
-                message: String::new(),
-                response: Str(response).to_string(),
+                data: response.into(),
             },
         )
+    }
+
+    pub fn ping_millis_f32(&self) -> Option<f32> {
+        self.ping.map(make_millis_f32)
+    }
+
+    pub fn set_players(&mut self, players: Players) {
+        if let ServerResultKind::Ok { info } = &mut self.kind {
+            info.players = players;
+        } else {
+            self.players = Some(players);
+        }
+    }
+
+    pub fn is_ok(&self) -> bool {
+        matches!(self.kind, ServerResultKind::Ok { .. })
+    }
+
+    pub fn has_players(&self) -> bool {
+        self.players.is_some()
+    }
+
+    pub fn set_ok(&mut self, ping: Duration, mut info: ServerInfo) {
+        let kind = mem::replace(&mut self.kind, ServerResultKind::Timeout);
+        if let ServerResultKind::Ok { info: old } = kind {
+            info.players = old.players;
+        } else if let Some(players) = self.players.take() {
+            info.players = players;
+        }
+        self.ping = Some(ping);
+        self.kind = ServerResultKind::Ok { info };
     }
 }
 
@@ -91,4 +123,8 @@ fn unix_time(time: &SystemTime) -> u64 {
 
 fn serialize_unix_time<S: Serializer>(time: &SystemTime, ser: S) -> Result<S::Ok, S::Error> {
     ser.serialize_u64(unix_time(time))
+}
+
+fn serialize_ping<S: Serializer>(ping: &Option<Duration>, ser: S) -> Result<S::Ok, S::Error> {
+    ping.map(make_millis_f32).serialize(ser)
 }

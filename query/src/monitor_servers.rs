@@ -8,6 +8,7 @@ use xash3d_observer::{GetServerInfoResponse, Handler};
 
 use crate::{
     cli::Cli,
+    print_json,
     server_info::ServerInfo,
     server_result::{ServerResult, ServerResultKind},
     QueryError,
@@ -44,7 +45,7 @@ impl Handler for Monitor<'_> {
         let info = ServerInfo::from(info);
         if self.cli.json {
             let result = ServerResult::ok(addr, ping, info);
-            println!("{}", serde_json::to_string_pretty(&result).unwrap());
+            print_json(self.cli, &result);
         } else {
             match self.servers.entry(addr) {
                 Entry::Occupied(mut e) => {
@@ -66,21 +67,21 @@ impl Handler for Monitor<'_> {
     fn server_update_ping(&mut self, addr: SocketAddr, ping: Duration) {
         if self.cli.json {
             let result = ServerResult::ping(addr, ping);
-            println!("{}", serde_json::to_string_pretty(&result).unwrap());
+            print_json(self.cli, &result);
         }
     }
 
     fn server_timeout(&mut self, addr: SocketAddr) {
         if self.cli.json {
             let result = ServerResult::timeout(addr);
-            println!("{}", serde_json::to_string_pretty(&result).unwrap());
+            print_json(self.cli, &result);
         }
     }
 
     fn server_remove(&mut self, addr: SocketAddr) {
         if self.cli.json {
             let result = ServerResult::new(addr, None, ServerResultKind::Remove);
-            println!("{}", serde_json::to_string_pretty(&result).unwrap());
+            print_json(self.cli, &result);
         } else {
             self.servers.remove(&addr);
         }

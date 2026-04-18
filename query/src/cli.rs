@@ -123,6 +123,7 @@ pub struct Cli {
     pub master_timeout: Duration,
     pub server_timeout: Duration,
     pub protocol: Vec<u8>,
+    pub compact: bool,
     pub json: bool,
     pub debug: bool,
     pub force_color: bool,
@@ -140,6 +141,7 @@ impl Default for Cli {
             master_timeout: Duration::from_secs(2),
             server_timeout: Duration::from_secs(2),
             protocol: vec![proto::PROTOCOL_VERSION, proto::PROTOCOL_VERSION - 1],
+            compact: false,
             json: false,
             debug: false,
             force_color: false,
@@ -197,6 +199,7 @@ pub fn parse() -> Cli {
         .join(",");
     let help = format!("protocol version [default: {protocols}]");
     opts.optopt("p", "protocol", &help, "VERSION");
+    opts.optflag("c", "compact-output", "compact instead of pretty-printed output");
     opts.optflag("j", "json", "output JSON");
     opts.optflag("d", "debug", "output debug");
     opts.optflag("F", "force-color", "force colored output");
@@ -284,6 +287,7 @@ pub fn parse() -> Cli {
     }
 
     cli.filter = filter.opt_get(&matches);
+    cli.compact = matches.opt_present("compact-output");
     cli.json = matches.opt_present("json");
     cli.debug = matches.opt_present("debug");
     cli.force_color = matches.opt_present("force-color");

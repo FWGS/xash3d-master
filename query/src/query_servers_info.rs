@@ -1,5 +1,6 @@
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
+    fmt,
     net::SocketAddr,
     time::{Duration, Instant},
 };
@@ -27,17 +28,70 @@ struct InfoResult<'a> {
     servers: &'a [ServerResult],
 }
 
+const LABEL_WIDTH: usize = 10;
+
+struct Label {
+    text: &'static str,
+    colored_output: bool,
+}
+
+impl fmt::Display for Label {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        #[cfg(feature = "color")]
+        if self.colored_output {
+            use crossterm::style::Stylize;
+            // Align manually because StyledContent printer does not support width parameter.
+            if let Some(n) = LABEL_WIDTH.checked_sub(self.text.len()) {
+                write!(f, "{:n$}", "")?;
+            }
+
+            return write!(f, "{}", self.text.bold().green());
+        }
+
+        write!(f, "{:>LABEL_WIDTH$}", self.text)
+    }
+}
+
 struct Printer<'a> {
+    all_servers: bool,
+    colored_output: bool,
     servers: &'a [ServerResult],
     /// Temporary storage for players.
     players: Vec<&'a PlayerInfo>,
 }
 
 impl<'a> Printer<'a> {
-    fn new(servers: &'a [ServerResult]) -> Self {
+    fn new(cli: &Cli, custom: bool, servers: &'a [ServerResult]) -> Self {
         Self {
+            all_servers: custom || cli.all_servers,
+            colored_output: cli.colored_output(),
             servers,
             players: Vec::new(),
+        }
+    }
+
+    fn label(&self, text: &'static str) -> Label {
+        Label {
+            colored_output: self.colored_output,
+            text,
+        }
+    }
+
+    fn label_server(&self, address: SocketAddr) -> impl fmt::Display {
+        struct LabelServer {
+            label: Label,
+            address: SocketAddr,
+        }
+
+        impl fmt::Display for LabelServer {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "{}: {}", self.label, self.address)
+            }
+        }
+
+        LabelServer {
+            label: self.label("server"),
+            address,
         }
     }
 
@@ -60,17 +114,8 @@ impl<'a> Printer<'a> {
         }
     }
 
-    fn print_server(&mut self, cli: &Cli, i: usize, server: &'a ServerResult) {
-        let ServerResultKind::Ok { info } = &server.kind else {
-            return;
-        };
-
-        if i > 0 {
-            println!();
-        }
-
-        let w = 10;
-        print!("{:>w$}: {}", "server", server.address);
+    fn print_server_info(&mut self, cli: &Cli, server: &ServerResult, info: &ServerInfo) {
+        print!("{}", self.label_server(server.address));
         if let Some(ping) = server.ping_millis_f32() {
             print!(" [ping {ping:.0}ms]");
         }
@@ -82,12 +127,12 @@ impl<'a> Printer<'a> {
         }
         println!();
 
-        let host = Colored::new(&info.host, cli.force_color);
-        println!("{:>w$}: {}", "name", host);
-        println!("{:>w$}: {}", "game", info.gamedir);
-        println!("{:>w$}: {}", "map", info.map);
+        let host = Colored::new(info.host.trim(), cli.colored_output());
+        println!("{}: {}", self.label("name"), host);
+        println!("{}: {}", self.label("game"), info.gamedir.trim());
+        println!("{}: {}", self.label("map"), info.map.trim());
 
-        print!("{:>w$}:", "mode");
+        print!("{}:", self.label("mode"));
         if info.coop || info.team || info.dm {
             if info.coop {
                 print!(" coop");
@@ -103,17 +148,33 @@ impl<'a> Printer<'a> {
         }
         println!();
 
-        println!("{:>w$}: {}/{}", "players", info.numcl, info.maxcl);
+        println!("{}: {}/{}", self.label("players"), info.numcl, info.maxcl);
+    }
 
-        if !info.players.is_empty() {
-            self.players.clear();
-            self.players.extend(info.players.iter());
-            self.players.sort_by_key(|i| i.frags);
-            for (i, player) in self.players.iter().rev().enumerate() {
-                let name = Colored::new(&player.name, cli.force_color);
-                println!("{i:w$}: {} {name}", player.frags);
-            }
+    fn print_server_players(&mut self, cli: &Cli, players: &'a Players) {
+        if players.is_empty() {
+            return;
         }
+
+        self.players.clear();
+        self.players.extend(players.iter());
+        self.players.sort_by_key(|i| i.frags);
+        for (i, player) in self.players.iter().rev().enumerate() {
+            let name = Colored::new(&player.name, cli.colored_output());
+            println!("{i:>LABEL_WIDTH$}: {} {name}", player.frags);
+        }
+    }
+
+    fn print_timeout(&mut self, _: &Cli, server: &ServerResult) {
+        println!("{} [timeout]", self.label_server(server.address));
+    }
+
+    fn print_invalid_protocol(&mut self, _: &Cli, server: &ServerResult) {
+        println!("{} [protocol error]", self.label_server(server.address));
+    }
+
+    fn print_invalid_packet(&mut self, _: &Cli, server: &ServerResult) {
+        println!("{} [invalid]", self.label_server(server.address));
     }
 
     fn print(&mut self, cli: &Cli) {
@@ -122,8 +183,40 @@ impl<'a> Printer<'a> {
             return;
         }
 
-        for (i, server) in self.servers.iter().enumerate() {
-            self.print_server(cli, i, server);
+        let mut first = true;
+        let mut print_separator = || {
+            if first {
+                first = false;
+            } else {
+                println!();
+            }
+        };
+
+        for server in self.servers {
+            match &server.kind {
+                ServerResultKind::Ok { info } => {
+                    print_separator();
+                    self.print_server_info(cli, server, info);
+                }
+                ServerResultKind::OkWithPlayers { info, players } => {
+                    print_separator();
+                    self.print_server_info(cli, server, info);
+                    self.print_server_players(cli, players);
+                }
+                ServerResultKind::Timeout if self.all_servers => {
+                    print_separator();
+                    self.print_timeout(cli, server);
+                }
+                ServerResultKind::InvalidProtocol if self.all_servers => {
+                    print_separator();
+                    self.print_invalid_protocol(cli, server);
+                }
+                ServerResultKind::InvalidPacket { .. } if self.all_servers => {
+                    print_separator();
+                    self.print_invalid_packet(cli, server);
+                }
+                _ => {}
+            }
         }
     }
 }
@@ -248,7 +341,7 @@ impl QueryServersInfo {
 
         let mut servers: Vec<_> = self.servers.into_values().collect();
         servers.sort_by_key(|a| a.address);
-        Printer::new(&servers).print(cli);
+        Printer::new(cli, self.custom, &servers).print(cli);
 
         Ok(())
     }

@@ -70,8 +70,6 @@ pub struct ServerInfo {
     pub coop: bool,
     pub password: bool,
     pub dedicated: bool,
-    #[serde(flatten)]
-    pub players: Players,
 }
 
 impl ServerInfo {
@@ -94,7 +92,6 @@ impl From<&xash3d_observer::event::ServerInfo<'_>> for ServerInfo {
             coop: other.is_coop(),
             password: other.has_password(),
             dedicated: other.is_dedicated(),
-            players: Players::default(),
         }
     }
 }
@@ -124,9 +121,9 @@ impl fmt::Display for ServerInfoPrinter<'_> {
             flag('D', self.info.dedicated),
             self.info.numcl,
             self.info.maxcl,
-            self.info.gamedir,
-            self.info.map,
-            Colored::new(&self.info.host, self.cli.force_color),
+            self.info.gamedir.trim(),
+            self.info.map.trim(),
+            Colored::new(self.info.host.trim(), self.cli.colored_output()),
         )
     }
 }

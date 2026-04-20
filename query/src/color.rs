@@ -1,16 +1,13 @@
 use std::fmt;
 
-#[cfg(feature = "color")]
-use std::io;
-
 pub struct Colored<'a> {
-    inner: &'a str,
-    forced: bool,
+    text: &'a str,
+    enable: bool,
 }
 
 impl<'a> Colored<'a> {
-    pub fn new(s: &'a str, forced: bool) -> Self {
-        Self { inner: s, forced }
+    pub fn new(text: &'a str, enable: bool) -> Self {
+        Self { text, enable }
     }
 }
 
@@ -18,15 +15,14 @@ impl fmt::Display for Colored<'_> {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         use xash3d_protocol::color;
 
-        #[cfg(feature = "color")]
-        use crossterm::{style::Stylize, tty::IsTty};
-
         // TODO: unicode width
         let mut width = 0;
-        let mut iter = color::ColorIter::new(self.inner);
+        let mut iter = color::ColorIter::new(self.text);
 
         #[cfg(feature = "color")]
-        if self.forced || io::stdout().is_tty() {
+        if self.enable {
+            use crossterm::style::Stylize;
+
             for (color, text) in iter.by_ref() {
                 width += text.chars().count();
                 let colored = match color::Color::try_from(color) {

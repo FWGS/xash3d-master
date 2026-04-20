@@ -293,6 +293,12 @@ where
             };
         }
 
+        // HACK: Some buggy servers send a response with a nul-byte at the end.
+        if cur.as_slice().ends_with(b"\0") {
+            let tail = cur.end();
+            cur = Cursor::new(&tail[..tail.len() - 1]);
+        }
+
         let mut ret = Self::default();
         loop {
             let key = match cur.get_key_raw() {

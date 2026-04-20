@@ -8,8 +8,10 @@ use std::{
     time::Duration,
 };
 
-use getopts::Options;
+#[cfg(feature = "color")]
+use std::io;
 
+use getopts::Options;
 use xash3d_protocol::{self as proto, filter::Version};
 
 const BIN_NAME: &str = env!("CARGO_BIN_NAME");
@@ -123,11 +125,12 @@ pub struct Cli {
     pub master_timeout: Duration,
     pub server_timeout: Duration,
     pub protocol: Vec<u8>,
+    pub all_servers: bool,
     pub players: bool,
     pub compact: bool,
     pub json: bool,
     pub debug: bool,
-    pub force_color: bool,
+    force_color: bool,
     pub filter: String,
 }
 
@@ -142,6 +145,7 @@ impl Default for Cli {
             master_timeout: Duration::from_secs(2),
             server_timeout: Duration::from_secs(2),
             protocol: vec![proto::PROTOCOL_VERSION, proto::PROTOCOL_VERSION - 1],
+            all_servers: false,
             players: true,
             compact: false,
             json: false,
@@ -149,6 +153,21 @@ impl Default for Cli {
             force_color: false,
             filter: String::new(),
         }
+    }
+}
+
+impl Cli {
+    pub fn colored_output(&self) -> bool {
+        if self.force_color {
+            return true;
+        }
+
+        #[cfg(feature = "color")]
+        if crossterm::tty::IsTty::is_tty(&io::stdout()) {
+            return true;
+        }
+
+        false
     }
 }
 
@@ -201,6 +220,7 @@ pub fn parse() -> Cli {
         .join(",");
     let help = format!("protocol version [default: {protocols}]");
     opts.optopt("p", "protocol", &help, "VERSION");
+    opts.optflag("A", "all-servers", "print all servers");
     opts.optflag(
         "c",
         "compact-output",
@@ -294,6 +314,7 @@ pub fn parse() -> Cli {
     }
 
     cli.filter = filter.opt_get(&matches);
+    cli.all_servers = matches.opt_present("all-servers");
     cli.compact = matches.opt_present("compact-output");
     cli.players = !matches.opt_present("no-players");
     cli.json = matches.opt_present("json");

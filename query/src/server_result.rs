@@ -16,6 +16,12 @@ pub enum ServerResultKind {
         #[serde(flatten)]
         info: ServerInfo,
     },
+    OkWithPlayers {
+        #[serde(flatten)]
+        info: ServerInfo,
+        #[serde(flatten)]
+        players: Players,
+    },
     Ping,
     InvalidPacket {
         data: Vec<u8>,
@@ -88,11 +94,13 @@ impl ServerResult {
     }
 
     pub fn set_players(&mut self, players: Players) {
-        if let ServerResultKind::Ok { info } = &mut self.kind {
-            info.players = players;
+        let mut kind = mem::replace(&mut self.kind, ServerResultKind::Timeout);
+        if let ServerResultKind::Ok { info } = kind {
+            kind = ServerResultKind::OkWithPlayers { info, players };
         } else {
             self.players = Some(players);
         }
+        self.kind = kind;
     }
 
     pub fn is_ok(&self) -> bool {
@@ -103,15 +111,17 @@ impl ServerResult {
         self.players.is_some()
     }
 
-    pub fn set_ok(&mut self, ping: Duration, mut info: ServerInfo) {
-        let kind = mem::replace(&mut self.kind, ServerResultKind::Timeout);
-        if let ServerResultKind::Ok { info: old } = kind {
-            info.players = old.players;
+    pub fn set_ok(&mut self, ping: Duration, info: ServerInfo) {
+        let mut kind = mem::replace(&mut self.kind, ServerResultKind::Timeout);
+        if let ServerResultKind::OkWithPlayers { players, .. } = kind {
+            kind = ServerResultKind::OkWithPlayers { info, players };
         } else if let Some(players) = self.players.take() {
-            info.players = players;
+            kind = ServerResultKind::OkWithPlayers { info, players };
+        } else {
+            kind = ServerResultKind::Ok { info };
         }
         self.ping = Some(ping);
-        self.kind = ServerResultKind::Ok { info };
+        self.kind = kind;
     }
 }
 

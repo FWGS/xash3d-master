@@ -376,6 +376,16 @@ impl<'a> PlayerInfo<'a> {
             time,
         }
     }
+
+    /// Returns `true` is it is a player.
+    pub fn is_player(&self) -> bool {
+        self.time >= 0.0
+    }
+
+    /// Returns `true` is it is a bot.
+    pub fn is_bot(&self) -> bool {
+        self.time == -1.0
+    }
 }
 
 /// Response to [GetPlayers](super::game::GetPlayers) request.

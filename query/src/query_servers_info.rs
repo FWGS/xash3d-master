@@ -148,7 +148,12 @@ impl<'a> Printer<'a> {
         }
         println!();
 
-        println!("{}: {}/{}", self.label("players"), info.numcl, info.maxcl);
+        print!("{}: {}/{}", self.label("players"), info.numcl, info.maxcl);
+        if info.bots > 0 {
+            let s = if info.bots > 1 { "s" } else { "" };
+            print!(" ({} bot{s})", info.bots);
+        }
+        println!();
     }
 
     fn print_server_players(&mut self, cli: &Cli, players: &'a Players) {

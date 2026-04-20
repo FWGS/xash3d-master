@@ -32,6 +32,11 @@ pub enum ServerResultKind {
 }
 
 impl ServerResultKind {
+    fn new_ok_with_players(mut info: ServerInfo, players: Players) -> Self {
+        info.bots = players.bots_count();
+        Self::OkWithPlayers { info, players }
+    }
+
     pub fn is_timeout(&self) -> bool {
         matches!(self, ServerResultKind::Timeout)
     }
@@ -96,7 +101,7 @@ impl ServerResult {
     pub fn set_players(&mut self, players: Players) {
         let mut kind = mem::replace(&mut self.kind, ServerResultKind::Timeout);
         if let ServerResultKind::Ok { info } = kind {
-            kind = ServerResultKind::OkWithPlayers { info, players };
+            kind = ServerResultKind::new_ok_with_players(info, players);
         } else {
             self.players = Some(players);
         }
@@ -114,9 +119,9 @@ impl ServerResult {
     pub fn set_ok(&mut self, ping: Duration, info: ServerInfo) {
         let mut kind = mem::replace(&mut self.kind, ServerResultKind::Timeout);
         if let ServerResultKind::OkWithPlayers { players, .. } = kind {
-            kind = ServerResultKind::OkWithPlayers { info, players };
+            kind = ServerResultKind::new_ok_with_players(info, players);
         } else if let Some(players) = self.players.take() {
-            kind = ServerResultKind::OkWithPlayers { info, players };
+            kind = ServerResultKind::new_ok_with_players(info, players);
         } else {
             kind = ServerResultKind::Ok { info };
         }

@@ -29,7 +29,15 @@ impl From<xash3d_observer::event::PlayerInfo<'_>> for PlayerInfo {
 
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct Players {
+    #[serde(skip)]
+    bots: u8,
     players: Vec<PlayerInfo>,
+}
+
+impl Players {
+    pub fn bots_count(&self) -> u8 {
+        self.bots
+    }
 }
 
 impl Deref for Players {
@@ -48,11 +56,19 @@ impl DerefMut for Players {
 
 impl From<xash3d_observer::event::ServerPlayers<'_>> for Players {
     fn from(value: xash3d_observer::event::ServerPlayers<'_>) -> Self {
-        let mut players = Vec::with_capacity(value.len());
+        let mut bots = 0;
+        let mut players = Vec::new();
         for i in value.iter().filter_map(|i| i.ok()) {
-            players.push(i.into());
+            if !i.is_bot() {
+                if players.is_empty() {
+                    players.reserve(value.len());
+                }
+                players.push(i.into());
+            } else {
+                bots += 1;
+            }
         }
-        Self { players }
+        Self { bots, players }
     }
 }
 
@@ -65,6 +81,8 @@ pub struct ServerInfo {
     pub protocol: u8,
     pub numcl: u8,
     pub maxcl: u8,
+    #[serde(skip_serializing_if = "is_zero_u8")]
+    pub bots: u8,
     pub dm: bool,
     pub team: bool,
     pub coop: bool,
@@ -87,6 +105,7 @@ impl From<&xash3d_observer::event::ServerInfo<'_>> for ServerInfo {
             protocol: other.protocol(),
             numcl: other.clients_count(),
             maxcl: other.clients_max(),
+            bots: 0,
             dm: other.is_deathmatch(),
             team: other.has_teams(),
             coop: other.is_coop(),
@@ -133,4 +152,8 @@ where
     S: Serializer,
 {
     ser.serialize_str(color::trim_color(s).as_ref())
+}
+
+fn is_zero_u8(value: &u8) -> bool {
+    *value == 0
 }

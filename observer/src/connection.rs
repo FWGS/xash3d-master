@@ -82,6 +82,7 @@ impl Connection {
     }
 
     fn query_info(&mut self, sock: &UdpSocket, buf: &mut [u8]) -> io::Result<()> {
+        // TODO: send TSource Engine Query
         let packet = proto::game::GetServerInfo {
             protocol: self.protocol,
         };

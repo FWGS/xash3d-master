@@ -96,8 +96,9 @@ impl Connection {
     }
 
     fn query_players(&mut self, sock: &UdpSocket, buf: &mut [u8]) -> io::Result<()> {
-        let packet = proto::game::GetPlayers.encode(buf).unwrap();
-        sock.send_to(packet, self.address)?;
+        let req = proto::game::GetPlayers::new(0).unwrap();
+        let data = req.encode(buf).unwrap();
+        sock.send_to(data, self.address)?;
         Ok(())
     }
 

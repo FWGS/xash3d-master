@@ -106,18 +106,56 @@ impl GetServerInfo {
     }
 }
 
+/// Request a challenge number from a game server.
+///
+/// See [GetChallengeResponse](super::server::GetChallengeResponse).
+///
+/// # Note
+///
+/// `GetChallenge` overlaps with [GetPlayers]. Try to decode this packet before decoding
+/// [GetPlayers].
+#[derive(Clone, Debug, PartialEq)]
+pub struct GetChallenge(());
+
+impl GetChallenge {
+    /// Packet header.
+    pub const HEADER: &'static [u8] = b"\xff\xff\xff\xffU\xff\xff\xff\xff";
+
+    /// Creates a new `GetChallenge`.
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
+        Self(())
+    }
+
+    /// Decode packet from `src`.
+    pub fn decode(src: &[u8]) -> Result<Self, Error> {
+        let mut cur = Cursor::new(src);
+        cur.expect(Self::HEADER)?;
+        cur.expect_empty()?;
+        Ok(Self(()))
+    }
+
+    /// Encode packet to `buf`.
+    pub fn encode<'a>(&self, buf: &'a mut [u8]) -> Result<&'a [u8], Error> {
+        let mut cur = CursorMut::new(buf);
+        cur.put_bytes(Self::HEADER)?;
+        let n = cur.pos();
+        Ok(&buf[..n])
+    }
+}
+
 /// Request an information from a game server.
 ///
-/// The game server may send [GetServerInfo2ResponseChallenge](super::server::GetServerInfo2ResponseChallenge)
+/// The game server may send [GetChallengeResponse](super::server::GetChallengeResponse)
 /// instead of [GetServerInfo2Response](super::server::GetServerInfo2Response). Repeat
 /// this query with a challenge number taken from the challenge response.
 ///
 /// See [GetServerInfo2Response](super::server::GetServerInfo2Response) and
-/// [GetServerInfo2ResponseChallenge](super::server::GetServerInfo2ResponseChallenge).
+/// [GetChallengeResponse](super::server::GetChallengeResponse).
 #[derive(Clone, Debug, PartialEq)]
 pub struct GetServerInfo2 {
     /// A challenge number from
-    /// [GetServerInfo2ResponseChallenge](super::server::GetServerInfo2ResponseChallenge) packet.
+    /// [GetChallengeResponse](super::server::GetChallengeResponse) packet.
     pub challenge: Option<u32>,
 }
 
@@ -165,24 +203,54 @@ impl GetServerInfo2 {
 /// Request player list from a game server.
 ///
 /// See [GetPlayersResponse](super::server::GetPlayersResponse).
+///
+/// # Note
+///
+/// [GetChallenge] packet uses the same header but with a challenge number equals to `u32::MAX`.
 #[derive(Clone, Debug, PartialEq)]
-pub struct GetPlayers;
+pub struct GetPlayers {
+    challenge: u32,
+}
 
 impl GetPlayers {
     /// Packet header.
-    pub const HEADER: &'static [u8] = b"\xff\xff\xff\xffU ";
+    pub const HEADER: &'static [u8] = b"\xff\xff\xff\xffU";
+
+    /// Create a new `GetPlayers`.
+    ///
+    /// Returns `None` if the challenge number equals to `u32::MAX`.
+    pub fn new(challenge: u32) -> Option<Self> {
+        if challenge != u32::MAX {
+            Some(Self { challenge })
+        } else {
+            None
+        }
+    }
+
+    /// A challenge number.
+    pub fn challenge(&self) -> u32 {
+        self.challenge
+    }
 
     /// Decode packet from `src`.
     pub fn decode(src: &[u8]) -> Result<Self, Error> {
         let mut cur = Cursor::new(src);
         cur.expect(Self::HEADER)?;
+        let challenge = cur.get_u32_le()?;
+        if challenge == u32::MAX {
+            // It is a GetChallenge packet.
+            return Err(Error::InvalidPacket);
+        }
         cur.expect_empty()?;
-        Ok(Self)
+        Ok(Self { challenge })
     }
 
     /// Encode packet to `buf`.
     pub fn encode<'a>(&self, buf: &'a mut [u8]) -> Result<&'a [u8], Error> {
-        let n = CursorMut::new(buf).put_bytes(Self::HEADER)?.pos();
+        let mut cur = CursorMut::new(buf);
+        cur.put_bytes(Self::HEADER)?;
+        cur.put_u32_le(self.challenge)?;
+        let n = cur.pos();
         Ok(&buf[..n])
     }
 }
@@ -193,6 +261,9 @@ impl GetPlayers {
 pub enum Packet<'a> {
     /// Request a list of server addresses from master servers.
     QueryServers(QueryServers<Filter<'a>>),
+
+    /// Request a challenge number from a game server.
+    GetChallenge(GetChallenge),
     /// Request an information from a game server.
     GetServerInfo(GetServerInfo),
     /// Request an information from a game server.
@@ -206,6 +277,9 @@ impl<'a> Packet<'a> {
     pub fn decode(src: &'a [u8]) -> Result<Option<Self>, Error> {
         if src.starts_with(QueryServers::HEADER) {
             QueryServers::decode(src).map(Self::QueryServers)
+        } else if src.starts_with(GetChallenge::HEADER) {
+            // NOTE: must be above GetPlayers
+            GetChallenge::decode(src).map(Self::GetChallenge)
         } else if src.starts_with(GetServerInfo::HEADER) {
             GetServerInfo::decode(src).map(Self::GetServerInfo)
         } else if src.starts_with(GetServerInfo2::HEADER) {
@@ -276,6 +350,14 @@ mod tests {
     }
 
     #[test]
+    fn get_challenge() {
+        let mut buf = [0; 32];
+        let p = GetChallenge::new();
+        let t = p.encode(&mut buf).unwrap();
+        assert_eq!(Packet::decode(t), Ok(Some(Packet::GetChallenge(p))));
+    }
+
+    #[test]
     fn get_server_info() {
         let p = GetServerInfo::new(49);
         let mut buf = [0; 512];
@@ -301,7 +383,7 @@ mod tests {
 
     #[test]
     fn get_players() {
-        let p = GetPlayers;
+        let p = GetPlayers::new(0x12345678).unwrap();
         let mut buf = [0; 32];
         let t = p.encode(&mut buf).unwrap();
         assert_eq!(Packet::decode(t), Ok(Some(Packet::GetPlayers(p))));

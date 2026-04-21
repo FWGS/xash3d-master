@@ -361,18 +361,18 @@ where
     }
 }
 
-/// Response to [GetServerInfo2](super::game::GetServerInfo2) request.
+/// Response to [GetChallenge](super::game::GetChallenge) or [GetServerInfo2](super::game::GetServerInfo2).
 #[derive(Clone, Debug, PartialEq)]
-pub struct GetServerInfo2ResponseChallenge {
+pub struct GetChallengeResponse {
     /// A challenge number.
     pub challenge: u32,
 }
 
-impl GetServerInfo2ResponseChallenge {
+impl GetChallengeResponse {
     /// Packet header.
     pub const HEADER: &'static [u8] = b"\xff\xff\xff\xffA";
 
-    /// Creates a new `GetServerInfo2ResponseChallenge`.
+    /// Creates a new `GetChallengeResponse`.
     pub fn new(challenge: u32) -> Self {
         Self { challenge }
     }
@@ -734,10 +734,11 @@ pub enum Packet<'a> {
     ServerAdd(ServerAdd<Str<&'a [u8]>>),
     /// Remove the game server from a list.
     ServerRemove,
+
+    /// A challenge response.
+    GetChallengeResponse(GetChallengeResponse),
     /// Game server information to game clients.
     GetServerInfoResponse(GetServerInfoResponse<Str<&'a [u8]>>),
-    /// Game server information challenge.
-    GetServerInfo2ResponseChallenge(GetServerInfo2ResponseChallenge),
     /// Game server information.
     GetServerInfo2Response(GetServerInfo2Response<'a>),
     /// Player list to game clients.
@@ -755,8 +756,8 @@ impl<'a> Packet<'a> {
             ServerRemove::decode(src).map(|_| Self::ServerRemove)
         } else if src.starts_with(GetServerInfoResponse::HEADER) {
             GetServerInfoResponse::decode(src).map(Self::GetServerInfoResponse)
-        } else if src.starts_with(GetServerInfo2ResponseChallenge::HEADER) {
-            GetServerInfo2ResponseChallenge::decode(src).map(Self::GetServerInfo2ResponseChallenge)
+        } else if src.starts_with(GetChallengeResponse::HEADER) {
+            GetChallengeResponse::decode(src).map(Self::GetChallengeResponse)
         } else if src.starts_with(GetServerInfo2Response::HEADER) {
             GetServerInfo2Response::decode(src).map(Self::GetServerInfo2Response)
         } else if src.starts_with(GetPlayersResponse::HEADER) {
@@ -824,6 +825,16 @@ mod tests {
     }
 
     #[test]
+    fn get_challenge_response() {
+        let mut buf = [0; 64];
+        let p = GetChallengeResponse::new(0xdeadbeef);
+        assert_eq!(
+            Packet::decode(p.encode(&mut buf).unwrap()),
+            Ok(Some(Packet::GetChallengeResponse(p)))
+        );
+    }
+
+    #[test]
     fn get_server_info_response() {
         let p = GetServerInfoResponse {
             protocol: 49,
@@ -843,17 +854,6 @@ mod tests {
         assert_eq!(
             Packet::decode(t),
             Ok(Some(Packet::GetServerInfoResponse(p)))
-        );
-    }
-
-    #[test]
-    fn get_server_info2_response_challenge() {
-        let p = GetServerInfo2ResponseChallenge::new(0xdeadbeef);
-        let mut buf = [0; 64];
-        let t = p.encode(&mut buf).unwrap();
-        assert_eq!(
-            Packet::decode(t),
-            Ok(Some(Packet::GetServerInfo2ResponseChallenge(p)))
         );
     }
 

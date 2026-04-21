@@ -4,9 +4,16 @@ use std::{
     time::{Duration, Instant},
 };
 
-use xash3d_protocol as proto;
+use xash3d_protocol::{
+    self as proto,
+    server::{GetChallengeResponse, GetPlayersResponse, GetServerInfoResponse},
+    Error as ProtocolError,
+};
 
-use crate::SERVER_TIMEOUT;
+use crate::{
+    event::{Event, InternalEvent, ServerInfo, ServerPlayers},
+    SERVER_TIMEOUT,
+};
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 #[repr(u8)]
@@ -26,6 +33,8 @@ pub struct Connection {
     state: ConnectionState,
     request_time: Instant,
     response_time: Instant,
+    challenge: u32,
+    wait_players: bool,
     data: Vec<u8>,
 }
 
@@ -39,6 +48,8 @@ impl Connection {
             state: ConnectionState::ProtocolDetection,
             request_time: now,
             response_time: now,
+            wait_players: false,
+            challenge: u32::MAX,
             data: Vec::new(),
         }
     }
@@ -59,11 +70,11 @@ impl Connection {
         now.duration_since(self.response_time) < SERVER_TIMEOUT
     }
 
-    pub fn update_response_time(&mut self) {
+    fn update_response_time(&mut self) {
         self.response_time = Instant::now();
     }
 
-    pub fn update_raw_info(&mut self, buf: &[u8]) -> bool {
+    fn update_raw_info(&mut self, buf: &[u8]) -> bool {
         self.state = ConnectionState::Idle;
         if self.data == buf {
             return false;
@@ -81,6 +92,11 @@ impl Connection {
         self.response_time.duration_since(self.request_time)
     }
 
+    fn send(&self, sock: &UdpSocket, data: &[u8]) -> io::Result<()> {
+        sock.send_to(data, self.address)?;
+        Ok(())
+    }
+
     fn query_info(&mut self, sock: &UdpSocket, buf: &mut [u8]) -> io::Result<()> {
         // TODO: send TSource Engine Query
         let packet = proto::game::GetServerInfo {
@@ -91,15 +107,20 @@ impl Connection {
         if self.state == ConnectionState::Idle {
             self.state = ConnectionState::WaitingInfo;
         }
-        sock.send_to(packet, self.address)?;
-        Ok(())
+        self.send(sock, packet)
     }
 
     fn query_players(&mut self, sock: &UdpSocket, buf: &mut [u8]) -> io::Result<()> {
-        let req = proto::game::GetPlayers::new(0).unwrap();
-        let data = req.encode(buf).unwrap();
-        sock.send_to(data, self.address)?;
-        Ok(())
+        use proto::game::{GetChallenge, GetPlayers};
+
+        self.wait_players = true;
+
+        if let Some(req) = GetPlayers::new(self.challenge) {
+            return self.send(sock, req.encode(buf).unwrap());
+        }
+
+        let data = GetChallenge::new().encode(buf).unwrap();
+        self.send(sock, data)
     }
 
     pub fn query(&mut self, sock: &UdpSocket, buf: &mut [u8]) -> io::Result<()> {
@@ -108,5 +129,70 @@ impl Connection {
             self.query_players(sock, buf)?;
         }
         Ok(())
+    }
+
+    pub(crate) fn handle_packet<'a>(
+        &mut self,
+        sock: &UdpSocket,
+        data: &'a [u8],
+    ) -> io::Result<Option<InternalEvent<'a>>> {
+        if let Ok(response) = GetChallengeResponse::decode(data) {
+            self.challenge = response.challenge;
+
+            // repeat request
+            if self.wait_players {
+                let mut buffer = [0; 32];
+                self.query_players(sock, &mut buffer)?;
+            }
+
+            return Ok(None);
+        }
+
+        if let Ok(response) = GetPlayersResponse::decode(data) {
+            if !self.wait_players {
+                // unexpected response
+                return Ok(None);
+            }
+
+            self.wait_players = false;
+            let players = ServerPlayers::new(response);
+            return Ok(Some(Event::ServerPlayers(self.address, players).into()));
+        }
+
+        match GetServerInfoResponse::decode(data) {
+            Ok(response) => {
+                self.update_response_time();
+                let info = ServerInfo {
+                    server: self.address,
+                    ping: self.ping(),
+                    new: self.state() == ConnectionState::ProtocolDetection,
+                    changed: self.update_raw_info(data),
+                    response,
+                };
+                Ok(Some(Event::ServerInfo(info).into()))
+            }
+            Err(ProtocolError::InvalidProtocolVersion) => {
+                if self.state() == ConnectionState::ProtocolDetection
+                    && self.protocol() == xash3d_protocol::PROTOCOL_VERSION
+                {
+                    // try legacy protocol version
+                    let mut buffer = [0; 512];
+                    self.set_legacy_protocol();
+                    self.query(sock, &mut buffer)?;
+                    Ok(None)
+                } else {
+                    Ok(Some(InternalEvent::ServerInvalidProtocol(
+                        self.address,
+                        self.request_time().elapsed(),
+                    )))
+                }
+            }
+            Err(error) => Ok(Some(InternalEvent::ServerInvalidPacket(
+                self.address,
+                self.request_time().elapsed(),
+                data,
+                error,
+            ))),
+        }
     }
 }

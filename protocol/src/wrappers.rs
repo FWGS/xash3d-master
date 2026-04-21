@@ -25,6 +25,18 @@ impl<T> From<T> for Str<T> {
     }
 }
 
+impl<'a> From<&'a str> for Str<&'a [u8]> {
+    fn from(value: &'a str) -> Self {
+        Self(value.as_bytes())
+    }
+}
+
+impl<T: AsRef<[u8]>> AsRef<[u8]> for Str<T> {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_ref()
+    }
+}
+
 impl PutKeyValue for Str<&[u8]> {
     fn put_key_value<'a, 'b>(
         &self,

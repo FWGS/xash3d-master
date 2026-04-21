@@ -106,6 +106,62 @@ impl GetServerInfo {
     }
 }
 
+/// Request an information from a game server.
+///
+/// The game server may send [GetServerInfo2ResponseChallenge](super::server::GetServerInfo2ResponseChallenge)
+/// instead of [GetServerInfo2Response](super::server::GetServerInfo2Response). Repeat
+/// this query with a challenge number taken from the challenge response.
+///
+/// See [GetServerInfo2Response](super::server::GetServerInfo2Response) and
+/// [GetServerInfo2ResponseChallenge](super::server::GetServerInfo2ResponseChallenge).
+#[derive(Clone, Debug, PartialEq)]
+pub struct GetServerInfo2 {
+    /// A challenge number from
+    /// [GetServerInfo2ResponseChallenge](super::server::GetServerInfo2ResponseChallenge) packet.
+    pub challenge: Option<u32>,
+}
+
+impl GetServerInfo2 {
+    /// Packet header.
+    pub const HEADER: &'static [u8] = b"\xff\xff\xff\xffTSource Engine Query\0";
+
+    /// Creates a new `GetServerInfo2`.
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
+        Self { challenge: None }
+    }
+
+    /// Creates a new `GetServerInfo2` with challenge number.
+    pub fn with_challenge(challenge: u32) -> Self {
+        Self {
+            challenge: Some(challenge),
+        }
+    }
+
+    /// Decode packet from `src`.
+    pub fn decode(src: &[u8]) -> Result<Self, Error> {
+        let mut cur = Cursor::new(src);
+        cur.expect(Self::HEADER)?;
+        let mut challenge = None;
+        if cur.has_remaining() {
+            challenge = Some(cur.get_u32_le()?);
+        }
+        cur.expect_empty()?;
+        Ok(Self { challenge })
+    }
+
+    /// Encode packet to `buf`.
+    pub fn encode<'a>(&self, buf: &'a mut [u8]) -> Result<&'a [u8], Error> {
+        let mut cur = CursorMut::new(buf);
+        cur.put_bytes(Self::HEADER)?;
+        if let Some(challenge) = self.challenge {
+            cur.put_u32_le(challenge)?;
+        }
+        let n = cur.pos();
+        Ok(&buf[..n])
+    }
+}
+
 /// Request player list from a game server.
 ///
 /// See [GetPlayersResponse](super::server::GetPlayersResponse).
@@ -139,6 +195,8 @@ pub enum Packet<'a> {
     QueryServers(QueryServers<Filter<'a>>),
     /// Request an information from a game server.
     GetServerInfo(GetServerInfo),
+    /// Request an information from a game server.
+    GetServerInfo2(GetServerInfo2),
     /// Request player list from a game server.
     GetPlayers(GetPlayers),
 }
@@ -150,6 +208,8 @@ impl<'a> Packet<'a> {
             QueryServers::decode(src).map(Self::QueryServers)
         } else if src.starts_with(GetServerInfo::HEADER) {
             GetServerInfo::decode(src).map(Self::GetServerInfo)
+        } else if src.starts_with(GetServerInfo2::HEADER) {
+            GetServerInfo2::decode(src).map(Self::GetServerInfo2)
         } else if src.starts_with(GetPlayers::HEADER) {
             GetPlayers::decode(src).map(Self::GetPlayers)
         } else {
@@ -221,6 +281,22 @@ mod tests {
         let mut buf = [0; 512];
         let t = p.encode(&mut buf).unwrap();
         assert_eq!(Packet::decode(t), Ok(Some(Packet::GetServerInfo(p))));
+    }
+
+    #[test]
+    fn get_server_info2() {
+        let p = GetServerInfo2::new();
+        let mut buf = [0; 64];
+        let t = p.encode(&mut buf).unwrap();
+        assert_eq!(Packet::decode(t), Ok(Some(Packet::GetServerInfo2(p))));
+    }
+
+    #[test]
+    fn get_server_info2_challenge() {
+        let p = GetServerInfo2::with_challenge(0xdeadbeef);
+        let mut buf = [0; 64];
+        let t = p.encode(&mut buf).unwrap();
+        assert_eq!(Packet::decode(t), Ok(Some(Packet::GetServerInfo2(p))));
     }
 
     #[test]

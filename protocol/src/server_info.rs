@@ -79,15 +79,36 @@ pub enum ServerType {
     Unknown,
 }
 
+impl From<u8> for ServerType {
+    fn from(value: u8) -> Self {
+        match value {
+            b'd' => Self::Dedicated,
+            b'l' => Self::Local,
+            b'p' => Self::Proxy,
+            _ => Self::Unknown,
+        }
+    }
+}
+
+impl From<ServerType> for u8 {
+    fn from(value: ServerType) -> Self {
+        match value {
+            ServerType::Dedicated => b'd',
+            ServerType::Local => b'l',
+            ServerType::Proxy => b'p',
+            ServerType::Unknown => 0,
+        }
+    }
+}
+
 impl TryFrom<&[u8]> for ServerType {
     type Error = CursorError;
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        match value {
-            b"d" => Ok(Self::Dedicated),
-            b"l" => Ok(Self::Local),
-            b"p" => Ok(Self::Proxy),
-            _ => Ok(Self::Unknown),
+        if let &[c] = value {
+            Ok(Self::from(c))
+        } else {
+            Ok(Self::Unknown)
         }
     }
 }
@@ -139,15 +160,36 @@ pub enum Os {
     Mac,
 }
 
+impl From<u8> for Os {
+    fn from(value: u8) -> Self {
+        match value {
+            b'l' => Os::Linux,
+            b'w' => Os::Windows,
+            b'm' => Os::Mac,
+            _ => Os::Unknown,
+        }
+    }
+}
+
+impl From<Os> for u8 {
+    fn from(value: Os) -> Self {
+        match value {
+            Os::Unknown => 0,
+            Os::Linux => b'l',
+            Os::Windows => b'w',
+            Os::Mac => b'm',
+        }
+    }
+}
+
 impl TryFrom<&[u8]> for Os {
     type Error = CursorError;
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        match value {
-            b"l" => Ok(Os::Linux),
-            b"w" => Ok(Os::Windows),
-            b"m" => Ok(Os::Mac),
-            _ => Ok(Os::Unknown),
+        if let &[c] = value {
+            Ok(Self::from(c))
+        } else {
+            Ok(Self::Unknown)
         }
     }
 }

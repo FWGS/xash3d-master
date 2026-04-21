@@ -235,6 +235,10 @@ impl<'a> CursorMut<'a> {
         Ok(self)
     }
 
+    pub fn put_as_cstr<T: fmt::Display>(&mut self, value: T) -> Result<&mut Self> {
+        self.put_as_str(value)?.put_u8(0)
+    }
+
     pub fn put_key_value<T: PutKeyValue>(&mut self, value: T) -> Result<&mut Self> {
         value.put_key_value(self)
     }

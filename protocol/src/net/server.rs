@@ -10,6 +10,8 @@ use crate::{
     {CursorError, Error},
 };
 
+use bitflags::bitflags;
+
 #[deprecated(since = "0.2.1", note = "use server_info::Region instead")]
 pub use crate::server_info::Region;
 
@@ -359,6 +361,259 @@ where
     }
 }
 
+/// Response to [GetServerInfo2](super::game::GetServerInfo2) request.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GetServerInfo2ResponseChallenge {
+    /// A challenge number.
+    pub challenge: u32,
+}
+
+impl GetServerInfo2ResponseChallenge {
+    /// Packet header.
+    pub const HEADER: &'static [u8] = b"\xff\xff\xff\xffA";
+
+    /// Creates a new `GetServerInfo2ResponseChallenge`.
+    pub fn new(challenge: u32) -> Self {
+        Self { challenge }
+    }
+
+    /// Decode packet from `src`.
+    pub fn decode(src: &[u8]) -> Result<Self, Error> {
+        let mut cur = Cursor::new(src);
+        cur.expect(Self::HEADER)?;
+        let challenge = cur.get_u32_le()?;
+        cur.expect_empty()?;
+        Ok(Self { challenge })
+    }
+
+    /// Encode packet to `buf`.
+    pub fn encode<'b>(&self, buf: &'b mut [u8]) -> Result<&'b [u8], Error> {
+        let n = CursorMut::new(buf)
+            .put_bytes(Self::HEADER)?
+            .put_u32_le(self.challenge)?
+            .pos();
+        Ok(&buf[..n])
+    }
+}
+
+bitflags! {
+    #[derive(Copy, Clone)]
+    struct ServerInfoExtra: u8 {
+        const APP_ID        = 0x01;
+        const STEAM_ID      = 0x10;
+        const KEYWORDS      = 0x20;
+        const SOURCE_TV     = 0x40;
+        const PORT          = 0x80;
+    }
+}
+
+/// SourceTV information.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SourceTv<'a> {
+    /// Spectator port number.
+    pub port: u16,
+    /// Name of the spectator server.
+    pub name: Str<&'a [u8]>,
+}
+
+/// Response to [GetServerInfo2](super::game::GetServerInfo2) request.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GetServerInfo2Response<'a> {
+    /// Protocol version used by the server.
+    pub protocol: u8,
+    /// Name of the server.
+    pub host: Str<&'a [u8]>,
+    /// Map the server has currently loaded.
+    pub map: Str<&'a [u8]>,
+    /// Name of the directory containing the game files.
+    pub gamedir: Str<&'a [u8]>,
+    /// Full name of the game.
+    pub game: Str<&'a [u8]>,
+    /// Steam AppID of the game.
+    pub app_id: u64,
+    /// Current number of players.
+    pub players: u8,
+    /// Maximum number of players.
+    pub max_players: u8,
+    /// Current number of bots.
+    pub bots: u8,
+    /// Server type.
+    pub ty: ServerType,
+    /// Server running on OS.
+    pub os: Os,
+    /// Server requires a password.
+    pub password: bool,
+    /// Server is protected by an anti-cheat.
+    pub secure: bool,
+    /// Server version.
+    pub version: Str<&'a [u8]>,
+    /// The server's game port number.
+    pub port: Option<u16>,
+    /// Server's SteamID.
+    pub steam_id: Option<u64>,
+    /// SourceTV port and name.
+    pub source_tv: Option<SourceTv<'a>>,
+    /// Tags that describe the game according to the server.
+    pub keywords: Option<Str<&'a [u8]>>,
+}
+
+impl<'a> GetServerInfo2Response<'a> {
+    /// Packet header.
+    pub const HEADER: &'static [u8] = b"\xff\xff\xff\xffI";
+
+    /// Decode packet from `src`.
+    pub fn decode(src: &'a [u8]) -> Result<Self, Error> {
+        let mut cur = Cursor::new(src);
+        cur.expect(Self::HEADER)?;
+        let protocol = cur.get_u8()?;
+        let host = cur.get_cstr()?;
+        let map = cur.get_cstr()?;
+        let gamedir = cur.get_cstr()?;
+        let game = cur.get_cstr()?;
+        let mut app_id = cur.get_u16_le()? as u64;
+        let clients = cur.get_u8()?;
+        let max_players = cur.get_u8()?;
+        let bots = cur.get_u8()?;
+        // The number of clients is a sum of players and bots.
+        let players = clients.checked_sub(bots).ok_or(Error::InvalidPacket)?;
+        let ty = cur.get_u8()?.into();
+        let os = cur.get_u8()?.into();
+        let password = cur.get_u8()? != 0;
+        let secure = cur.get_u8()? != 0;
+
+        // TODO: server info extra for The Ship: Murder Party game
+        // if gamedir == Str(b"ship") {
+        //     let mode = cur.get_u8()?;
+        //     let witnesses = cur.get_u8()?;
+        //     let duration = cur.get_u8()?;
+        // }
+
+        let version = cur.get_cstr()?;
+        let mut port = None;
+        let mut steam_id = None;
+        let mut source_tv = None;
+        let mut keywords = None;
+
+        if cur.has_remaining() {
+            let extra = ServerInfoExtra::from_bits_retain(cur.get_u8()?);
+
+            if extra.intersects(ServerInfoExtra::PORT) {
+                port = Some(cur.get_u16_le()?);
+            }
+
+            if extra.intersects(ServerInfoExtra::STEAM_ID) {
+                steam_id = Some(cur.get_u64_le()?);
+            }
+
+            if extra.intersects(ServerInfoExtra::SOURCE_TV) {
+                source_tv = Some(SourceTv {
+                    port: cur.get_u16_le()?,
+                    name: cur.get_cstr()?,
+                });
+            }
+
+            if extra.intersects(ServerInfoExtra::KEYWORDS) {
+                keywords = Some(cur.get_cstr()?);
+            }
+
+            if extra.intersects(ServerInfoExtra::APP_ID) {
+                app_id = cur.get_u64_le()?;
+            }
+        }
+
+        cur.expect_empty()?;
+
+        Ok(Self {
+            protocol,
+            host,
+            map,
+            gamedir,
+            game,
+            app_id,
+            players,
+            max_players,
+            bots,
+            ty,
+            os,
+            password,
+            secure,
+            version,
+            port,
+            steam_id,
+            source_tv,
+            keywords,
+        })
+    }
+
+    /// Encode packet to `buf`.
+    pub fn encode<'b>(&self, buf: &'b mut [u8]) -> Result<&'b [u8], Error> {
+        debug_assert!(self.players.checked_add(self.bots).is_some());
+
+        let mut cur = CursorMut::new(buf);
+        cur.put_bytes(Self::HEADER)?
+            .put_u8(self.protocol)?
+            .put_cstr(self.host)?
+            .put_cstr(self.map)?
+            .put_cstr(self.gamedir)?
+            .put_cstr(self.game)?
+            .put_u16_le(self.app_id as u16)?
+            // The number of clients is a sum of players and bots.
+            .put_u8(self.players + self.bots)?
+            .put_u8(self.max_players)?
+            .put_u8(self.bots)?
+            .put_u8(self.ty.into())?
+            .put_u8(self.os.into())?
+            .put_u8(self.password as u8)?
+            .put_u8(self.secure as u8)?;
+
+        // TODO: server info extra for The Ship: Murder Party game
+        // if self.gamedir == Str(b"ship") {
+        //     cur.put_u8(0)?; // mode
+        //     cur.put_u8(0)?; // witnesses
+        //     cur.put_u8(0)?; // duration
+        // }
+
+        let mut n = cur.put_cstr(self.version)?.pos();
+
+        let (mut head, mut tail) = cur.split(1)?;
+        let mut extra = ServerInfoExtra::empty();
+
+        if let Some(port) = self.port {
+            extra.insert(ServerInfoExtra::PORT);
+            tail.put_u16_le(port)?;
+        }
+
+        if let Some(steam_id) = self.steam_id {
+            extra.insert(ServerInfoExtra::STEAM_ID);
+            tail.put_u64_le(steam_id)?;
+        }
+
+        if let Some(source_tv) = &self.source_tv {
+            extra.insert(ServerInfoExtra::SOURCE_TV);
+            tail.put_u16_le(source_tv.port)?;
+            tail.put_cstr(source_tv.name)?;
+        }
+
+        if let Some(keywords) = self.keywords {
+            extra.insert(ServerInfoExtra::KEYWORDS);
+            tail.put_cstr(keywords)?;
+        }
+
+        if u16::try_from(self.app_id).is_err() {
+            extra.insert(ServerInfoExtra::APP_ID);
+            tail.put_u64_le(self.app_id)?;
+        }
+
+        if !extra.is_empty() {
+            head.put_u8(extra.bits())?;
+            head.expect_full().expect("must be full");
+            n = tail.pos();
+        }
+
+        Ok(&buf[..n])
+    }
+}
+
 /// A player info.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct PlayerInfo<'a> {
@@ -481,6 +736,10 @@ pub enum Packet<'a> {
     ServerRemove,
     /// Game server information to game clients.
     GetServerInfoResponse(GetServerInfoResponse<Str<&'a [u8]>>),
+    /// Game server information challenge.
+    GetServerInfo2ResponseChallenge(GetServerInfo2ResponseChallenge),
+    /// Game server information.
+    GetServerInfo2Response(GetServerInfo2Response<'a>),
     /// Player list to game clients.
     GetPlayersResponse(GetPlayersResponse<&'a [u8]>),
 }
@@ -496,6 +755,10 @@ impl<'a> Packet<'a> {
             ServerRemove::decode(src).map(|_| Self::ServerRemove)
         } else if src.starts_with(GetServerInfoResponse::HEADER) {
             GetServerInfoResponse::decode(src).map(Self::GetServerInfoResponse)
+        } else if src.starts_with(GetServerInfo2ResponseChallenge::HEADER) {
+            GetServerInfo2ResponseChallenge::decode(src).map(Self::GetServerInfo2ResponseChallenge)
+        } else if src.starts_with(GetServerInfo2Response::HEADER) {
+            GetServerInfo2Response::decode(src).map(Self::GetServerInfo2Response)
         } else if src.starts_with(GetPlayersResponse::HEADER) {
             GetPlayersResponse::decode(src).map(Self::GetPlayersResponse)
         } else {
@@ -580,6 +843,111 @@ mod tests {
         assert_eq!(
             Packet::decode(t),
             Ok(Some(Packet::GetServerInfoResponse(p)))
+        );
+    }
+
+    #[test]
+    fn get_server_info2_response_challenge() {
+        let p = GetServerInfo2ResponseChallenge::new(0xdeadbeef);
+        let mut buf = [0; 64];
+        let t = p.encode(&mut buf).unwrap();
+        assert_eq!(
+            Packet::decode(t),
+            Ok(Some(Packet::GetServerInfo2ResponseChallenge(p)))
+        );
+    }
+
+    #[test]
+    fn get_server_info2_response() {
+        let mut buf = [0; 512];
+
+        let base = GetServerInfo2Response {
+            protocol: 49,
+            host: "Test".into(),
+            map: "crossfire".into(),
+            gamedir: "valve".into(),
+            game: "Test server".into(),
+            app_id: 1200,
+            players: 4,
+            max_players: 32,
+            bots: 2,
+            ty: ServerType::Dedicated,
+            os: Os::Linux,
+            password: true,
+            secure: false,
+            version: "0.21".into(),
+            port: None,
+            steam_id: None,
+            source_tv: None,
+            keywords: None,
+        };
+        assert_eq!(
+            Packet::decode(base.encode(&mut buf).unwrap()),
+            Ok(Some(Packet::GetServerInfo2Response(base.clone())))
+        );
+
+        let extra_port = GetServerInfo2Response {
+            port: Some(27015),
+            ..base.clone()
+        };
+        assert_eq!(
+            Packet::decode(extra_port.encode(&mut buf).unwrap()),
+            Ok(Some(Packet::GetServerInfo2Response(extra_port.clone())))
+        );
+
+        let extra_steam_id = GetServerInfo2Response {
+            steam_id: Some(12345678),
+            ..base.clone()
+        };
+        assert_eq!(
+            Packet::decode(extra_steam_id.encode(&mut buf).unwrap()),
+            Ok(Some(Packet::GetServerInfo2Response(extra_steam_id.clone())))
+        );
+
+        let extra_tv = GetServerInfo2Response {
+            source_tv: Some(SourceTv {
+                port: 27020,
+                name: "Test Source TV".into(),
+            }),
+            ..base.clone()
+        };
+        assert_eq!(
+            Packet::decode(extra_tv.encode(&mut buf).unwrap()),
+            Ok(Some(Packet::GetServerInfo2Response(extra_tv.clone())))
+        );
+
+        let extra_keywords = GetServerInfo2Response {
+            keywords: Some("some keywords".into()),
+            ..base.clone()
+        };
+        assert_eq!(
+            Packet::decode(extra_keywords.encode(&mut buf).unwrap()),
+            Ok(Some(Packet::GetServerInfo2Response(extra_keywords.clone())))
+        );
+
+        let extra_app_id = GetServerInfo2Response {
+            app_id: 12345678,
+            ..base.clone()
+        };
+        assert_eq!(
+            Packet::decode(extra_app_id.encode(&mut buf).unwrap()),
+            Ok(Some(Packet::GetServerInfo2Response(extra_app_id.clone())))
+        );
+
+        let extra_all = GetServerInfo2Response {
+            app_id: 12345678,
+            port: Some(27016),
+            steam_id: Some(87654321),
+            source_tv: Some(SourceTv {
+                port: 12345,
+                name: "Test TV".into(),
+            }),
+            keywords: Some("keywords...".into()),
+            ..base.clone()
+        };
+        assert_eq!(
+            Packet::decode(extra_all.encode(&mut buf).unwrap()),
+            Ok(Some(Packet::GetServerInfo2Response(extra_all.clone())))
         );
     }
 

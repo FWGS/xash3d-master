@@ -9,13 +9,12 @@ use std::{
 use xash3d_protocol::{
     game::QueryServers,
     master::QueryServersResponse,
-    server::{GetPlayersResponse, GetServerInfoResponse, Region},
-    Error as ProtocolError,
+    server::{GetServerInfoResponse, Region},
 };
 
 use crate::{
     connection::{Connection, ConnectionState},
-    event::{Event, InternalEvent, ServerInfo, ServerList, ServerPlayers},
+    event::{Event, InternalEvent, ServerInfo, ServerList},
     filter::Filter,
     observer_old::Handler,
 };
@@ -313,49 +312,15 @@ impl ObserverNew {
         from: &SocketAddr,
         data: &'a [u8],
     ) -> io::Result<Option<InternalEvent<'a>>> {
-        let Some(con) = self.connections.get_mut(from) else {
-            // ignore packets from unknown servers
-            return Ok(None);
-        };
-
-        if let Ok(response) = GetPlayersResponse::decode(data) {
-            let players = ServerPlayers::new(response);
-            return Ok(Some(Event::ServerPlayers(*from, players).into()));
-        }
-
-        match GetServerInfoResponse::decode(data) {
-            Ok(response) => {
-                con.update_response_time();
-                let info = ServerInfo {
-                    server: *from,
-                    ping: con.ping(),
-                    new: con.state() == ConnectionState::ProtocolDetection,
-                    changed: con.update_raw_info(data),
-                    response,
-                };
-                Ok(Some(Event::ServerInfo(info).into()))
-            }
-            Err(ProtocolError::InvalidProtocolVersion) => {
-                if con.state() == ConnectionState::ProtocolDetection
-                    && con.protocol() == xash3d_protocol::PROTOCOL_VERSION
-                {
-                    // try legacy protocol version
-                    let mut buffer = [0; 512];
-                    con.set_legacy_protocol();
-                    con.query(&self.sock, &mut buffer)?;
-                    Ok(None)
-                } else {
-                    let time = con.request_time().elapsed();
+        match self.connections.get_mut(from) {
+            Some(con) => {
+                let result = con.handle_packet(&self.sock, data);
+                if let Ok(Some(InternalEvent::ServerInvalidProtocol(..))) = &result {
                     self.connections.remove(from);
-                    Ok(Some(InternalEvent::ServerInvalidProtocol(*from, time)))
                 }
+                result
             }
-            Err(error) => {
-                let time = con.request_time().elapsed();
-                Ok(Some(InternalEvent::ServerInvalidPacket(
-                    *from, time, data, error,
-                )))
-            }
+            None => Ok(None),
         }
     }
 

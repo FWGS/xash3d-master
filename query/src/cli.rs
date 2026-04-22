@@ -12,6 +12,7 @@ use std::{
 use std::io;
 
 use getopts::Options;
+use log::LevelFilter;
 use xash3d_protocol::{self as proto, filter::Version};
 
 const BIN_NAME: &str = env!("CARGO_BIN_NAME");
@@ -130,6 +131,7 @@ pub struct Cli {
     pub compact: bool,
     pub json: bool,
     pub debug: bool,
+    pub log: LevelFilter,
     force_color: bool,
     pub filter: String,
 }
@@ -150,6 +152,7 @@ impl Default for Cli {
             compact: false,
             json: false,
             debug: false,
+            log: LevelFilter::Off,
             force_color: false,
             filter: String::new(),
         }
@@ -229,6 +232,7 @@ pub fn parse() -> Cli {
     opts.optflag("P", "no-players", "do not print players list");
     opts.optflag("j", "json", "output JSON");
     opts.optflag("d", "debug", "output debug");
+    opts.optopt("l", "log", "enable logs [default: off]", "LEVEL");
     opts.optflag("F", "force-color", "force colored output");
     opts.optflag("k", "key", "send challenge key to master");
 
@@ -311,6 +315,21 @@ pub fn parse() -> Cli {
         if error {
             process::exit(1);
         }
+    }
+
+    if let Some(s) = matches.opt_str("log") {
+        cli.log = match s.as_str() {
+            "o" | "off" => LevelFilter::Off,
+            "t" | "trace" => LevelFilter::Trace,
+            "d" | "debug" => LevelFilter::Debug,
+            "i" | "info" => LevelFilter::Info,
+            "w" | "warn" => LevelFilter::Warn,
+            "e" | "error" => LevelFilter::Error,
+            _ => {
+                eprintln!("error: invalid argument {s:?} for --log option");
+                process::exit(1);
+            }
+        };
     }
 
     cli.filter = filter.opt_get(&matches);

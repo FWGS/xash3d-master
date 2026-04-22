@@ -3,6 +3,7 @@
 
 mod cli;
 mod color;
+mod logger;
 mod server_info;
 mod server_result;
 mod utils;
@@ -59,6 +60,8 @@ fn main() {
         // suppress broken pipe error
         libc::signal(libc::SIGPIPE, libc::SIG_DFL);
     }
+
+    logger::init(&cli);
 
     if let Err(e) = execute(cli) {
         eprintln!("error: {e}");

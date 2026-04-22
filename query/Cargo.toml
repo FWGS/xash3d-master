@@ -17,6 +17,7 @@ color = ["crossterm"]
 
 [dependencies]
 libc = "0.2.148"
+log.workspace = true
 thiserror.workspace = true
 getopts.workspace = true
 fastrand.workspace = true

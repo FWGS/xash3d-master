@@ -2,6 +2,7 @@
 extern crate log;
 
 mod connection;
+mod net;
 mod observer_new;
 mod observer_old;
 

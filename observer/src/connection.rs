@@ -1,6 +1,6 @@
 use std::{
     io,
-    net::{SocketAddr, UdpSocket},
+    net::SocketAddr,
     time::{Duration, Instant},
 };
 
@@ -12,6 +12,7 @@ use xash3d_protocol::{
 
 use crate::{
     event::{Event, InternalEvent, ServerInfo, ServerPlayers},
+    net::Socket,
     SERVER_TIMEOUT,
 };
 
@@ -92,12 +93,12 @@ impl Connection {
         self.response_time.duration_since(self.request_time)
     }
 
-    fn send(&self, sock: &UdpSocket, data: &[u8]) -> io::Result<()> {
+    fn send(&self, sock: &Socket, data: &[u8]) -> io::Result<()> {
         sock.send_to(data, self.address)?;
         Ok(())
     }
 
-    fn query_info(&mut self, sock: &UdpSocket, buf: &mut [u8]) -> io::Result<()> {
+    fn query_info(&mut self, sock: &Socket, buf: &mut [u8]) -> io::Result<()> {
         // TODO: send TSource Engine Query
         let packet = proto::game::GetServerInfo {
             protocol: self.protocol,
@@ -110,7 +111,7 @@ impl Connection {
         self.send(sock, packet)
     }
 
-    fn query_players(&mut self, sock: &UdpSocket, buf: &mut [u8]) -> io::Result<()> {
+    fn query_players(&mut self, sock: &Socket, buf: &mut [u8]) -> io::Result<()> {
         use proto::game::{GetChallenge, GetPlayers};
 
         self.wait_players = true;
@@ -123,7 +124,7 @@ impl Connection {
         self.send(sock, data)
     }
 
-    pub fn query(&mut self, sock: &UdpSocket, buf: &mut [u8]) -> io::Result<()> {
+    pub fn query(&mut self, sock: &Socket, buf: &mut [u8]) -> io::Result<()> {
         self.query_info(sock, buf)?;
         if self.players {
             self.query_players(sock, buf)?;
@@ -133,7 +134,7 @@ impl Connection {
 
     pub(crate) fn handle_packet<'a>(
         &mut self,
-        sock: &UdpSocket,
+        sock: &Socket,
         data: &'a [u8],
     ) -> io::Result<Option<InternalEvent<'a>>> {
         if let Ok(response) = GetChallengeResponse::decode(data) {

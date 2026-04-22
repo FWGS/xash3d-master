@@ -2,7 +2,7 @@ use std::{
     cmp,
     collections::{hash_map::Entry, HashMap},
     fmt, io,
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket},
+    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     time::{Duration, Instant},
 };
 
@@ -16,6 +16,7 @@ use crate::{
     connection::{Connection, ConnectionState},
     event::{Event, InternalEvent, ServerInfo, ServerList},
     filter::Filter,
+    net::Socket,
     observer_old::Handler,
 };
 
@@ -143,7 +144,7 @@ enum Pending {
 }
 
 pub struct ObserverNew {
-    pub(crate) sock: UdpSocket,
+    pub(crate) sock: Socket,
     filter: String,
     masters: Vec<Master>,
     query_servers_task: Task,
@@ -156,7 +157,7 @@ pub struct ObserverNew {
 
 impl ObserverNew {
     pub fn bind(addr: SocketAddr) -> io::Result<Self> {
-        let sock = UdpSocket::bind(addr)?;
+        let sock = Socket::bind(addr)?;
         let connections = HashMap::new();
         let now = Instant::now();
 
@@ -229,6 +230,12 @@ impl ObserverNew {
         for master in self.masters.iter_mut() {
             if handler.query_servers_from_master(master.addr) {
                 let packet = master.encode_query_servers_packet(&self.filter, buf);
+
+                // Do not send queries twice.
+                if self.pending.contains(&Pending::Master(master.addr)) {
+                    continue;
+                }
+
                 self.sock.send_to(packet, master.addr)?;
             }
         }

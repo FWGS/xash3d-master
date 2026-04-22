@@ -503,6 +503,7 @@ dependencies = [
  "fastrand",
  "getopts",
  "libc",
+ "log",
  "serde",
  "serde_json",
  "thiserror",

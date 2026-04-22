@@ -7,6 +7,9 @@ use core::{fmt, ops::Deref};
 
 use crate::cursor::{CursorError, CursorMut, PutKeyValue};
 
+/// A non-utf8 string slice.
+pub type StrSlice<'a> = Str<&'a [u8]>;
+
 /// Wrapper for slice of bytes with printing the bytes as a string.
 ///
 /// # Examples

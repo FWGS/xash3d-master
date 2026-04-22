@@ -6,8 +6,8 @@
 use crate::{
     cursor::{Cursor, CursorMut, GetKeyValue, PutKeyValue},
     filter::Version,
-    wrappers::Str,
-    {CursorError, Error},
+    wrappers::{Str, StrSlice},
+    CursorError, Error,
 };
 
 use bitflags::bitflags;
@@ -614,6 +614,157 @@ impl<'a> GetServerInfo2Response<'a> {
     }
 }
 
+/// Mod information.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ModInfo<'a> {
+    /// URL to mod website.
+    pub link: StrSlice<'a>,
+    /// URL to download the mod.
+    pub download_link: StrSlice<'a>,
+    /// Version of mod installed on server.
+    pub version: u32,
+    /// Space (in bytes) the mod takes up.
+    pub size: u32,
+    /// Multiplayer only.
+    pub multiplayer_only: bool,
+    /// Mod is using a custom DLL.
+    pub custom_dll: bool,
+}
+
+/// Response to [GetServerInfo2](super::game::GetServerInfo2) request from GoldSource servers.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GetServerInfo2ResponseOld<'a> {
+    /// IP address and port of the server.
+    pub address: StrSlice<'a>,
+    /// Name of the server.
+    pub host: StrSlice<'a>,
+    /// Map the server has currently loaded.
+    pub map: StrSlice<'a>,
+    /// Name of the folder containing the game files.
+    pub gamedir: StrSlice<'a>,
+    /// Full name of the game.
+    pub game: StrSlice<'a>,
+    /// Number of players on the server.
+    pub players: u8,
+    /// Maximum number of players the server reports it can hold.
+    pub max_players: u8,
+    /// Protocol version used by the server.
+    pub protocol: u8,
+    /// Server type.
+    pub ty: ServerType,
+    /// Server running on OS.
+    pub os: Os,
+    /// Server requires a password.
+    pub password: bool,
+    /// Mod information.
+    pub mod_info: Option<ModInfo<'a>>,
+    /// Server is protected by an anti-cheat.
+    pub secure: bool,
+    /// Current number of bots.
+    pub bots: u8,
+}
+
+impl<'a> GetServerInfo2ResponseOld<'a> {
+    /// Packet header.
+    pub const HEADER: &'static [u8] = b"\xff\xff\xff\xffm";
+
+    /// Decode packet from `src`.
+    pub fn decode(src: &'a [u8]) -> Result<Self, Error> {
+        let mut cur = Cursor::new(src);
+        cur.expect(Self::HEADER)?;
+        let address = cur.get_cstr()?;
+        let host = cur.get_cstr()?;
+        let map = cur.get_cstr()?;
+        let gamedir = cur.get_cstr()?;
+        let game = cur.get_cstr()?;
+        let players = cur.get_u8()?;
+        let max_players = cur.get_u8()?;
+        let protocol = cur.get_u8()?;
+        let ty = cur.get_u8()?.into();
+        let os = cur.get_u8()?.into();
+        let password = cur.get_u8()? != 0;
+        let mut mod_info = None;
+
+        if cur.get_u8()? != 0 {
+            let link = cur.get_cstr()?;
+            let download_link = cur.get_cstr()?;
+            // unknown byte, must be zero
+            cur.get_u8()?;
+            let version = cur.get_u32_le()?;
+            let size = cur.get_u32_le()?;
+            let multiplayer_only = cur.get_u8()? != 0;
+            let custom_dll = cur.get_u8()? != 0;
+
+            mod_info = Some(ModInfo {
+                link,
+                download_link,
+                version,
+                size,
+                multiplayer_only,
+                custom_dll,
+            });
+        }
+
+        let secure = cur.get_u8()? != 0;
+        let bots = cur.get_u8()?;
+        cur.expect_empty()?;
+
+        Ok(Self {
+            address,
+            host,
+            map,
+            gamedir,
+            game,
+            players,
+            max_players,
+            protocol,
+            ty,
+            os,
+            password,
+            mod_info,
+            secure,
+            bots,
+        })
+    }
+
+    /// Encode packet to `buf`.
+    pub fn encode<'b>(&self, buf: &'b mut [u8]) -> Result<&'b [u8], Error> {
+        let mut cur = CursorMut::new(buf);
+        cur.put_bytes(Self::HEADER)?
+            .put_cstr(self.address)?
+            .put_cstr(self.host)?
+            .put_cstr(self.map)?
+            .put_cstr(self.gamedir)?
+            .put_cstr(self.game)?
+            .put_u8(self.players)?
+            .put_u8(self.max_players)?
+            .put_u8(self.protocol)?
+            .put_u8(self.ty.into())?
+            .put_u8(self.os.into())?
+            .put_u8(self.password as u8)?;
+
+        if let Some(mod_info) = &self.mod_info {
+            cur.put_u8(1)?
+                .put_cstr(mod_info.link)?
+                .put_cstr(mod_info.download_link)?
+                // unknown byte, must be zero
+                .put_u8(0)?
+                .put_u32_le(mod_info.version)?
+                .put_u32_le(mod_info.size)?
+                .put_u8(mod_info.multiplayer_only as u8)?
+                .put_u8(mod_info.custom_dll as u8)?;
+        } else {
+            cur.put_u8(0)?;
+        }
+
+        cur.put_u8(self.secure as u8)?;
+        cur.put_u8(self.bots)?;
+        let n = cur.pos();
+
+        Ok(&buf[..n])
+    }
+}
+
 /// A player info.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct PlayerInfo<'a> {
@@ -741,6 +892,8 @@ pub enum Packet<'a> {
     GetServerInfoResponse(GetServerInfoResponse<Str<&'a [u8]>>),
     /// Game server information.
     GetServerInfo2Response(GetServerInfo2Response<'a>),
+    /// Game server information to game clients.
+    GetServerInfo2ResponseOld(GetServerInfo2ResponseOld<'a>),
     /// Player list to game clients.
     GetPlayersResponse(GetPlayersResponse<&'a [u8]>),
 }
@@ -760,6 +913,8 @@ impl<'a> Packet<'a> {
             GetChallengeResponse::decode(src).map(Self::GetChallengeResponse)
         } else if src.starts_with(GetServerInfo2Response::HEADER) {
             GetServerInfo2Response::decode(src).map(Self::GetServerInfo2Response)
+        } else if src.starts_with(GetServerInfo2ResponseOld::HEADER) {
+            GetServerInfo2ResponseOld::decode(src).map(Self::GetServerInfo2ResponseOld)
         } else if src.starts_with(GetPlayersResponse::HEADER) {
             GetPlayersResponse::decode(src).map(Self::GetPlayersResponse)
         } else {
@@ -948,6 +1103,48 @@ mod tests {
         assert_eq!(
             Packet::decode(extra_all.encode(&mut buf).unwrap()),
             Ok(Some(Packet::GetServerInfo2Response(extra_all.clone())))
+        );
+    }
+
+    #[test]
+    fn get_server_info2_response_old() {
+        let mut buf = [0; 512];
+
+        let base = GetServerInfo2ResponseOld {
+            address: "123.123.123.123:27015".into(),
+            host: "Test Server".into(),
+            map: "test map".into(),
+            gamedir: "valve".into(),
+            game: "Full server description".into(),
+            players: 3,
+            max_players: 32,
+            protocol: 48,
+            ty: ServerType::Dedicated,
+            os: Os::Windows,
+            password: false,
+            mod_info: None,
+            secure: true,
+            bots: 8,
+        };
+        assert_eq!(
+            Packet::decode(base.encode(&mut buf).unwrap()),
+            Ok(Some(Packet::GetServerInfo2ResponseOld(base.clone())))
+        );
+
+        let extra = GetServerInfo2ResponseOld {
+            mod_info: Some(ModInfo {
+                link: "http://localhost".into(),
+                download_link: "http://download.local/game.zip".into(),
+                version: 12345,
+                size: 87654,
+                multiplayer_only: false,
+                custom_dll: true,
+            }),
+            ..base
+        };
+        assert_eq!(
+            Packet::decode(extra.encode(&mut buf).unwrap()),
+            Ok(Some(Packet::GetServerInfo2ResponseOld(extra.clone())))
         );
     }
 

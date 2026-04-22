@@ -5,8 +5,11 @@ use std::{
 };
 
 use xash3d_protocol::{
-    self as proto,
-    server::{GetChallengeResponse, GetPlayersResponse, GetServerInfoResponse},
+    game::{GetChallenge, GetPlayers, GetServerInfo, GetServerInfo2},
+    server::{
+        GetChallengeResponse, GetPlayersResponse, GetServerInfo2Response,
+        GetServerInfo2ResponseOld, GetServerInfoResponse,
+    },
     Error as ProtocolError,
 };
 
@@ -34,7 +37,7 @@ pub struct Connection {
     state: ConnectionState,
     request_time: Instant,
     response_time: Instant,
-    challenge: u32,
+    challenge: Option<u32>,
     wait_players: bool,
     data: Vec<u8>,
 }
@@ -50,7 +53,7 @@ impl Connection {
             request_time: now,
             response_time: now,
             wait_players: false,
-            challenge: u32::MAX,
+            challenge: None,
             data: Vec::new(),
         }
     }
@@ -99,28 +102,40 @@ impl Connection {
     }
 
     fn query_info(&mut self, sock: &Socket, buf: &mut [u8]) -> io::Result<()> {
-        // TODO: send TSource Engine Query
-        let packet = proto::game::GetServerInfo {
-            protocol: self.protocol,
-        };
-        let packet = packet.encode(buf).unwrap();
         self.request_time = Instant::now();
+
         if self.state == ConnectionState::Idle {
             self.state = ConnectionState::WaitingInfo;
         }
-        self.send(sock, packet)
+
+        if true {
+            let req = GetServerInfo::new(self.protocol);
+            let data = req.encode(buf).unwrap();
+            self.send(sock, data)?;
+        }
+
+        // TODO: Xash3D engine has bug and will not respond to this query. Enable only for testing.
+        if log_enabled!(log::Level::Trace) {
+            let req = self
+                .challenge
+                .map(GetServerInfo2::with_challenge)
+                .unwrap_or_else(GetServerInfo2::new);
+            let data = req.encode(buf).unwrap();
+            self.send(sock, data)?;
+        }
+
+        Ok(())
     }
 
     fn query_players(&mut self, sock: &Socket, buf: &mut [u8]) -> io::Result<()> {
-        use proto::game::{GetChallenge, GetPlayers};
-
         self.wait_players = true;
 
-        if let Some(req) = GetPlayers::new(self.challenge) {
-            return self.send(sock, req.encode(buf).unwrap());
-        }
+        let data = if let Some(req) = self.challenge.and_then(GetPlayers::new) {
+            req.encode(buf).unwrap()
+        } else {
+            GetChallenge::new().encode(buf).unwrap()
+        };
 
-        let data = GetChallenge::new().encode(buf).unwrap();
         self.send(sock, data)
     }
 
@@ -138,7 +153,7 @@ impl Connection {
         data: &'a [u8],
     ) -> io::Result<Option<InternalEvent<'a>>> {
         if let Ok(response) = GetChallengeResponse::decode(data) {
-            self.challenge = response.challenge;
+            self.challenge = Some(response.challenge);
 
             // repeat request
             if self.wait_players {
@@ -146,6 +161,18 @@ impl Connection {
                 self.query_players(sock, &mut buffer)?;
             }
 
+            return Ok(None);
+        }
+
+        if data.starts_with(GetServerInfo2Response::HEADER) {
+            let response = GetServerInfo2Response::decode(data);
+            trace!("recv info {} {response:?}", self.address);
+            return Ok(None);
+        }
+
+        if data.starts_with(GetServerInfo2ResponseOld::HEADER) {
+            let response = GetServerInfo2ResponseOld::decode(data);
+            trace!("recv info old {} {response:?}", self.address);
             return Ok(None);
         }
 

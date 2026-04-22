@@ -150,7 +150,8 @@ impl GetChallenge {
 /// instead of [GetServerInfo2Response](super::server::GetServerInfo2Response). Repeat
 /// this query with a challenge number taken from the challenge response.
 ///
-/// See [GetServerInfo2Response](super::server::GetServerInfo2Response) and
+/// See [GetServerInfo2Response](super::server::GetServerInfo2Response),
+/// [GetServerInfo2ResponseOld](super::server::GetServerInfo2ResponseOld) and
 /// [GetChallengeResponse](super::server::GetChallengeResponse).
 #[derive(Clone, Debug, PartialEq)]
 pub struct GetServerInfo2 {

@@ -16,7 +16,7 @@ use xash3d_protocol::{
 use crate::{
     event::{Event, InternalEvent, ServerInfo, ServerPlayers},
     net::Socket,
-    SERVER_TIMEOUT,
+    observer_new::SERVER_TIMEOUT,
 };
 
 #[derive(Copy, Clone, PartialEq, Eq)]

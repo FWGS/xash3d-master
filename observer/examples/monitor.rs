@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 use std::{
     collections::{hash_map::Entry, HashMap},
     fmt, io,

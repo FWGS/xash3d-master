@@ -17,8 +17,15 @@ use crate::{
     event::{Event, InternalEvent, ServerInfo, ServerList},
     filter::Filter,
     net::Socket,
-    observer_old::Handler,
 };
+
+#[allow(deprecated)]
+use crate::observer_old::Handler;
+
+pub(crate) const MASTER_INTERVAL: Duration = Duration::from_secs(8);
+pub(crate) const SERVER_INTERVAL: Duration = Duration::from_secs(2);
+pub(crate) const SERVER_TIMEOUT: Duration = Duration::from_secs(16);
+pub(crate) const SERVER_CLEAN_INTERVAL: Duration = Duration::from_secs(16);
 
 pub struct Master {
     addr: SocketAddr,
@@ -155,6 +162,8 @@ pub struct ObserverNew {
     pending: Vec<Pending>,
 }
 
+// FIXME: compatibility with old api
+#[allow(deprecated)]
 impl ObserverNew {
     pub fn bind(addr: SocketAddr) -> io::Result<Self> {
         let sock = Socket::bind(addr)?;
@@ -165,9 +174,9 @@ impl ObserverNew {
             sock,
             filter: String::new(),
             masters: Vec::new(),
-            query_servers_task: Task::new(now, crate::MASTER_INTERVAL),
-            query_info_task: Task::new(now, crate::SERVER_INTERVAL),
-            cleanup_task: Task::new(now, crate::SERVER_CLEAN_INTERVAL),
+            query_servers_task: Task::new(now, MASTER_INTERVAL),
+            query_info_task: Task::new(now, SERVER_INTERVAL),
+            cleanup_task: Task::new(now, SERVER_CLEAN_INTERVAL),
             connections,
             delayed_events: Vec::new(),
             pending: Vec::new(),

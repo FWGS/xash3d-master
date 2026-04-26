@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 use std::{
     io,
     marker::PhantomData,
@@ -15,9 +17,11 @@ use crate::{
     Server,
 };
 
+#[deprecated]
 pub type GetServerInfoResponse<'a, T = &'a [u8]> =
     xash3d_protocol::server::GetServerInfoResponse<T>;
 
+#[deprecated]
 #[allow(unused_variables)]
 pub trait Handler {
     /// Returns `true` if observer's main loop should stop.
@@ -85,6 +89,7 @@ pub trait Handler {
     }
 }
 
+#[deprecated]
 pub struct ObserverBuilder<'a> {
     filter: Filter,
     phantom: PhantomData<&'a ()>,
@@ -176,6 +181,7 @@ impl<'a> Default for ObserverBuilder<'a> {
     }
 }
 
+#[deprecated]
 pub struct Observer<T> {
     inner: ObserverNew,
     handler: T,

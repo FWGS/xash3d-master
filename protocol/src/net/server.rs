@@ -148,10 +148,7 @@ where
                 b"version" => {
                     ret.version = cur
                         .get_key_value()
-                        .map_err(|e| {
-                            debug!("invalid server version");
-                            e
-                        })
+                        .inspect_err(|e| debug!("invalid server version: {e}"))
                         .unwrap_or_default()
                 }
                 b"region" => ret.region = cur.get("region")?,

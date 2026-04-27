@@ -2,6 +2,7 @@ use std::fmt;
 
 pub struct Colored<'a> {
     text: &'a str,
+    #[cfg_attr(not(feature = "color"), allow(dead_code))]
     enable: bool,
 }
 
@@ -17,6 +18,8 @@ impl fmt::Display for Colored<'_> {
 
         // TODO: unicode width
         let mut width = 0;
+
+        #[cfg_attr(not(feature = "color"), allow(unused_mut))]
         let mut iter = color::ColorIter::new(self.text);
 
         #[cfg(feature = "color")]

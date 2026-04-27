@@ -32,6 +32,7 @@ const LABEL_WIDTH: usize = 10;
 
 struct Label {
     text: &'static str,
+    #[cfg_attr(not(feature = "color"), allow(dead_code))]
     colored_output: bool,
 }
 

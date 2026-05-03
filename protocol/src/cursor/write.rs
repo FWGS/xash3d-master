@@ -149,7 +149,7 @@ impl<'a> CursorMut<'a> {
     /// remaining capacity in the original buffer.
     pub fn split(mut self, len: usize) -> Result<(Self, Self)> {
         if self.available() < len {
-            return Err(CursorError::UnexpectedEnd);
+            return Err(CursorError::BufferOverflow);
         }
         let offset = self.pos + len;
         let (head, tail) = self.buffer.split_at_mut(offset);
@@ -167,7 +167,7 @@ impl<'a> CursorMut<'a> {
             self.pos += count;
             Ok(self)
         } else {
-            Err(CursorError::UnexpectedEnd)
+            Err(CursorError::BufferOverflow)
         }
     }
 
@@ -231,7 +231,7 @@ impl<'a> CursorMut<'a> {
     }
 
     pub fn put_as_str<T: fmt::Display>(&mut self, value: T) -> Result<&mut Self> {
-        write!(self, "{value}").map_err(|_| CursorError::UnexpectedEnd)?;
+        write!(self, "{value}").map_err(|_| CursorError::BufferOverflow)?;
         Ok(self)
     }
 

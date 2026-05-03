@@ -30,8 +30,10 @@ pub enum CursorError {
     ExpectEmpty,
     /// Buffer must be full.
     ExpectFull,
-    /// Buffer size is no enougth to decode or encode a packet.
-    UnexpectedEnd,
+    /// Need more bytes to decode a packet.
+    NeedMoreBytes(usize),
+    /// Buffer capcity is not enough to encode a packet.
+    BufferOverflow,
 }
 
 impl fmt::Display for CursorError {
@@ -46,7 +48,8 @@ impl fmt::Display for CursorError {
             Self::Expect => "Expected data not found",
             Self::ExpectEmpty => "Unexpected data",
             Self::ExpectFull => "Unexpected free space in buffer",
-            Self::UnexpectedEnd => "Unexpected end of buffer",
+            Self::NeedMoreBytes(count) => return write!(fmt, "need {count} bytes"),
+            Self::BufferOverflow => "Buffer capacity is not enough",
         };
         s.fmt(fmt)
     }
@@ -85,7 +88,7 @@ mod tests {
         assert_eq!(cur.get_u8(), Ok(0x7f));
         assert_eq!(cur.get_i8(), Ok(-128));
         assert_eq!(cur.get_u32_le(), Ok(0x44332211));
-        assert_eq!(cur.get_u8(), Err(CursorError::UnexpectedEnd));
+        assert_eq!(cur.get_u8(), Err(CursorError::NeedMoreBytes(1)));
 
         Ok(())
     }

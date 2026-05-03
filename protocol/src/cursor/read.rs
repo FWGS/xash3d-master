@@ -113,6 +113,7 @@ impl_get_value! {
 #[derive(Copy, Clone)]
 pub struct Cursor<'a> {
     buffer: &'a [u8],
+    pos: usize,
 }
 
 macro_rules! impl_get {
@@ -127,34 +128,52 @@ macro_rules! impl_get {
 
 impl<'a> Cursor<'a> {
     pub fn new(buffer: &'a [u8]) -> Self {
-        Self { buffer }
+        Self { buffer, pos: 0 }
     }
 
+    #[inline(always)]
     pub fn end(self) -> &'a [u8] {
-        self.buffer
+        &self.buffer[self.pos..]
     }
 
+    #[inline(always)]
+    pub fn pos(&self) -> usize {
+        self.pos
+    }
+
+    #[inline(always)]
     pub fn as_slice(&'a self) -> &'a [u8] {
-        self.buffer
+        &self.buffer[self.pos..]
     }
 
     #[inline(always)]
     pub fn remaining(&self) -> usize {
-        self.buffer.len()
+        self.buffer.len() - self.pos
     }
 
     #[inline(always)]
     pub fn has_remaining(&self) -> bool {
-        self.remaining() != 0
+        self.pos < self.buffer.len()
+    }
+
+    pub fn get_tail(&mut self) -> &'a [u8] {
+        if self.pos < self.buffer.len() {
+            let tail = &self.buffer[self.pos..];
+            self.pos = self.buffer.len();
+            tail
+        } else {
+            b""
+        }
     }
 
     pub fn get_bytes(&mut self, count: usize) -> Result<&'a [u8]> {
-        if count <= self.remaining() {
-            let (head, tail) = self.buffer.split_at(count);
-            self.buffer = tail;
-            Ok(head)
+        let end = self.pos + count;
+        if end <= self.buffer.len() {
+            let bytes = &self.buffer[self.pos..end];
+            self.pos = end;
+            Ok(bytes)
         } else {
-            Err(CursorError::UnexpectedEnd)
+            Err(CursorError::NeedMoreBytes(end - self.buffer.len()))
         }
     }
 
@@ -181,13 +200,13 @@ impl<'a> Cursor<'a> {
 
     pub fn get_cstr(&mut self) -> Result<Str<&'a [u8]>> {
         let pos = self
-            .buffer
+            .as_slice()
             .iter()
             .position(|&c| c == b'\0')
-            .ok_or(CursorError::UnexpectedEnd)?;
-        let (head, tail) = self.buffer.split_at(pos);
-        self.buffer = &tail[1..];
-        Ok(Str(&head[..pos]))
+            .ok_or(CursorError::NeedMoreBytes(1))?;
+        let s = &self.buffer[self.pos..self.pos + pos];
+        self.pos += pos + 1;
+        Ok(Str(s))
     }
 
     pub fn get_cstr_as_str(&mut self) -> Result<&'a str> {
@@ -234,7 +253,9 @@ impl<'a> Cursor<'a> {
     }
 
     pub fn expect(&mut self, s: &[u8]) -> Result<()> {
-        if self.buffer.starts_with(s) {
+        if self.remaining() < s.len() {
+            Err(CursorError::NeedMoreBytes(s.len() - self.remaining()))
+        } else if self.as_slice().starts_with(s) {
             self.advance(s.len())?;
             Ok(())
         } else {
@@ -254,10 +275,10 @@ impl<'a> Cursor<'a> {
     where
         F: FnMut(u8) -> bool,
     {
-        self.buffer
+        self.as_slice()
             .iter()
             .position(|&i| !cond(i))
-            .ok_or(CursorError::UnexpectedEnd)
+            .ok_or(CursorError::NeedMoreBytes(1))
             .and_then(|n| self.get_bytes(n))
     }
 
@@ -265,11 +286,7 @@ impl<'a> Cursor<'a> {
     where
         F: FnMut(u8) -> bool,
     {
-        self.take_while(cond).unwrap_or_else(|_| {
-            let (head, tail) = self.buffer.split_at(self.buffer.len());
-            self.buffer = tail;
-            head
-        })
+        self.take_while(cond).unwrap_or_else(|_| self.get_tail())
     }
 
     pub fn get_key_value_raw(&mut self) -> Result<&'a [u8]> {
@@ -300,7 +317,7 @@ impl<'a> Cursor<'a> {
                 *self = cur;
                 Ok(value)
             }
-            Ok(b'\n') | Err(CursorError::UnexpectedEnd) => Err(CursorError::TableEnd),
+            Ok(b'\n') | Err(CursorError::NeedMoreBytes(1)) => Err(CursorError::TableEnd),
             _ => Err(CursorError::InvalidTableKey),
         }
     }

@@ -14,9 +14,9 @@ use xash3d_protocol::{
 };
 
 use crate::{
-    event::{Event, InternalEvent, ServerInfo, ServerPlayers},
+    event::{Event, ServerInfo, ServerPlayers},
     net::Socket,
-    observer_new::SERVER_TIMEOUT,
+    observer::SERVER_TIMEOUT,
 };
 
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -88,10 +88,6 @@ impl Connection {
         true
     }
 
-    pub fn request_time(&self) -> Instant {
-        self.request_time
-    }
-
     pub fn ping(&self) -> Duration {
         self.response_time.duration_since(self.request_time)
     }
@@ -151,7 +147,7 @@ impl Connection {
         &mut self,
         sock: &Socket,
         data: &'a [u8],
-    ) -> io::Result<Option<InternalEvent<'a>>> {
+    ) -> io::Result<Option<Event<'a>>> {
         if let Ok(response) = GetChallengeResponse::decode(data) {
             self.challenge = Some(response.challenge);
 
@@ -184,7 +180,7 @@ impl Connection {
 
             self.wait_players = false;
             let players = ServerPlayers::new(response);
-            return Ok(Some(Event::ServerPlayers(self.address, players).into()));
+            return Ok(Some(Event::ServerPlayers(self.address, players)));
         }
 
         match GetServerInfoResponse::decode(data) {
@@ -193,11 +189,10 @@ impl Connection {
                 let info = ServerInfo {
                     server: self.address,
                     ping: self.ping(),
-                    new: self.state() == ConnectionState::ProtocolDetection,
                     changed: self.update_raw_info(data),
                     response,
                 };
-                Ok(Some(Event::ServerInfo(info).into()))
+                Ok(Some(Event::ServerInfo(info)))
             }
             Err(ProtocolError::InvalidProtocolVersion) => {
                 if self.state() == ConnectionState::ProtocolDetection
@@ -209,18 +204,10 @@ impl Connection {
                     self.query(sock, &mut buffer)?;
                     Ok(None)
                 } else {
-                    Ok(Some(InternalEvent::ServerInvalidProtocol(
-                        self.address,
-                        self.request_time().elapsed(),
-                    )))
+                    Ok(Some(Event::ServerInvalidProtocol(self.address)))
                 }
             }
-            Err(error) => Ok(Some(InternalEvent::ServerInvalidPacket(
-                self.address,
-                self.request_time().elapsed(),
-                data,
-                error,
-            ))),
+            Err(_) => Ok(Some(Event::ServerInvalidPacket(self.address, data))),
         }
     }
 }

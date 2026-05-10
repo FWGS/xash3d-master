@@ -5,19 +5,19 @@ use std::{
 };
 
 use serde::Serialize;
-use xash3d_observer::{Master, ObserverNew};
+use xash3d_observer::{Master, Observer};
 
 use crate::cli::Cli;
 
-pub fn create_observer(cli: &Cli) -> io::Result<ObserverNew> {
+pub fn create_observer(cli: &Cli) -> io::Result<Observer> {
     // TODO: ipv6
     let unspecified = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0));
-    let mut observer = ObserverNew::bind(unspecified)?;
+    let mut observer = Observer::bind(unspecified)?;
     observer.set_filter_raw(cli.filter.clone());
     Ok(observer)
 }
 
-pub fn create_observer_with_masters(cli: &Cli) -> io::Result<ObserverNew> {
+pub fn create_observer_with_masters(cli: &Cli) -> io::Result<Observer> {
     let mut observer = create_observer(cli)?;
     let local_addr = observer.local_addr()?;
     for i in &cli.masters {

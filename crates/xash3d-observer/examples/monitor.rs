@@ -1,17 +1,18 @@
-#![allow(deprecated)]
-
 use std::{
     collections::{hash_map::Entry, HashMap},
     fmt, io,
-    net::SocketAddr,
-    time::Duration,
+    net::{Ipv4Addr, SocketAddr, SocketAddrV4, ToSocketAddrs},
 };
 
-use xash3d_observer::{GetServerInfoResponse, Handler, ObserverBuilder};
+use xash3d_observer::{
+    event::{Event, ServerInfo},
+    filter::Filter,
+    Buffer, Master, Observer, Server,
+};
 use xash3d_protocol::color::trim_color;
 
 #[derive(Clone, Debug)]
-pub struct ServerInfo {
+pub struct MyServerInfo {
     pub gamedir: String,
     pub map: String,
     pub host: String,
@@ -25,7 +26,7 @@ pub struct ServerInfo {
     pub dedicated: bool,
 }
 
-impl fmt::Display for ServerInfo {
+impl fmt::Display for MyServerInfo {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         fn flag(c: char, cond: bool) -> char {
             if cond {
@@ -52,26 +53,26 @@ impl fmt::Display for ServerInfo {
     }
 }
 
-impl ServerInfo {
-    pub fn new(packet: &GetServerInfoResponse) -> Self {
+impl MyServerInfo {
+    pub fn new(packet: &ServerInfo) -> Self {
         fn lossy_no_color(bytes: &[u8]) -> String {
             let s = String::from_utf8_lossy(bytes);
             trim_color(&s).trim().to_string()
         }
 
-        let gamedir = lossy_no_color(packet.gamedir);
-        let map = lossy_no_color(packet.map);
-        let host = lossy_no_color(packet.host);
-        let protocol = packet.protocol;
-        let numcl = packet.numcl;
-        let maxcl = packet.maxcl;
-        let dm = packet.dm;
-        let team = packet.team;
-        let coop = packet.coop;
-        let password = packet.password;
-        let dedicated = packet.dedicated;
+        let gamedir = lossy_no_color(packet.gamedir());
+        let map = lossy_no_color(packet.map());
+        let host = lossy_no_color(packet.host());
+        let protocol = packet.protocol();
+        let numcl = packet.clients_count();
+        let maxcl = packet.clients_max();
+        let dm = packet.is_deathmatch();
+        let team = packet.has_teams();
+        let coop = packet.is_coop();
+        let password = packet.has_password();
+        let dedicated = packet.is_dedicated();
 
-        ServerInfo {
+        MyServerInfo {
             gamedir,
             map,
             host,
@@ -87,53 +88,62 @@ impl ServerInfo {
     }
 }
 
-#[derive(Default)]
-struct Monitor {
-    servers: HashMap<SocketAddr, ServerInfo>,
-}
+fn main() -> io::Result<()> {
+    let addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0));
+    let mut observer = Observer::bind(addr)?;
 
-impl Handler for Monitor {
-    fn server_update(
-        &mut self,
-        addr: SocketAddr,
-        info: &GetServerInfoResponse,
-        _: bool,
-        ping: Duration,
-    ) {
-        let info = ServerInfo::new(info);
-        match self.servers.entry(addr) {
-            Entry::Occupied(mut e) => {
-                println!("{:8} {addr:24?} {ping:>7.1?} {info}", "update");
-                e.insert(info);
+    let masters = &["mentality.rip:27010", "mentality.rip:27011"];
+    for i in masters {
+        let addr = i.to_socket_addrs()?.next().unwrap();
+        observer.insert_master(Master::new(addr));
+    }
+
+    let mut filter = Filter::default();
+    filter.set_nat(false);
+    let gamedir = std::env::args().nth(1);
+    if let Some(gamedir) = gamedir.as_deref() {
+        filter.set_gamedir(gamedir);
+    }
+    observer.set_filter(&filter);
+
+    let mut servers = HashMap::new();
+    let mut buffer = Buffer::new();
+    loop {
+        match observer.wait_event(&mut buffer, None)? {
+            Event::ServerList(servers) => {
+                for addr in servers.iter() {
+                    let server = Server::new(addr);
+                    observer.insert_server(server);
+                }
             }
-            Entry::Vacant(e) => {
-                println!("{:8} {addr:24?} {ping:>7.1?} {info}", "new");
-                e.insert(info);
+            Event::ServerInfo(server_info) => {
+                let addr = *server_info.address();
+                let ping = server_info.ping();
+                let info = MyServerInfo::new(&server_info);
+                match servers.entry(addr) {
+                    Entry::Occupied(mut e) => {
+                        if server_info.is_changed() {
+                            println!("{:8} {addr:24?} {ping:>7.1?} {info}", "update");
+                            e.insert(info);
+                        } else {
+                            // println!("{:8} {addr:24?} {ping:>7.1?}", "ping");
+                            println!("{:8} {addr:24?} {ping:>7.1?} {info}", "same");
+                        }
+                    }
+                    Entry::Vacant(e) => {
+                        println!("{:8} {addr:24?} {ping:>7.1?} {info}", "new");
+                        e.insert(info);
+                    }
+                }
             }
+            Event::ServerInfoTimeout(addr) => {
+                println!("{:8} {addr:24?}", "timeout");
+            }
+            Event::ServerRemove(addr) => {
+                println!("{:8} {addr:24?}", "remove");
+                servers.remove(&addr);
+            }
+            _ => todo!(),
         }
     }
-
-    fn server_update_ping(&mut self, addr: SocketAddr, ping: Duration) {
-        println!("{:8} {addr:24?} {ping:>7.1?}", "ping");
-    }
-
-    fn server_timeout(&mut self, addr: SocketAddr) {
-        println!("{:8} {addr:24?}", "timeout");
-    }
-
-    fn server_remove(&mut self, addr: SocketAddr) {
-        println!("{:8} {addr:24?}", "remove");
-        self.servers.remove(&addr);
-    }
-}
-
-fn main() -> io::Result<()> {
-    let gamedir = std::env::args().nth(1);
-    let gamedir = gamedir.as_deref();
-    let masters = &["mentality.rip:27010", "mentality.rip:27011"];
-    let mut builder = ObserverBuilder::default().nat(false);
-    if let Some(gamedir) = gamedir {
-        builder = builder.gamedir(gamedir)
-    }
-    builder.build(Monitor::default(), masters)?.run()
 }

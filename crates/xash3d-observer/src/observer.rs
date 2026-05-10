@@ -14,13 +14,10 @@ use xash3d_protocol::{
 
 use crate::{
     connection::{Connection, ConnectionState},
-    event::{Event, InternalEvent, ServerInfo, ServerList},
+    event::{Event, ServerInfo, ServerList},
     filter::Filter,
     net::Socket,
 };
-
-#[allow(deprecated)]
-use crate::observer_old::Handler;
 
 pub(crate) const MASTER_INTERVAL: Duration = Duration::from_secs(8);
 pub(crate) const SERVER_INTERVAL: Duration = Duration::from_secs(2);
@@ -92,11 +89,11 @@ enum DelayedEvent {
     ServerRemove(SocketAddr),
 }
 
-impl<'a> From<DelayedEvent> for InternalEvent<'a> {
+impl<'a> From<DelayedEvent> for Event<'a> {
     fn from(value: DelayedEvent) -> Self {
         match value {
-            DelayedEvent::ServerTimeout(addr) => Event::ServerInfoTimeout(addr).into(),
-            DelayedEvent::ServerRemove(addr) => Event::ServerRemove(addr).into(),
+            DelayedEvent::ServerTimeout(addr) => Event::ServerInfoTimeout(addr),
+            DelayedEvent::ServerRemove(addr) => Event::ServerRemove(addr),
         }
     }
 }
@@ -150,7 +147,7 @@ enum Pending {
     Server(SocketAddr),
 }
 
-pub struct ObserverNew {
+pub struct Observer {
     pub(crate) sock: Socket,
     filter: String,
     masters: Vec<Master>,
@@ -162,9 +159,7 @@ pub struct ObserverNew {
     pending: Vec<Pending>,
 }
 
-// FIXME: compatibility with old api
-#[allow(deprecated)]
-impl ObserverNew {
+impl Observer {
     pub fn bind(addr: SocketAddr) -> io::Result<Self> {
         let sock = Socket::bind(addr)?;
         let connections = HashMap::new();
@@ -232,29 +227,21 @@ impl ObserverNew {
         self.masters.iter().find(|master| master.addr.eq(addr))
     }
 
-    fn query_servers_from_masters<T>(&mut self, buf: &mut [u8], handler: &mut T) -> io::Result<()>
-    where
-        T: Handler,
-    {
+    fn query_servers_from_masters(&mut self, buf: &mut [u8]) -> io::Result<()> {
         for master in self.masters.iter_mut() {
-            if handler.query_servers_from_master(master.addr) {
-                let packet = master.encode_query_servers_packet(&self.filter, buf);
+            let packet = master.encode_query_servers_packet(&self.filter, buf);
 
-                // Do not send queries twice.
-                if self.pending.contains(&Pending::Master(master.addr)) {
-                    continue;
-                }
-
-                self.sock.send_to(packet, master.addr)?;
+            // Do not send queries twice.
+            if self.pending.contains(&Pending::Master(master.addr)) {
+                continue;
             }
+
+            self.sock.send_to(packet, master.addr)?;
         }
         Ok(())
     }
 
-    fn query_info_from_servers<T>(&mut self, buffer: &mut [u8], handler: &mut T) -> io::Result<()>
-    where
-        T: Handler,
-    {
+    fn query_info_from_servers(&mut self, buffer: &mut [u8]) -> io::Result<()> {
         let now = Instant::now();
         for (addr, con) in self.connections.iter_mut() {
             // Invalid connections will be removed later by cleanup task. Master servers can send
@@ -277,15 +264,6 @@ impl ObserverNew {
             con.query(&self.sock, buffer)?;
         }
 
-        // Hook for old API.
-        for &addr in handler.extra_servers() {
-            if let Entry::Vacant(e) = self.connections.entry(addr) {
-                let mut con = Connection::new(addr, false);
-                con.query(&self.sock, buffer)?;
-                e.insert(con);
-            }
-        }
-
         Ok(())
     }
 
@@ -294,7 +272,7 @@ impl ObserverNew {
         from: &SocketAddr,
         data: &'a [u8],
         key: u32,
-    ) -> Option<InternalEvent<'a>> {
+    ) -> Option<Event<'a>> {
         match QueryServersResponse::decode(data) {
             Ok(response) => {
                 if response.key != Some(key) {
@@ -302,22 +280,21 @@ impl ObserverNew {
                     return None;
                 }
 
-                Some(Event::ServerList(ServerList::new(*from, response)).into())
+                Some(Event::ServerList(ServerList::new(*from, response)))
             }
-            Err(error) => {
+            Err(_) => {
                 // The master server can respond with a fake server at same address. It's used
                 // for update messages.
                 if let Ok(response) = GetServerInfoResponse::decode(data) {
                     let info = ServerInfo {
                         server: *from,
                         ping: Duration::default(),
-                        new: true,
                         changed: true,
                         response,
                     };
-                    Some(Event::ServerInfo(info).into())
+                    Some(Event::ServerInfo(info))
                 } else {
-                    Some(InternalEvent::MasterInvalidPacket(*from, data, error))
+                    Some(Event::MasterInvalidPacket(*from, data))
                 }
             }
         }
@@ -327,11 +304,11 @@ impl ObserverNew {
         &mut self,
         from: &SocketAddr,
         data: &'a [u8],
-    ) -> io::Result<Option<InternalEvent<'a>>> {
+    ) -> io::Result<Option<Event<'a>>> {
         match self.connections.get_mut(from) {
             Some(con) => {
                 let result = con.handle_packet(&self.sock, data);
-                if let Ok(Some(InternalEvent::ServerInvalidProtocol(..))) = &result {
+                if let Ok(Some(Event::ServerInvalidProtocol(..))) = &result {
                     self.connections.remove(from);
                 }
                 result
@@ -344,7 +321,7 @@ impl ObserverNew {
         &mut self,
         from: &SocketAddr,
         buffer: &'a [u8],
-    ) -> io::Result<Option<InternalEvent<'a>>> {
+    ) -> io::Result<Option<Event<'a>>> {
         if let Some(master) = self.get_master(from) {
             Ok(self.handle_master_packet(from, buffer, master.key))
         } else {
@@ -352,25 +329,17 @@ impl ObserverNew {
         }
     }
 
-    fn receive<'a, T>(
+    fn receive<'a>(
         &mut self,
         buffer: &'a mut [u8],
         user_deadline: Option<Instant>,
-        handler: &mut T,
-    ) -> io::Result<Option<InternalEvent<'a>>>
-    where
-        T: Handler,
-    {
+    ) -> io::Result<Option<Event<'a>>> {
         let mut deadline = cmp::min(self.query_servers_task.time(), self.query_info_task.time());
         if let Some(user_deadline) = user_deadline {
             deadline = cmp::min(deadline, user_deadline);
         }
         let mut now = Instant::now();
         while now < deadline {
-            if handler.stop_observer() {
-                return Ok(Some(InternalEvent::Stop));
-            }
-
             // FIXME: Work around limitation in current borrow checker, remove when polonius
             // will become available in MSRV.
             //
@@ -431,21 +400,13 @@ impl ObserverNew {
         });
     }
 
-    fn process_tasks<T>(
-        &mut self,
-        buffer: &mut [u8],
-        now: Instant,
-        handler: &mut T,
-    ) -> io::Result<()>
-    where
-        T: Handler,
-    {
+    fn process_tasks(&mut self, buffer: &mut [u8], now: Instant) -> io::Result<()> {
         if self.query_servers_task.update_time(now) {
-            self.query_servers_from_masters(buffer, handler)?;
+            self.query_servers_from_masters(buffer)?;
         }
 
         if self.query_info_task.update_time(now) {
-            self.query_info_from_servers(buffer, handler)?;
+            self.query_info_from_servers(buffer)?;
         }
 
         if self.cleanup_task.update_time(now) {
@@ -455,15 +416,11 @@ impl ObserverNew {
         Ok(())
     }
 
-    pub(crate) fn wait_event_internal<'a, T>(
+    pub fn wait_event<'a>(
         &mut self,
         buffer: &'a mut Buffer,
         timeout: Option<Duration>,
-        handler: &mut T,
-    ) -> io::Result<InternalEvent<'a>>
-    where
-        T: Handler,
-    {
+    ) -> io::Result<Event<'a>> {
         if let Some(delayed_event) = self.delayed_events.pop() {
             return Ok(delayed_event.into());
         }
@@ -480,42 +437,19 @@ impl ObserverNew {
             let now = Instant::now();
             if let Some(deadline) = deadline {
                 if deadline <= now {
-                    return Ok(Event::Timeout.into());
+                    return Ok(Event::Timeout);
                 }
             }
 
-            self.process_tasks(buffer, now, handler)?;
+            self.process_tasks(buffer, now)?;
             self.process_pending(buffer)?;
 
             if let Some(delayed_event) = self.delayed_events.pop() {
                 return Ok(delayed_event.into());
             }
 
-            if let Some(event) = self.receive(buffer, deadline, handler)? {
+            if let Some(event) = self.receive(buffer, deadline)? {
                 return Ok(event);
-            }
-        }
-    }
-
-    pub fn wait_event<'a>(
-        &mut self,
-        buffer: &'a mut Buffer,
-        timeout: Option<Duration>,
-    ) -> io::Result<Event<'a>> {
-        struct StubHandler;
-        impl Handler for StubHandler {}
-
-        match self.wait_event_internal(buffer, timeout, &mut StubHandler)? {
-            InternalEvent::Stop => unreachable!(),
-            InternalEvent::Event(event) => Ok(event),
-            InternalEvent::MasterInvalidPacket(address, data, _) => {
-                Ok(Event::MasterInvalidPacket(address, data))
-            }
-            InternalEvent::ServerInvalidProtocol(address, _) => {
-                Ok(Event::ServerInvalidProtocol(address))
-            }
-            InternalEvent::ServerInvalidPacket(address, _, data, _) => {
-                Ok(Event::ServerInvalidPacket(address, data))
             }
         }
     }

@@ -70,7 +70,7 @@ jobs:
             strip: true
       - run: |
           mkdir -p staging/ artifacts/
-          cp master/config/default.toml staging/config.toml
+          cp crates/xash3d-master/config/default.toml staging/config.toml
           find target/${{ matrix.platform.target }}/release -maxdepth 1 -type f -executable -exec cp {} staging/ ';'
           pushd staging/
             tar --zstd -cvf ../artifacts/xash3d-master-${{ matrix.platform.target }}.tar.zst *

@@ -3,7 +3,8 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use log::{Metadata, Record};
-use xash3d_master::config::LogConfig;
+
+use crate::config::LogConfig;
 
 pub struct Logger {
     print_time: AtomicBool,

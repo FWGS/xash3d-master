@@ -7,7 +7,7 @@ use getopts::Options;
 use log::LevelFilter;
 use thiserror::Error;
 
-use xash3d_master::config;
+use crate::config;
 
 const BIN_NAME: &str = env!("CARGO_BIN_NAME");
 const PKG_NAME: &str = env!("CARGO_PKG_NAME");

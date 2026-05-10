@@ -1,5 +1,3 @@
-// SPDX-License-Identifier: GPL-3.0-only
-
 use std::net::IpAddr;
 use std::process;
 

@@ -1,6 +1,3 @@
-// SPDX-License-Identifier: LGPL-3.0-only
-// SPDX-FileCopyrightText: 2023 Denis Drakhnia <numas13@gmail.com>
-
 #![cfg_attr(not(feature = "net"), allow(dead_code))]
 
 use core::{mem, str};

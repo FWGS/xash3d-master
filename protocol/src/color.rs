@@ -1,6 +1,3 @@
-// SPDX-License-Identifier: LGPL-3.0-only
-// SPDX-FileCopyrightText: 2023 Denis Drakhnia <numas13@gmail.com>
-
 //! Color codes for strings.
 
 #[cfg(feature = "alloc")]

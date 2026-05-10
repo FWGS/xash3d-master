@@ -1,6 +1,3 @@
-// SPDX-License-Identifier: LGPL-3.0-only
-// SPDX-FileCopyrightText: 2023 Denis Drakhnia <numas13@gmail.com>
-
 //! Admin packets.
 
 use crate::cursor::{Cursor, CursorMut};

@@ -1,5 +1,3 @@
-// SPDX-License-Identifier: GPL-3.0-only
-
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use log::{Metadata, Record};

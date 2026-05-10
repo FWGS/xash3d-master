@@ -6,7 +6,6 @@ use std::{
 use xash3d_protocol::{
     master::{QueryServersResponse, QueryServersResponseIter},
     server::{GetPlayersResponse, GetServerInfoResponse},
-    Error as ProtocolError,
 };
 
 pub struct ServerList<'a> {
@@ -60,7 +59,6 @@ impl<'a> Iterator for ServerIter<'a> {
 pub struct ServerInfo<'a> {
     pub(crate) server: SocketAddr,
     pub(crate) ping: Duration,
-    pub(crate) new: bool,
     pub(crate) changed: bool,
     pub(crate) response: GetServerInfoResponse<&'a [u8]>,
 }
@@ -163,19 +161,4 @@ pub enum Event<'a> {
     MasterInvalidPacket(SocketAddr, &'a [u8]),
     ServerInvalidProtocol(SocketAddr),
     ServerInvalidPacket(SocketAddr, &'a [u8]),
-}
-
-/// Extended events for old API.
-pub(crate) enum InternalEvent<'a> {
-    Stop,
-    Event(Event<'a>),
-    MasterInvalidPacket(SocketAddr, &'a [u8], ProtocolError),
-    ServerInvalidProtocol(SocketAddr, Duration),
-    ServerInvalidPacket(SocketAddr, Duration, &'a [u8], ProtocolError),
-}
-
-impl<'a> From<Event<'a>> for InternalEvent<'a> {
-    fn from(value: Event<'a>) -> Self {
-        Self::Event(value)
-    }
 }

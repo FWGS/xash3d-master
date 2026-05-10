@@ -6,7 +6,7 @@ use std::{
 };
 
 use serde::Serialize;
-use xash3d_observer::{event::Event, Buffer, ObserverNew, Server};
+use xash3d_observer::{event::Event, Buffer, Observer, Server};
 use xash3d_protocol::PROTOCOL_VERSION;
 
 use crate::{
@@ -234,11 +234,11 @@ struct QueryServersInfo {
     timeout: Duration,
     servers: HashMap<SocketAddr, ServerResult>,
     servers_custom: HashSet<SocketAddr>,
-    observer: ObserverNew,
+    observer: Observer,
 }
 
 impl QueryServersInfo {
-    fn new(cli: &Cli, observer: ObserverNew, custom: bool) -> Self {
+    fn new(cli: &Cli, observer: Observer, custom: bool) -> Self {
         let (timeout, timeout_master) = if !custom {
             // Wait a response from any master server and then change to game server timeout.
             (cli.master_timeout, true)

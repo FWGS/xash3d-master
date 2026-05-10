@@ -1,9 +1,17 @@
-// SPDX-License-Identifier: GPL-3.0-only
-
 #![deny(unsafe_code)]
 
+#[macro_use]
+extern crate log;
+
 mod cli;
+mod config;
+mod hash_map;
 mod logger;
+mod master_server;
+mod periodic;
+mod stats;
+mod str_arr;
+mod time;
 
 use std::{
     process,
@@ -13,15 +21,17 @@ use std::{
     },
 };
 
-use log::{error, info};
 #[cfg(not(windows))]
 use signal_hook::{consts::signal::*, flag as signal_flag};
-use xash3d_master::{
-    config::{self, Config},
-    Error, Master,
-};
 
-use crate::{cli::Cli, logger::Logger};
+use crate::{
+    cli::Cli,
+    config::Config,
+    logger::Logger,
+    master_server::{Error, Master},
+    stats::Stats,
+    str_arr::StrArr,
+};
 
 fn load_config(cli: &Cli, logger: &Logger) -> Result<Config, config::Error> {
     let mut cfg = match cli.config_path {

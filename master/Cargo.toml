@@ -17,10 +17,6 @@ default = ["logtime"]
 logtime = []
 stats = []
 
-[[bin]]
-name = "xash3d-master"
-path = "bin/main.rs"
-
 [dependencies]
 thiserror.workspace = true
 getopts.workspace = true

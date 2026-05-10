@@ -14,7 +14,10 @@ use xash3d_protocol::{
     wrappers::Str,
 };
 
-use crate::{master_server::ServerInfo, Config, MasterServer};
+use crate::{
+    master_server::{MasterServer, ServerInfo},
+    Config,
+};
 
 const UNSPECIFIED: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0);
 

@@ -11,6 +11,7 @@ allow = [
     "MIT",
 ]
 exceptions = [
+    { allow = ["AGPL-3.0-only"], crate = "xash3d-master" },
     { allow = ["GPL-3.0-only"], crate = "xash3d-admin" },
     { allow = ["GPL-3.0-only"], crate = "xash3d-query" },
     { allow = ["Unicode-3.0"], crate = "unicode-ident" },

@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod tests;
+
 use std::{
     cmp::Eq,
     collections::hash_map,
@@ -13,7 +16,6 @@ use std::{
 use ahash::AHashSet as HashSet;
 use blake2b_simd::Params;
 use fastrand::Rng;
-use log::{debug, error, info, trace, warn};
 use thiserror::Error;
 use xash3d_protocol::{
     admin,
@@ -741,110 +743,5 @@ impl<Addr: AddrExt> MasterServer<Addr> {
                 warn!("invalid admin command: {}", args[0]);
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    use xash3d_protocol::server::Region;
-
-    #[test]
-    fn check_remove_server_by_ip() {
-        use server::{Os, ServerAdd, ServerFlags, ServerType};
-
-        let cfg = Config::default();
-
-        let addr = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0);
-        let mut master = MasterServer::new(cfg, addr).unwrap();
-
-        let server_add = ServerAdd {
-            gamedir: Str(&b"valve"[..]),
-            map: Str(&b"crossfire"[..]),
-            version: Version::new(0, 20),
-            challenge: 0x12345678,
-            server_type: ServerType::Dedicated,
-            os: Os::Linux,
-            region: Region::RestOfTheWorld,
-            protocol: 49,
-            players: 4,
-            max: 32,
-            bots: 8,
-            flags: ServerFlags::all(),
-        };
-
-        let dummy_ip = Ipv4Addr::new(1, 1, 1, 1);
-        let dummy_ip2 = Ipv4Addr::new(1, 1, 1, 2);
-
-        master.add_server(
-            SocketAddrV4::new(dummy_ip, 27015),
-            ServerInfo::new(&server_add),
-        );
-        master.add_server(
-            SocketAddrV4::new(dummy_ip, 27016),
-            ServerInfo::new(&server_add),
-        );
-        master.add_server(
-            SocketAddrV4::new(dummy_ip, 27017),
-            ServerInfo::new(&server_add),
-        );
-        master.add_server(
-            SocketAddrV4::new(dummy_ip2, 27015),
-            ServerInfo::new(&server_add),
-        );
-
-        assert_eq!(master.count_all_servers(), 4);
-
-        master.remove_servers_by_ip(&Ipv4Addr::new(1, 1, 1, 1));
-
-        assert_eq!(master.count_all_servers(), 1);
-    }
-
-    #[test]
-    fn check_query_servers() {
-        const BUILDNUM_NEW: u32 = 3500;
-        const BUILDNUM_OLD: u32 = 3000;
-
-        let mut cfg = Config::default();
-        cfg.master.client.min_version = Version::new(0, 19);
-        cfg.master.client.min_engine_buildnum = BUILDNUM_NEW;
-        cfg.master.client.min_old_engine_buildnum = BUILDNUM_OLD;
-
-        let addr = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0);
-        let master = MasterServer::new(cfg, addr).unwrap();
-
-        let mut query = QueryServers {
-            region: Region::RestOfTheWorld,
-            last: SocketAddr::V4(addr),
-            filter: Filter::default(),
-        };
-
-        // check missing fields
-        query.filter.clver = None;
-        query.filter.client_buildnum = None;
-        assert!(!master.is_query_servers_valid(&addr, &query));
-
-        query.filter.clver = Some(Version::new(0, 21));
-        query.filter.client_buildnum = None;
-        assert!(!master.is_query_servers_valid(&addr, &query));
-
-        query.filter.clver = None;
-        query.filter.client_buildnum = Some(BUILDNUM_NEW);
-        assert!(!master.is_query_servers_valid(&addr, &query));
-
-        // check engine buildnum
-        query.filter.clver = Some(Version::new(0, 21));
-        query.filter.client_buildnum = Some(BUILDNUM_NEW);
-        assert!(master.is_query_servers_valid(&addr, &query));
-        query.filter.client_buildnum = Some(BUILDNUM_NEW - 1);
-        assert!(!master.is_query_servers_valid(&addr, &query));
-
-        // check engine buildnum
-        query.filter.clver = Some(Version::new(0, 19));
-        query.filter.client_buildnum = Some(BUILDNUM_OLD);
-        assert!(master.is_query_servers_valid(&addr, &query));
-        query.filter.client_buildnum = Some(BUILDNUM_OLD - 1);
-        assert!(!master.is_query_servers_valid(&addr, &query));
     }
 }

@@ -9,26 +9,19 @@ mod hash_map;
 mod logger;
 mod master_server;
 mod periodic;
+mod signal_flags;
 mod stats;
 mod str_arr;
 mod time;
 
-use std::{
-    process,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-};
-
-#[cfg(not(windows))]
-use signal_hook::{consts::signal::*, flag as signal_flag};
+use std::process;
 
 use crate::{
     cli::Cli,
     config::Config,
     logger::Logger,
     master_server::{Error, Master},
+    signal_flags::SignalFlags,
     stats::Stats,
     str_arr::StrArr,
 };
@@ -63,7 +56,7 @@ fn load_config(cli: &Cli, logger: &Logger) -> Result<Config, config::Error> {
 fn run() -> Result<(), Error> {
     let cli = cli::parse().unwrap_or_else(|e| {
         eprintln!("{e}");
-        std::process::exit(1);
+        process::exit(1);
     });
 
     let logger = logger::init();
@@ -77,15 +70,11 @@ fn run() -> Result<(), Error> {
     });
 
     let mut master = Master::new(cfg)?;
-    let sig_flag = Arc::new(AtomicBool::new(false));
-    // XXX: Windows does not support SIGUSR1.
-    #[cfg(not(windows))]
-    signal_flag::register(SIGUSR1, sig_flag.clone())?;
+    let sig_flags = SignalFlags::init()?;
+    while !sig_flags.is_exit() {
+        master.run()?;
 
-    loop {
-        master.run(&sig_flag)?;
-
-        if sig_flag.swap(false, Ordering::Relaxed) {
+        if sig_flags.remove_reload() {
             if let Some(config_path) = cli.config_path.as_deref() {
                 info!("Reloading config from {}", config_path);
 
@@ -100,6 +89,9 @@ fn run() -> Result<(), Error> {
             }
         }
     }
+
+    info!("Server stopped");
+    Ok(())
 }
 
 fn main() {

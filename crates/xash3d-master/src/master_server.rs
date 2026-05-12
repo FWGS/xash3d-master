@@ -9,7 +9,6 @@ use std::{
     io,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, ToSocketAddrs, UdpSocket},
     str::{self, FromStr},
-    sync::atomic::{AtomicBool, Ordering},
     time::Duration,
 };
 
@@ -30,6 +29,7 @@ use xash3d_protocol::{
 use crate::{
     config::{Config, MasterConfig},
     hash_map::{Timed, TimedHashMap},
+    signal_flags::SignalFlags,
     Stats, StrArr,
 };
 
@@ -180,10 +180,10 @@ impl Master {
         Ok(())
     }
 
-    pub fn run(&mut self, sig_flag: &AtomicBool) -> Result<(), Error> {
+    pub fn run(&mut self) -> Result<(), Error> {
         match self {
-            Self::V4(inner) => inner.run(sig_flag),
-            Self::V6(inner) => inner.run(sig_flag),
+            Self::V4(inner) => inner.run(),
+            Self::V6(inner) => inner.run(),
         }
     }
 }
@@ -276,9 +276,9 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         Ok(None)
     }
 
-    pub fn run(&mut self, sig_flag: &AtomicBool) -> Result<(), Error> {
+    pub fn run(&mut self) -> Result<(), Error> {
         let mut buf = [0; 2048];
-        while !sig_flag.load(Ordering::Relaxed) {
+        while SignalFlags::get().is_empty() {
             let (n, from) = match self.sock.recv_from(&mut buf) {
                 Ok(x) => x,
                 Err(e) => match e.kind() {

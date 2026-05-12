@@ -1,7 +1,6 @@
 use std::{
     io,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket},
-    sync::atomic::AtomicBool,
     thread,
     time::Duration,
 };
@@ -64,8 +63,7 @@ impl Test {
     fn create_master(&mut self, cfg: &Config) {
         let mut master = MasterServer::new(cfg.clone(), UNSPECIFIED).unwrap();
         self.master_addr = master.local_addr().unwrap();
-        let sig_flag = AtomicBool::new(false);
-        thread::spawn(move || master.run(&sig_flag).unwrap());
+        thread::spawn(move || master.run().unwrap());
     }
 
     fn add_server(&mut self, cfg: &Config) {

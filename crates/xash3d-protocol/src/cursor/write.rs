@@ -93,7 +93,7 @@ pub struct CursorMut<'a> {
 
 macro_rules! impl_put {
     ($($n:ident: $t:ty = $f:ident),+ $(,)?) => (
-        $(#[inline]
+        $(#[inline(always)]
         pub fn $n(&mut self, n: $t) -> Result<&mut Self> {
             self.put_array(&n.$f())
         })+
@@ -101,6 +101,7 @@ macro_rules! impl_put {
 }
 
 impl<'a> CursorMut<'a> {
+    #[inline(always)]
     pub fn new(buffer: &'a mut [u8]) -> Self {
         Self {
             buffer,
@@ -109,6 +110,7 @@ impl<'a> CursorMut<'a> {
         }
     }
 
+    #[inline(always)]
     fn with_offset(buffer: &'a mut [u8], offset: usize) -> Self {
         Self {
             buffer,
@@ -118,11 +120,13 @@ impl<'a> CursorMut<'a> {
     }
 
     /// Returns the position in the original buffer.
+    #[inline(always)]
     pub fn pos(&self) -> usize {
         self.offset + self.pos
     }
 
     /// Returns the position in the current chunk of original buffer.
+    #[inline(always)]
     pub fn current_pos(&self) -> usize {
         self.pos
     }
@@ -132,8 +136,9 @@ impl<'a> CursorMut<'a> {
         self.buffer.len() - self.pos
     }
 
+    #[inline(always)]
     pub fn expect_full(&self) -> Result<()> {
-        if self.available() == 0 {
+        if self.pos == self.buffer.len() {
             Ok(())
         } else {
             Err(CursorError::ExpectFull)
@@ -145,45 +150,40 @@ impl<'a> CursorMut<'a> {
     /// The first returned cursor have `len` capacity. The second returned cursor have all
     /// remaining capacity in the original buffer.
     pub fn split(mut self, len: usize) -> Result<(Self, Self)> {
-        if self.available() < len {
-            return Err(CursorError::BufferOverflow);
+        let new_pos = self.pos + len;
+        if new_pos <= self.buffer.len() {
+            let (head, tail) = self.buffer.split_at_mut(new_pos);
+            let tail = CursorMut::with_offset(tail, self.offset + new_pos);
+            self.buffer = head;
+            Ok((self, tail))
+        } else {
+            Err(CursorError::BufferOverflow)
         }
-        let offset = self.pos + len;
-        let (head, tail) = self.buffer.split_at_mut(offset);
-        let tail = CursorMut::with_offset(tail, self.offset + offset);
-        self.buffer = head;
-        Ok((self, tail))
     }
 
-    pub fn advance<F>(&mut self, count: usize, mut f: F) -> Result<&mut Self>
-    where
-        F: FnMut(&mut [u8]),
-    {
-        if count <= self.available() {
-            f(&mut self.buffer[self.pos..self.pos + count]);
-            self.pos += count;
+    #[inline(always)]
+    pub fn put_bytes(&mut self, s: &[u8]) -> Result<&mut Self> {
+        let new_pos = self.pos + s.len();
+        if new_pos <= self.buffer.len() {
+            self.buffer[self.pos..new_pos].copy_from_slice(s);
+            self.pos = new_pos;
             Ok(self)
         } else {
             Err(CursorError::BufferOverflow)
         }
     }
 
-    pub fn put_bytes(&mut self, s: &[u8]) -> Result<&mut Self> {
-        self.advance(s.len(), |i| {
-            i.copy_from_slice(s);
-        })
-    }
-
+    #[inline(always)]
     pub fn put_array<const N: usize>(&mut self, s: &[u8; N]) -> Result<&mut Self> {
-        self.advance(N, |i| {
-            i.copy_from_slice(s);
-        })
+        self.put_bytes(s)
     }
 
+    #[inline(always)]
     pub fn put_str(&mut self, s: &str) -> Result<&mut Self> {
         self.put_bytes(s.as_bytes())
     }
 
+    #[inline(always)]
     pub fn put_cstr(&mut self, s: impl AsRef<[u8]>) -> Result<&mut Self> {
         self.put_bytes(s.as_ref())?.put_u8(0)
     }

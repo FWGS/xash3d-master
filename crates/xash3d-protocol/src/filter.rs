@@ -26,7 +26,10 @@
 //! * Do not have bots
 //! * Is not protected by a password
 
-use core::{fmt, str::FromStr};
+use core::{
+    fmt::{self, Write},
+    str::FromStr,
+};
 
 use bitflags::bitflags;
 
@@ -287,55 +290,54 @@ impl<'a> TryFrom<&'a [u8]> for Filter<'a> {
 
 impl fmt::Display for Filter<'_> {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        macro_rules! display_name {
+            ($name:expr) => {
+                fmt.write_str(concat!("\\", $name, "\\"))?;
+            };
+        }
+
+        macro_rules! display_some {
+            ($name:expr, $value:expr) => {
+                display_some!($name, $value, Display);
+            };
+            ($name:expr, $value:expr, $trait:ident) => {
+                if let Some(s) = $value.as_ref() {
+                    display_name!($name);
+                    fmt::$trait::fmt(s, fmt)?;
+                }
+            };
+        }
+
         macro_rules! display_flag {
-            ($n:expr, $f:expr) => {
-                if self.flags_mask.contains($f) {
-                    let flag = if self.flags.contains($f) { '1' } else { '0' };
-                    write!(fmt, "\\{}\\{}", $n, flag)?;
+            ($name:expr, $flag:expr) => {
+                if self.flags_mask.contains($flag) {
+                    display_name!($name);
+                    let c = if self.flags.contains($flag) { '1' } else { '0' };
+                    fmt.write_char(c)?;
                 }
             };
         }
 
         display_flag!("dedicated", FilterFlags::DEDICATED);
         display_flag!("secure", FilterFlags::SECURE);
-        if let Some(s) = self.gamedir {
-            write!(fmt, "\\gamedir\\{s}")?;
-        }
+        display_some!("gamedir", self.gamedir);
         display_flag!("secure", FilterFlags::SECURE);
-        if let Some(s) = self.map {
-            write!(fmt, "\\map\\{s}")?;
-        }
+        display_some!("map", self.map);
         display_flag!("empty", FilterFlags::EMPTY);
         display_flag!("full", FilterFlags::FULL);
         display_flag!("password", FilterFlags::PASSWORD);
         display_flag!("noplayers", FilterFlags::NOPLAYERS);
-        if let Some(v) = self.clver {
-            write!(fmt, "\\clver\\{v}")?;
-        }
+        display_some!("clver", self.clver);
         display_flag!("nat", FilterFlags::NAT);
         display_flag!("lan", FilterFlags::LAN);
         display_flag!("bots", FilterFlags::BOTS);
-        if let Some(x) = self.key {
-            write!(fmt, "\\key\\{x:x}")?;
-        }
-        if let Some(x) = self.protocol {
-            write!(fmt, "\\protocol\\{x}")?;
-        }
-        if let Some(x) = self.client_buildnum {
-            write!(fmt, "\\buildnum\\{x}")?;
-        }
-        if let Some(x) = self.client_os {
-            write!(fmt, "\\os\\{x}")?;
-        }
-        if let Some(x) = self.client_arch {
-            write!(fmt, "\\arch\\{x}")?;
-        }
-        if let Some(x) = self.client_branch {
-            write!(fmt, "\\branch\\{x}")?;
-        }
-        if let Some(x) = self.client_commit {
-            write!(fmt, "\\commit\\{x}")?;
-        }
+        display_some!("key", self.key, LowerHex);
+        display_some!("protocol", self.protocol);
+        display_some!("buildnum", self.client_buildnum);
+        display_some!("os", self.client_os);
+        display_some!("arch", self.client_arch);
+        display_some!("branch", self.client_branch);
+        display_some!("commit", self.client_commit);
         Ok(())
     }
 }

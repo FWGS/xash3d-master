@@ -127,7 +127,7 @@ pub struct Cursor<'a> {
 
 macro_rules! impl_get {
     ($($n:ident: $t:ty = $f:ident),+ $(,)?) => (
-        $(#[inline]
+        $(#[inline(always)]
         pub fn $n(&mut self) -> Result<$t> {
             const N: usize = mem::size_of::<$t>();
             self.get_array::<N>().map(<$t>::$f)
@@ -175,6 +175,7 @@ impl<'a> Cursor<'a> {
         }
     }
 
+    #[inline(always)]
     pub fn get_bytes(&mut self, count: usize) -> Result<&'a [u8]> {
         let end = self.pos + count;
         if end <= self.buffer.len() {
@@ -190,6 +191,7 @@ impl<'a> Cursor<'a> {
         self.get_bytes(count).map(|_| ())
     }
 
+    #[inline(always)]
     pub fn get_array<const N: usize>(&mut self) -> Result<[u8; N]> {
         self.get_bytes(N).map(|s| {
             let mut array = [0; N];

@@ -99,6 +99,7 @@ impl ServerAddressSealed for SocketAddrV4 {
         Ok(SocketAddrV4::new(ip, port))
     }
 
+    #[inline(always)]
     fn put(&self, cur: &mut CursorMut) -> Result<(), Error> {
         cur.put_array(&self.ip().octets())?;
         cur.put_u16_be(self.port())?;
@@ -117,6 +118,7 @@ impl ServerAddressSealed for SocketAddrV6 {
         Ok(SocketAddrV6::new(ip, port, 0, 0))
     }
 
+    #[inline(always)]
     fn put(&self, cur: &mut CursorMut) -> Result<(), Error> {
         cur.put_array(&self.ip().octets())?;
         cur.put_u16_be(self.port())?;
@@ -208,19 +210,19 @@ impl<'a> QueryServersResponse<'a> {
             cur.put_u32_le(key)?;
             cur.put_u8(8)?;
         }
+
         let mut count = 0;
-        let mut iter = list.iter();
-        while cur.available() >= A::size() * 2 {
-            if let Some(i) = iter.next() {
-                i.put(&mut cur)?;
-                count += 1;
-            } else {
+        for i in list {
+            if cur.available() < A::size() * 2 {
                 break;
             }
+            i.put(&mut cur)?;
+            count += 1;
         }
-        for _ in 0..A::size() {
-            cur.put_u8(0)?;
-        }
+
+        // always write end marker
+        cur.put_bytes(&[0; 18][..A::size()])?;
+
         let n = cur.pos();
         Ok((&buf[..n], count))
     }

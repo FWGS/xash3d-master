@@ -1,6 +1,9 @@
 use core::fmt;
 
-use crate::cursor::CursorError;
+use crate::{
+    cursor::CursorError,
+    map::{InvalidKeyError, InvalidMapError},
+};
 
 /// The error type for decoding and encoding packets.
 #[derive(Debug, PartialEq, Eq)]
@@ -51,5 +54,17 @@ impl std::error::Error for Error {}
 impl From<CursorError> for Error {
     fn from(source: CursorError) -> Self {
         Self::CursorError(source)
+    }
+}
+
+impl From<InvalidMapError> for Error {
+    fn from(_: InvalidMapError) -> Self {
+        Self::InvalidFilter
+    }
+}
+
+impl From<InvalidKeyError> for Error {
+    fn from(_: InvalidKeyError) -> Self {
+        Self::InvalidFilter
     }
 }

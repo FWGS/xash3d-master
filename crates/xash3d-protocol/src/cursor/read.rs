@@ -7,12 +7,18 @@ use alloc::{borrow::ToOwned, boxed::Box, string::String};
 
 use memchr::{memchr, memchr2};
 
-use crate::{color, wrappers::Str};
+use crate::{color, map::MapStr, wrappers::Str};
 
 use super::{CursorError, Result};
 
 pub trait GetKeyValue<'a>: Sized {
     fn get_key_value(cur: &mut Cursor<'a>) -> Result<Self>;
+}
+
+impl<'a> GetKeyValue<'a> for &'a MapStr {
+    fn get_key_value(cur: &mut Cursor<'a>) -> Result<Self> {
+        MapStr::from_slice(cur.get_key_value_raw()?).map_err(|_| CursorError::InvalidString)
+    }
 }
 
 impl<'a> GetKeyValue<'a> for &'a [u8] {

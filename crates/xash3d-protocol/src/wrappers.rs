@@ -1,6 +1,10 @@
 //! Wrappers for byte slices with pretty-printers.
 
-use core::{fmt, ops::Deref};
+use core::{
+    fmt::{self, Write},
+    ops::Deref,
+    str,
+};
 
 use crate::cursor::{CursorError, CursorMut, PutKeyValue};
 
@@ -62,23 +66,49 @@ where
     }
 }
 
+fn str_format_bytes(s: &[u8], fmt: &mut fmt::Formatter) -> fmt::Result {
+    const HEX: [u8; 16] = *b"0123456789abcdef";
+
+    #[inline(always)]
+    fn is_printable(c: u8) -> bool {
+        c != b'\\' && (c.is_ascii_graphic() || c == b' ')
+    }
+
+    let mut it = s.iter().enumerate();
+    while let Some((i, mut c)) = it.next() {
+        if is_printable(*c) {
+            let n = it.find(|(_, c)| !is_printable(**c));
+            let e = n.map_or(s.len(), |(e, _)| e);
+            // SAFETY: The slice contains only ASCII graphic and space characters.
+            let valid = unsafe { str::from_utf8_unchecked(&s[i..e]) };
+            fmt.write_str(valid)?;
+            match n {
+                Some((_, n)) => c = n,
+                None => break,
+            }
+        }
+
+        match c {
+            b'\\' => fmt.write_str("\\\\")?,
+            b'\n' => fmt.write_str("\\n")?,
+            b'\t' => fmt.write_str("\\t")?,
+            _ => {
+                fmt.write_str("\\x")?;
+                fmt.write_char(HEX[(c >> 4) as usize] as char)?;
+                fmt.write_char(HEX[(c & 15) as usize] as char)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
 impl<T> fmt::Display for Str<T>
 where
     T: AsRef<[u8]>,
 {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        for &c in self.0.as_ref() {
-            match c {
-                b'\n' => write!(fmt, "\\n")?,
-                b'\t' => write!(fmt, "\\t")?,
-                b'\\' => write!(fmt, "\\\\")?,
-                _ if c.is_ascii_graphic() || c == b' ' => {
-                    write!(fmt, "{}", c as char)?;
-                }
-                _ => write!(fmt, "\\x{c:02x}")?,
-            }
-        }
-        Ok(())
+        str_format_bytes(self.0.as_ref(), fmt)
     }
 }
 
@@ -119,5 +149,22 @@ impl<T> Deref for Hide<T> {
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn str_wrapper_format() {
+        assert_eq!(
+            Str(b"123\\foobar\n\x00 \tbaz%\n\\\xff").to_string(),
+            r#"123\\foobar\n\x00 \tbaz%\n\\\xff"#
+        );
+        assert_eq!(
+            Str(b"\xff123\\foobar\n\x00 \tbaz%\n\\").to_string(),
+            r#"\xff123\\foobar\n\x00 \tbaz%\n\\"#
+        );
     }
 }

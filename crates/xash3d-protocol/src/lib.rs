@@ -17,6 +17,7 @@ pub mod net;
 
 pub mod color;
 pub mod filter;
+pub mod map;
 pub mod server_info;
 pub mod wrappers;
 

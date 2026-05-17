@@ -6,6 +6,8 @@ use core::fmt;
 pub use read::{Cursor, GetKeyValue};
 pub use write::{CursorMut, PutKeyValue};
 
+use crate::map::MapStrParseError;
+
 /// The error type for `Cursor` and `CursorMut`.
 #[derive(Debug, PartialEq, Eq)]
 pub enum CursorError {
@@ -54,6 +56,36 @@ impl fmt::Display for CursorError {
 
 #[cfg(feature = "std")]
 impl std::error::Error for CursorError {}
+
+impl From<core::str::Utf8Error> for CursorError {
+    fn from(_: core::str::Utf8Error) -> Self {
+        Self::InvalidString
+    }
+}
+
+impl From<core::num::ParseIntError> for CursorError {
+    fn from(_: core::num::ParseIntError) -> Self {
+        Self::InvalidNumber
+    }
+}
+
+impl From<MapStrParseError<core::num::ParseIntError>> for CursorError {
+    fn from(value: MapStrParseError<core::num::ParseIntError>) -> Self {
+        match value {
+            MapStrParseError::Utf8Error(e) => e.into(),
+            MapStrParseError::ParseError(e) => e.into(),
+        }
+    }
+}
+
+impl From<MapStrParseError<CursorError>> for CursorError {
+    fn from(value: MapStrParseError<CursorError>) -> Self {
+        match value {
+            MapStrParseError::Utf8Error(e) => e.into(),
+            MapStrParseError::ParseError(e) => e,
+        }
+    }
+}
 
 pub type Result<T, E = CursorError> = core::result::Result<T, E>;
 

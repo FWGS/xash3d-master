@@ -2,14 +2,12 @@ use std::{
     cmp,
     collections::{hash_map::Entry, HashMap},
     fmt, io,
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    net::SocketAddr,
     time::{Duration, Instant},
 };
 
 use xash3d_protocol::{
-    game::QueryServers,
-    master::QueryServersResponse,
-    server::{GetServerInfoResponse, Region},
+    game::QueryServers, master::QueryServersResponse, server::GetServerInfoResponse,
 };
 
 use crate::{
@@ -51,14 +49,10 @@ impl Master {
         // generate a fresh key for each request
         self.key = fastrand::u32(..);
 
-        let packet = QueryServers {
-            region: Region::RestOfTheWorld,
-            last: SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0).into(),
-            filter: FilterKey {
-                filter,
-                key: self.key,
-            },
-        };
+        let packet = QueryServers::new(FilterKey {
+            filter,
+            key: self.key,
+        });
 
         // TODO: handle error, filter may not fit
         packet.encode(buf).unwrap()

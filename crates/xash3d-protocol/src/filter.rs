@@ -285,7 +285,7 @@ impl<'a> TryFrom<&'a [u8]> for Filter<'a> {
     }
 }
 
-impl fmt::Display for &Filter<'_> {
+impl fmt::Display for Filter<'_> {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         macro_rules! display_flag {
             ($n:expr, $f:expr) => {

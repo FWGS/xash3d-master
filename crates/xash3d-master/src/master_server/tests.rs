@@ -162,15 +162,9 @@ fn check_query_servers() {
     let addr = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0);
     let master = MasterServer::new(cfg, addr).unwrap();
 
-    let mut query = QueryServers {
-        region: Region::RestOfTheWorld,
-        last: SocketAddr::V4(addr),
-        filter: Filter::default(),
-    };
+    let mut query = QueryServers::default();
 
     // check missing fields
-    query.filter.clver = None;
-    query.filter.client_buildnum = None;
     assert!(!master.is_query_servers_valid(&addr, &query));
 
     query.filter.clver = Some(Version::new(0, 21));
@@ -206,19 +200,15 @@ fn server_add() {
     let mut buf = [0; 1024];
     let sock = UdpSocket::bind(UNSPECIFIED).unwrap();
     let game_key = Some(0xbeefdead);
-    let p = game::QueryServers {
-        region: server::Region::RestOfTheWorld,
-        last: UNSPECIFIED.into(),
-        filter: Filter {
-            gamedir: Some(Str(b"valve")),
-            clver: Some(xash3d_protocol::CLIENT_VERSION),
-            client_os: Some(Str(b"linux")),
-            client_arch: Some(Str(b"amd64")),
-            client_buildnum: Some(cfg.master.client.min_engine_buildnum),
-            key: game_key,
-            ..Filter::default()
-        },
-    };
+    let p = game::QueryServers::new(Filter {
+        gamedir: Some(Str(b"valve")),
+        clver: Some(xash3d_protocol::CLIENT_VERSION),
+        client_os: Some(Str(b"linux")),
+        client_arch: Some(Str(b"amd64")),
+        client_buildnum: Some(cfg.master.client.min_engine_buildnum),
+        key: game_key,
+        ..Filter::default()
+    });
     let p = p.encode(&mut buf).unwrap();
     sock.send_to(p, test.master_addr).unwrap();
 
@@ -275,19 +265,15 @@ fn client_rate_limit() {
         }
         info!("send {queries} client queries");
         let game_key = Some(0xbeefdead);
-        let p = game::QueryServers {
-            region: server::Region::RestOfTheWorld,
-            last: UNSPECIFIED.into(),
-            filter: Filter {
-                gamedir: Some(Str(b"valve")),
-                clver: Some(xash3d_protocol::CLIENT_VERSION),
-                client_os: Some(Str(b"linux")),
-                client_arch: Some(Str(b"amd64")),
-                client_buildnum: Some(cfg.master.client.min_engine_buildnum),
-                key: game_key,
-                ..Filter::default()
-            },
-        };
+        let p = game::QueryServers::new(Filter {
+            gamedir: Some(Str(b"valve")),
+            clver: Some(xash3d_protocol::CLIENT_VERSION),
+            client_os: Some(Str(b"linux")),
+            client_arch: Some(Str(b"amd64")),
+            client_buildnum: Some(cfg.master.client.min_engine_buildnum),
+            key: game_key,
+            ..Filter::default()
+        });
         let mut buf = [0; 512];
         let p = p.encode(&mut buf).unwrap();
         for _ in 0..queries {

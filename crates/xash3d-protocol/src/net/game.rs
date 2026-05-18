@@ -1,52 +1,52 @@
 //! Game client packets.
 
-use std::{
-    fmt,
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
-};
+use std::fmt;
 
 use crate::{
     cursor::{Cursor, CursorMut},
     filter::Filter,
     net::server::Region,
+    wrappers::{Str, StrSlice},
     Error,
 };
 
+const FIRST_ADDRESS: &[u8] = b"0.0.0.0:0";
+
 /// Request a list of server addresses from master servers.
 #[derive(Clone, Debug, PartialEq)]
-pub struct QueryServers<T> {
+pub struct QueryServers<'a, T> {
     /// Servers must be from the `region`.
     pub region: Region,
     /// Last received server address __(not used)__.
-    pub last: SocketAddr,
+    pub last: StrSlice<'a>,
     /// Select only servers that match the `filter`.
     pub filter: T,
 }
 
-impl QueryServers<()> {
+impl QueryServers<'_, ()> {
     /// Packet header.
     pub const HEADER: &'static [u8] = b"1";
 }
 
-impl<T> QueryServers<T> {
+impl<'a, T> QueryServers<'a, T> {
     /// Creates a new `QueryServers` with a given filter.
     pub fn new(filter: T) -> Self {
         Self {
             region: Region::RestOfTheWorld,
-            last: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)),
+            last: Str(FIRST_ADDRESS),
             filter,
         }
     }
 
     /// Decode packet from `src`.
-    pub fn decode<'a>(src: &'a [u8]) -> Result<Self, Error>
+    pub fn decode(src: &'a [u8]) -> Result<Self, Error>
     where
         T: TryFrom<&'a [u8], Error = Error>,
     {
         let mut cur = Cursor::new(src);
         cur.expect(QueryServers::HEADER)?;
         let region = cur.get_u8()?.try_into().map_err(|_| Error::InvalidRegion)?;
-        let last = cur.get_cstr_as_str()?;
+        let last = cur.get_cstr()?;
         let filter = match cur.get_bytes(cur.remaining())? {
             // some clients may have bug and filter will be with zero at the end
             [x @ .., 0] => x,
@@ -54,7 +54,7 @@ impl<T> QueryServers<T> {
         };
         Ok(Self {
             region,
-            last: last.parse().map_err(|_| Error::InvalidQueryServersLast)?,
+            last,
             filter: T::try_from(filter)?,
         })
     }
@@ -76,7 +76,7 @@ impl<T> QueryServers<T> {
     }
 }
 
-impl<T: Default> Default for QueryServers<T> {
+impl<T: Default> Default for QueryServers<'_, T> {
     fn default() -> Self {
         Self::new(T::default())
     }
@@ -274,7 +274,7 @@ impl GetPlayers {
 #[non_exhaustive]
 pub enum Packet<'a> {
     /// Request a list of server addresses from master servers.
-    QueryServers(QueryServers<Filter<'a>>),
+    QueryServers(QueryServers<'a, Filter<'a>>),
 
     /// Request a challenge number from a game server.
     GetChallenge(GetChallenge),

@@ -1,13 +1,17 @@
 #![cfg_attr(not(feature = "net"), allow(dead_code))]
 
-use core::{mem, str};
+use core::{ffi::CStr, mem, str};
 
 #[cfg(feature = "alloc")]
 use alloc::{borrow::ToOwned, boxed::Box, string::String};
 
 use memchr::{memchr, memchr2};
 
-use crate::{color, map::MapStr, wrappers::Str};
+use crate::{
+    color,
+    map::MapStr,
+    wrappers::{Str, StrSlice},
+};
 
 use super::{CursorError, Result};
 
@@ -225,15 +229,16 @@ impl<'a> Cursor<'a> {
         Ok(s)
     }
 
-    pub fn get_cstr(&mut self) -> Result<Str<&'a [u8]>> {
-        let pos = self
-            .as_slice()
-            .iter()
-            .position(|&c| c == b'\0')
-            .ok_or(CursorError::NeedMoreBytes(1))?;
-        let s = &self.buffer[self.pos..self.pos + pos];
-        self.pos += pos + 1;
-        Ok(Str(s))
+    pub fn get_cstr_ffi(&mut self) -> Result<&'a CStr> {
+        let e = self.pos + self.find(b'\0')? + 1;
+        let s = &self.buffer[self.pos..e];
+        self.pos = e;
+        // SAFETY: The slice contains exactly one nul-byte at the end.
+        Ok(unsafe { CStr::from_bytes_with_nul_unchecked(s) })
+    }
+
+    pub fn get_cstr(&mut self) -> Result<StrSlice<'a>> {
+        Ok(Str(self.get_cstr_ffi()?.to_bytes()))
     }
 
     pub fn get_cstr_as_str(&mut self) -> Result<&'a str> {

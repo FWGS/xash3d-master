@@ -1,6 +1,9 @@
 //! Game client packets.
 
-use std::{fmt, net::SocketAddr};
+use std::{
+    fmt,
+    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+};
 
 use crate::{
     cursor::{Cursor, CursorMut},
@@ -25,12 +28,21 @@ impl QueryServers<()> {
     pub const HEADER: &'static [u8] = b"1";
 }
 
-impl<'a, T: 'a> QueryServers<T>
-where
-    T: TryFrom<&'a [u8], Error = Error>,
-{
+impl<T> QueryServers<T> {
+    /// Creates a new `QueryServers` with a given filter.
+    pub fn new(filter: T) -> Self {
+        Self {
+            region: Region::RestOfTheWorld,
+            last: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)),
+            filter,
+        }
+    }
+
     /// Decode packet from `src`.
-    pub fn decode(src: &'a [u8]) -> Result<Self, Error> {
+    pub fn decode<'a>(src: &'a [u8]) -> Result<Self, Error>
+    where
+        T: TryFrom<&'a [u8], Error = Error>,
+    {
         let mut cur = Cursor::new(src);
         cur.expect(QueryServers::HEADER)?;
         let region = cur.get_u8()?.try_into().map_err(|_| Error::InvalidRegion)?;
@@ -46,14 +58,12 @@ where
             filter: T::try_from(filter)?,
         })
     }
-}
 
-impl<T> QueryServers<T>
-where
-    for<'b> &'b T: fmt::Display,
-{
     /// Encode packet to `buf`.
-    pub fn encode<'a>(&self, buf: &'a mut [u8]) -> Result<&'a [u8], Error> {
+    pub fn encode<'b>(&self, buf: &'b mut [u8]) -> Result<&'b [u8], Error>
+    where
+        T: fmt::Display,
+    {
         let n = CursorMut::new(buf)
             .put_bytes(QueryServers::HEADER)?
             .put_u8(self.region as u8)?
@@ -63,6 +73,12 @@ where
             .put_u8(0)?
             .pos();
         Ok(&buf[..n])
+    }
+}
+
+impl<T: Default> Default for QueryServers<T> {
+    fn default() -> Self {
+        Self::new(T::default())
     }
 }
 
@@ -295,8 +311,6 @@ impl<'a> Packet<'a> {
 mod tests {
     use super::*;
 
-    use std::net::{IpAddr, Ipv4Addr};
-
     use crate::{
         filter::{FilterFlags, Version},
         wrappers::Str,
@@ -304,20 +318,16 @@ mod tests {
 
     #[test]
     fn query_servers() {
-        let p = QueryServers {
-            region: Region::RestOfTheWorld,
-            last: SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0),
-            filter: Filter {
-                gamedir: Some(Str(&b"valve"[..])),
-                map: Some(Str(&b"crossfire"[..])),
-                key: Some(0xdeadbeef),
-                protocol: Some(49),
-                clver: Some(Version::new(0, 20)),
-                flags: FilterFlags::all(),
-                flags_mask: FilterFlags::all(),
-                ..Filter::default()
-            },
-        };
+        let p = QueryServers::new(Filter {
+            gamedir: Some(Str(&b"valve"[..])),
+            map: Some(Str(&b"crossfire"[..])),
+            key: Some(0xdeadbeef),
+            protocol: Some(49),
+            clver: Some(Version::new(0, 20)),
+            flags: FilterFlags::all(),
+            flags_mask: FilterFlags::all(),
+            ..Filter::default()
+        });
         let mut buf = [0; 512];
         let t = p.encode(&mut buf).unwrap();
         assert_eq!(Packet::decode(t), Ok(Some(Packet::QueryServers(p))));
@@ -325,20 +335,16 @@ mod tests {
 
     #[test]
     fn query_servers_filter_bug() {
-        let p = QueryServers {
-            region: Region::RestOfTheWorld,
-            last: SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0),
-            filter: Filter {
-                gamedir: None,
-                protocol: Some(48),
-                map: None,
-                key: None,
-                clver: Some(Version::new(0, 20)),
-                flags: FilterFlags::empty(),
-                flags_mask: FilterFlags::NAT,
-                ..Filter::default()
-            },
-        };
+        let p = QueryServers::new(Filter {
+            gamedir: None,
+            protocol: Some(48),
+            map: None,
+            key: None,
+            clver: Some(Version::new(0, 20)),
+            flags: FilterFlags::empty(),
+            flags_mask: FilterFlags::NAT,
+            ..Filter::default()
+        });
 
         let s = b"1\xff0.0.0.0:0\x00\\protocol\\48\\clver\\0.20\\nat\\0\0";
         assert_eq!(Packet::decode(s), Ok(Some(Packet::QueryServers(p.clone()))));

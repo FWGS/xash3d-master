@@ -10,8 +10,8 @@ use crate::{
 pub enum Error {
     /// Failed to decode a packet.
     InvalidPacket,
-    /// Invalid filter.
-    InvalidFilter,
+    /// Invalid map string.
+    InvalidMap,
     /// Invalid region.
     InvalidRegion,
     /// Invalid client announce IP.
@@ -32,7 +32,7 @@ impl fmt::Display for Error {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::InvalidPacket => "Invalid packet".fmt(fmt),
-            Self::InvalidFilter => "Invalid filter".fmt(fmt),
+            Self::InvalidMap => "Invalid map string".fmt(fmt),
             Self::InvalidRegion => "Invalid region".fmt(fmt),
             Self::InvalidClientAnnounceIp => "Invalid client announce IP".fmt(fmt),
             Self::InvalidQueryServersLast => "Invalid last server IP".fmt(fmt),
@@ -59,12 +59,12 @@ impl From<CursorError> for Error {
 
 impl From<InvalidMapError> for Error {
     fn from(_: InvalidMapError) -> Self {
-        Self::InvalidFilter
+        Self::InvalidMap
     }
 }
 
 impl From<InvalidKeyError> for Error {
     fn from(_: InvalidKeyError) -> Self {
-        Self::InvalidFilter
+        Self::InvalidMap
     }
 }

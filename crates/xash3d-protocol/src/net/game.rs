@@ -47,15 +47,22 @@ impl<'a, T> QueryServers<'a, T> {
         cur.expect(QueryServers::HEADER)?;
         let region = cur.get_u8()?.try_into().map_err(|_| Error::InvalidRegion)?;
         let last = cur.get_cstr()?;
-        let filter = match cur.get_bytes(cur.remaining())? {
-            // some clients may have bug and filter will be with zero at the end
-            [x @ .., 0] => x,
-            x => x,
+        let filter_raw = match cur.get_cstr_ffi() {
+            Ok(s) => {
+                cur.expect_empty()?;
+                s.to_bytes()
+            }
+            Err(_) => {
+                // Xash3D engine does not write nul bute at the end.
+                cur.end()
+            }
         };
+        // FIXME: Can not use CStr because of bug in Xash3D engine.
+        let filter = T::try_from(filter_raw)?;
         Ok(Self {
             region,
             last,
-            filter: T::try_from(filter)?,
+            filter,
         })
     }
 

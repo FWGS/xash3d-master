@@ -198,11 +198,11 @@ fn bench_filter(c: &mut Criterion) {
         let raw = raw.as_bytes();
 
         // check errors
-        let filter = Filter::try_from(raw).unwrap();
+        let filter = Filter::from_slice(raw).unwrap();
 
         group.throughput(Throughput::Bytes(raw.len() as u64));
         group.bench_function(format!("parse/{}", raw.len()), |b| {
-            b.iter(|| Filter::try_from(black_box(raw)))
+            b.iter(|| Filter::from_slice(black_box(raw)))
         });
 
         group.bench_function(format!("fmt/{}", raw.len()), |b| {

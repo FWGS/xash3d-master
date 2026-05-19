@@ -27,6 +27,7 @@
 //! * Is not protected by a password
 
 use core::{
+    ffi::CStr,
     fmt::{self, Write},
     str::FromStr,
 };
@@ -35,6 +36,7 @@ use bitflags::bitflags;
 
 use crate::{
     cursor::{Cursor, CursorError, GetKeyValue, PutKeyValue},
+    map::{MapIter, MapStr},
     server_info::ServerInfo,
     wrappers::Str,
     Error,
@@ -196,7 +198,7 @@ pub struct Filter<'a> {
     pub flags_mask: FilterFlags,
 }
 
-impl Filter<'_> {
+impl<'a> Filter<'a> {
     /// Insert filter flag.
     pub fn insert_flag(&mut self, flag: FilterFlags, value: bool) {
         self.flags.set(flag, value);
@@ -222,69 +224,105 @@ impl Filter<'_> {
             || self.map.is_some_and(|s| *s != info.map.as_ref())
             || self.protocol.is_some_and(|s| s != info.protocol))
     }
+
+    fn set_flag(&mut self, flag: FilterFlags, value: &MapStr) -> Result<(), CursorError> {
+        self.insert_flag(flag, value.parse_bool()?);
+        Ok(())
+    }
+
+    fn set(&mut self, key: &MapStr, value: &'a MapStr) -> Result<bool, CursorError> {
+        match key.as_bytes() {
+            b"dedicated" => self.set_flag(FilterFlags::DEDICATED, value)?,
+            b"secure" => self.set_flag(FilterFlags::SECURE, value)?,
+            b"gamedir" => self.gamedir = Some(Str(value.as_bytes())),
+            b"map" => self.map = Some(Str(value.as_bytes())),
+            b"protocol" => self.protocol = Some(value.parse()?),
+            b"empty" => self.set_flag(FilterFlags::EMPTY, value)?,
+            b"full" => self.set_flag(FilterFlags::FULL, value)?,
+            b"password" => self.set_flag(FilterFlags::PASSWORD, value)?,
+            b"noplayers" => self.set_flag(FilterFlags::NOPLAYERS, value)?,
+            b"clver" => self.clver = Some(value.parse()?),
+            b"os" => self.client_os = Some(Str(value.as_bytes())),
+            b"arch" => self.client_arch = Some(Str(value.as_bytes())),
+            b"branch" => self.client_branch = Some(Str(value.as_bytes())),
+            b"commit" => self.client_commit = Some(Str(value.as_bytes())),
+            b"buildnum" => self.client_buildnum = Some(value.parse()?),
+            b"nat" => self.set_flag(FilterFlags::NAT, value)?,
+            b"lan" => self.set_flag(FilterFlags::LAN, value)?,
+            b"bots" => self.set_flag(FilterFlags::BOTS, value)?,
+            b"key" => self.key = Some(u32::from_str_radix(value.to_str()?, 16)?),
+            _ => return Ok(false),
+        }
+        Ok(true)
+    }
+
+    pub fn from_map_iter(iter: MapIter<'a>) -> Result<Self, Error> {
+        let mut filter = Self::default();
+        for entry in iter {
+            let (key, value) = entry?;
+            match filter.set(key, value) {
+                Ok(true) => {}
+                Ok(false) => {
+                    trace!("unexpected Filter field {key:?} = {value:?}");
+                }
+                Err(err) => {
+                    let name = filter_key_name_str(key);
+                    return Err(Error::InvalidFilterValue(name, err));
+                }
+            }
+        }
+        Ok(filter)
+    }
+
+    pub fn from_cstr(src: &'a CStr) -> Result<Self, Error> {
+        Self::from_map_iter(MapIter::from_cstr(src)?)
+    }
+
+    pub fn from_slice(src: &'a [u8]) -> Result<Self, Error> {
+        Self::from_map_iter(MapIter::from_slice(src)?)
+    }
+}
+
+#[inline(never)]
+#[cold]
+fn filter_key_name_str(key: &MapStr) -> &'static str {
+    match key.as_bytes() {
+        b"dedicated" => "dedicated",
+        b"secure" => "secure",
+        b"gamedir" => "gamedir",
+        b"map" => "map",
+        b"protocol" => "protocol",
+        b"empty" => "empty",
+        b"full" => "full",
+        b"password" => "password",
+        b"noplayers" => "noplayers",
+        b"clver" => "clver",
+        b"os" => "os",
+        b"arch" => "arch",
+        b"branch" => "branch",
+        b"commit" => "commit",
+        b"buildnum" => "buildnum",
+        b"nat" => "nat",
+        b"lan" => "lan",
+        b"bots" => "bots",
+        b"key" => "key",
+        _ => "unknown",
+    }
+}
+
+impl<'a> TryFrom<&'a CStr> for Filter<'a> {
+    type Error = Error;
+
+    fn try_from(src: &'a CStr) -> Result<Self, Self::Error> {
+        Self::from_cstr(src)
+    }
 }
 
 impl<'a> TryFrom<&'a [u8]> for Filter<'a> {
     type Error = Error;
 
     fn try_from(src: &'a [u8]) -> Result<Self, Self::Error> {
-        trait Helper<'a> {
-            fn get<T: GetKeyValue<'a>>(&mut self, key: &'static str) -> Result<T, Error>;
-        }
-
-        impl<'a> Helper<'a> for Cursor<'a> {
-            fn get<T: GetKeyValue<'a>>(&mut self, key: &'static str) -> Result<T, Error> {
-                T::get_key_value(self).map_err(|e| Error::InvalidFilterValue(key, e))
-            }
-        }
-
-        let mut cur = Cursor::new(src);
-        let mut filter = Self::default();
-
-        loop {
-            let key = match cur.get_key_raw().map(Str) {
-                Ok(s) => s,
-                Err(CursorError::TableEnd) => break,
-                Err(e) => Err(e)?,
-            };
-
-            match *key {
-                b"dedicated" => filter.insert_flag(FilterFlags::DEDICATED, cur.get("dedicated")?),
-                b"secure" => filter.insert_flag(FilterFlags::SECURE, cur.get("secure")?),
-                b"gamedir" => filter.gamedir = Some(cur.get("gamedir")?),
-                b"map" => filter.map = Some(cur.get("map")?),
-                b"protocol" => filter.protocol = Some(cur.get("protocol")?),
-                b"empty" => filter.insert_flag(FilterFlags::EMPTY, cur.get("empty")?),
-                b"full" => filter.insert_flag(FilterFlags::FULL, cur.get("full")?),
-                b"password" => filter.insert_flag(FilterFlags::PASSWORD, cur.get("password")?),
-                b"noplayers" => filter.insert_flag(FilterFlags::NOPLAYERS, cur.get("noplayers")?),
-                b"clver" => filter.clver = Some(cur.get("clver")?),
-                b"os" => filter.client_os = Some(cur.get("os")?),
-                b"arch" => filter.client_arch = Some(cur.get("arch")?),
-                b"branch" => filter.client_branch = Some(cur.get("branch")?),
-                b"commit" => filter.client_commit = Some(cur.get("commit")?),
-                b"buildnum" => filter.client_buildnum = Some(cur.get("buildnum")?),
-                b"nat" => filter.insert_flag(FilterFlags::NAT, cur.get("nat")?),
-                b"lan" => filter.insert_flag(FilterFlags::LAN, cur.get("lan")?),
-                b"bots" => filter.insert_flag(FilterFlags::BOTS, cur.get("bots")?),
-                b"key" => {
-                    filter.key = Some(
-                        cur.get_key_value::<&str>()
-                            .and_then(|s| {
-                                u32::from_str_radix(s, 16).map_err(|_| CursorError::InvalidNumber)
-                            })
-                            .map_err(|e| Error::InvalidFilterValue("key", e))?,
-                    )
-                }
-                _ => {
-                    // skip unknown fields
-                    let value = Str(cur.get_key_value_raw()?);
-                    debug!("Invalid Filter field \"{}\" = \"{}\"", key, value);
-                }
-            }
-        }
-
-        Ok(filter)
+        Self::from_slice(src)
     }
 }
 

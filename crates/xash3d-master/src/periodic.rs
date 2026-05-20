@@ -16,6 +16,12 @@ impl Periodic {
         Self { limit, cur: 0 }
     }
 
+    /// Reset the counter.
+    #[inline(always)]
+    pub fn reset(&mut self) {
+        self.cur = 0;
+    }
+
     /// Increase the counter.
     ///
     /// Returns true if the counter has reached the limit.
@@ -24,7 +30,7 @@ impl Periodic {
         if self.cur < self.limit {
             false
         } else {
-            self.cur = 0;
+            self.reset();
             true
         }
     }

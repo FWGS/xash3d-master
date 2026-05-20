@@ -641,18 +641,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
     }
 
     fn remove_servers_by_ip(&mut self, ip: &Addr::Ip) {
-        let mut servers_to_remove: Vec<Addr> = Vec::new();
-
-        // have to create a copy to not mutate while iterating
-        for (addr, _) in self.servers.iter() {
-            if addr.ip() == ip {
-                servers_to_remove.push(*addr);
-            }
-        }
-
-        for addr in servers_to_remove {
-            self.servers.remove(&addr);
-        }
+        self.servers.retain(|addr, _| addr.ip() != ip);
     }
 
     fn add_server(&mut self, addr: Addr, server: ServerInfo) {

@@ -103,13 +103,11 @@ fn check_remove_server_by_ip() {
     use server::{Os, ServerAdd, ServerFlags, ServerType};
 
     let cfg = Config::default();
-
-    let addr = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0);
-    let mut master = MasterServer::new(cfg, addr).unwrap();
+    let mut master = MasterServer::new(cfg, UNSPECIFIED).unwrap();
 
     let server_add = ServerAdd {
-        gamedir: Str(&b"valve"[..]),
-        map: Str(&b"crossfire"[..]),
+        gamedir: Str(b"valve"),
+        map: Str(b"crossfire"),
         version: Version::new(0, 20),
         challenge: 0x12345678,
         server_type: ServerType::Dedicated,
@@ -121,32 +119,32 @@ fn check_remove_server_by_ip() {
         bots: 8,
         flags: ServerFlags::all(),
     };
+    let info = ServerInfo::new(&server_add);
 
-    let dummy_ip = Ipv4Addr::new(1, 1, 1, 1);
-    let dummy_ip2 = Ipv4Addr::new(1, 1, 1, 2);
+    for i in 1..=4 {
+        let ip = Ipv4Addr::new(1, 1, 1, i);
+        for j in 0..4 {
+            let addr = SocketAddrV4::new(ip, 27015 + j);
+            master.add_server(addr, info.clone());
+        }
+    }
 
-    master.add_server(
-        SocketAddrV4::new(dummy_ip, 27015),
-        ServerInfo::new(&server_add),
-    );
-    master.add_server(
-        SocketAddrV4::new(dummy_ip, 27016),
-        ServerInfo::new(&server_add),
-    );
-    master.add_server(
-        SocketAddrV4::new(dummy_ip, 27017),
-        ServerInfo::new(&server_add),
-    );
-    master.add_server(
-        SocketAddrV4::new(dummy_ip2, 27015),
-        ServerInfo::new(&server_add),
-    );
+    assert_eq!(master.count_all_servers(), 16);
 
+    master.admin_command("ban 2.2.2.2");
+    assert_eq!(master.count_all_servers(), 16);
+
+    master.admin_command("ban 1.1.1.1");
+    assert_eq!(master.count_all_servers(), 12);
+
+    master.admin_command("ban 1.1.1.2");
+    assert_eq!(master.count_all_servers(), 8);
+
+    master.admin_command("ban 1.1.1.3");
     assert_eq!(master.count_all_servers(), 4);
 
-    master.remove_servers_by_ip(&Ipv4Addr::new(1, 1, 1, 1));
-
-    assert_eq!(master.count_all_servers(), 1);
+    master.admin_command("ban 1.1.1.4");
+    assert_eq!(master.count_all_servers(), 0);
 }
 
 #[test]

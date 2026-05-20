@@ -159,6 +159,30 @@ impl<K: Eq + Hash, V> TimedHashMap<K, V> {
             }
         })
     }
+
+    /// Retains only the elements specified by the predicate.
+    ///
+    /// See [AHashMap::retain].
+    pub fn retain<F>(&mut self, mut f: F)
+    where
+        F: FnMut(&K, &mut V) -> bool,
+    {
+        if self.map.is_empty() {
+            return;
+        }
+
+        let now = RelativeTime::now();
+        self.map.retain(|k, v| {
+            // Use this opportunity to remove outdated entries.
+            if !v.is_valid(now, self.timeout) {
+                return false;
+            }
+            f(k, v)
+        });
+
+        // Outdated entries have been removed. The periodic cleanup can be delayed.
+        self.periodic.reset();
+    }
 }
 
 #[cfg(test)]

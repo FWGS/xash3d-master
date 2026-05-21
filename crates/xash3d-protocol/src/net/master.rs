@@ -126,18 +126,16 @@ impl ServerAddressSealed for SocketAddrV6 {
 
 /// Game server addresses list.
 #[derive(Clone, Debug, PartialEq)]
-pub struct QueryServersResponse<I> {
-    inner: I,
+pub struct QueryServersResponse<'a> {
+    inner: &'a [u8],
     /// A challenge number received in a filter string.
     pub key: Option<u32>,
 }
 
-impl QueryServersResponse<()> {
+impl<'a> QueryServersResponse<'a> {
     /// Packet header.
     pub const HEADER: &'static [u8] = b"\xff\xff\xff\xfff\n";
-}
 
-impl<'a> QueryServersResponse<&'a [u8]> {
     /// Decode packet from `src`.
     pub fn decode(src: &'a [u8]) -> Result<Self, Error> {
         let mut cur = Cursor::new(src);
@@ -190,16 +188,16 @@ impl<'a, A: ServerAddress> Iterator for QueryServersResponseIter<'a, A> {
     }
 }
 
-impl QueryServersResponse<()> {
+impl<'a> QueryServersResponse<'a> {
     /// Creates a new `QueryServersResponse`.
     pub fn new(key: Option<u32>) -> Self {
-        Self { inner: (), key }
+        Self { inner: b"", key }
     }
 
     /// Encode packet to `buf`.
     ///
     /// Returns number of bytes written into `buf` and how many items was written.
-    pub fn encode<'a, A>(&self, buf: &'a mut [u8], list: &[A]) -> Result<(&'a [u8], usize), Error>
+    pub fn encode<'b, A>(&self, buf: &'b mut [u8], list: &[A]) -> Result<(&'b [u8], usize), Error>
     where
         A: ServerAddress,
     {
@@ -318,7 +316,7 @@ pub enum Packet<'a> {
     /// Master server challenge response packet.
     ChallengeResponse(ChallengeResponse),
     /// Game server addresses list.
-    QueryServersResponse(QueryServersResponse<&'a [u8]>),
+    QueryServersResponse(QueryServersResponse<'a>),
     /// Announce a game client to game server behind NAT.
     ClientAnnounce(ClientAnnounce),
     /// Admin challenge response.

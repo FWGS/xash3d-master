@@ -10,11 +10,11 @@ use xash3d_protocol::{
 
 pub struct ServerList<'a> {
     master: SocketAddr,
-    response: QueryServersResponse<&'a [u8]>,
+    response: QueryServersResponse<'a>,
 }
 
 impl<'a> ServerList<'a> {
-    pub(crate) fn new(master: SocketAddr, response: QueryServersResponse<&'a [u8]>) -> Self {
+    pub(crate) fn new(master: SocketAddr, response: QueryServersResponse<'a>) -> Self {
         Self { master, response }
     }
 

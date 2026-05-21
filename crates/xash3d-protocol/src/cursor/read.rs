@@ -5,6 +5,8 @@ use core::{mem, str};
 #[cfg(feature = "alloc")]
 use alloc::{borrow::ToOwned, boxed::Box, string::String};
 
+use memchr::{memchr, memchr2};
+
 use crate::{color, wrappers::Str};
 
 use super::{CursorError, Result};
@@ -192,6 +194,28 @@ impl<'a> Cursor<'a> {
             .get_bytes(n)
             .and_then(|s| str::from_utf8(s).map_err(|_| CursorError::InvalidString))?;
         *self = cur;
+        Ok(s)
+    }
+
+    pub fn find(&mut self, c: u8) -> Result<usize> {
+        memchr(c, &self.buffer[self.pos..]).ok_or(CursorError::NeedMoreBytes(1))
+    }
+
+    pub fn find2(&mut self, c0: u8, c1: u8) -> Result<usize> {
+        memchr2(c0, c1, &self.buffer[self.pos..]).ok_or(CursorError::NeedMoreBytes(1))
+    }
+
+    pub fn take_until(&mut self, c: u8) -> Result<&'a [u8]> {
+        let e = self.pos + self.find(c)?;
+        let s = &self.buffer[self.pos..e];
+        self.pos = e;
+        Ok(s)
+    }
+
+    pub fn take_until2(&mut self, c0: u8, c1: u8) -> Result<&'a [u8]> {
+        let e = self.pos + self.find2(c0, c1)?;
+        let s = &self.buffer[self.pos..e];
+        self.pos = e;
         Ok(s)
     }
 

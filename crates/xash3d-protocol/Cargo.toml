@@ -20,3 +20,4 @@ net = ["std"]
 [dependencies]
 log.workspace = true
 bitflags.workspace = true
+memchr.workspace = true

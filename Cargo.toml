@@ -22,6 +22,7 @@ libc = "0.2.148"
 log = "0.4"
 bitflags = "2.4"
 thiserror = "2"
+memchr = { version = "2.0", default-features = false }
 getopts = "0.2.21"
 blake2b_simd = "1.0"
 fastrand = "2"

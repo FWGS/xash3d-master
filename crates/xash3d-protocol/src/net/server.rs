@@ -118,6 +118,22 @@ impl<'a> ServerAdd<'a> {
         let mut cur = Cursor::new(src);
         cur.expect(ServerAdd::HEADER)?;
 
+        let info = match cur.take_until2(b'\n', b'\0') {
+            Ok(s) => {
+                if cur.get_u8() != Ok(b'\n') {
+                    // Nul byte is not allowed in an info string.
+                    return Err(Error::InvalidPacket);
+                }
+                cur.expect_empty()?;
+                s
+            }
+            Err(_) => {
+                // Xash3D engine has bug and do not write `\n` at the end.
+                cur.end()
+            }
+        };
+
+        let mut cur = Cursor::new(info);
         let mut ret = Self::default();
         let mut challenge = None;
         loop {
@@ -188,6 +204,7 @@ impl<'a> ServerAdd<'a> {
             .put_key("secure", self.flags.contains(ServerFlags::SECURE))?
             .put_key("lan", self.flags.contains(ServerFlags::LAN))?
             .put_key("nat", self.flags.contains(ServerFlags::NAT))?
+            .put_u8(b'\n')?
             .pos();
         Ok(&buf[..n])
     }
@@ -1124,14 +1141,81 @@ mod tests {
 
     #[test]
     fn server_add_bots_is_a_number() {
-        let s = b"0\n\\protocol\\48\\challenge\\4161802725\\players\\0\\max\\32\\bots\\3\\gamedir\\valve\\map\\rats_bathroom\\type\\d\\password\\0\\os\\l\\secure\\0\\lan\\0\\version\\0.19.4\\region\\255\\product\\valve\\nat\\0";
-        ServerAdd::decode(s).unwrap();
+        let mut buf = Vec::new();
+        buf.extend(b"0\n");
+        buf.extend(b"\\protocol\\48");
+        buf.extend(b"\\challenge\\4161802725");
+        buf.extend(b"\\players\\0");
+        buf.extend(b"\\max\\32");
+        buf.extend(b"\\bots\\3");
+        buf.extend(b"\\gamedir\\valve");
+        buf.extend(b"\\map\\rats_bathroom");
+        buf.extend(b"\\type\\d");
+        buf.extend(b"\\password\\0");
+        buf.extend(b"\\os\\l");
+        buf.extend(b"\\secure\\0");
+        buf.extend(b"\\lan\\0");
+        buf.extend(b"\\version\\0.19.4");
+        buf.extend(b"\\region\\255");
+        buf.extend(b"\\product\\valve");
+        buf.extend(b"\\nat\\0");
+
+        let info = ServerAdd::decode(&buf).unwrap();
+        assert_eq!(info.protocol, 48);
+        assert_eq!(info.challenge, 4161802725);
+        assert_eq!(info.players, 0);
+        assert_eq!(info.max, 32);
+        assert_eq!(info.bots, 3);
+        assert_eq!(info.gamedir, Str(&b"valve"[..]));
+        assert_eq!(info.map, Str(&b"rats_bathroom"[..]));
+        assert_eq!(info.server_type, ServerType::Dedicated);
+        assert_eq!(info.os, Os::Linux);
+        assert_eq!(info.version, Version::with_patch(0, 19, 4));
+        assert_eq!(info.region, Region::RestOfTheWorld);
+        // TODO: assert_eq!(info.product, b"valve");
+        assert_eq!(info.flags, ServerFlags::BOTS);
     }
 
+    /// Checks if ServerAdd can be decoded with and without \n character at the end.
     #[test]
-    fn server_add_legacy() {
-        let s = b"0\n\\protocol\\48\\challenge\\1680337211\\players\\1\\max\\8\\bots\\0\\gamedir\\cstrike\\map\\cs_assault\\type\\d\\password\\0\\os\\l\\secure\\0\\lan\\0\\version\\0.17.1\\region\\255\\product\\cstrike\n";
-        ServerAdd::decode(s).unwrap();
+    fn server_add_ends_with_nl() {
+        let mut buf = Vec::new();
+        buf.extend(b"0\n");
+        buf.extend(b"\\protocol\\48");
+        buf.extend(b"\\challenge\\1680337211");
+        buf.extend(b"\\players\\1");
+        buf.extend(b"\\max\\8");
+        buf.extend(b"\\bots\\0");
+        buf.extend(b"\\gamedir\\cstrike");
+        buf.extend(b"\\map\\cs_assault");
+        buf.extend(b"\\type\\d");
+        buf.extend(b"\\password\\0");
+        buf.extend(b"\\os\\l");
+        buf.extend(b"\\secure\\0");
+        buf.extend(b"\\lan\\0");
+        buf.extend(b"\\version\\0.17.1");
+        buf.extend(b"\\region\\255");
+        buf.extend(b"\\product\\cstrike");
+
+        // Old Xash3D engine versions encode without \n character at the end.
+        ServerAdd::decode(&buf).unwrap();
+
+        // GoldSrc and Source encode with \n character at the end.
+        buf.extend(b"\n");
+        let info = ServerAdd::decode(&buf).unwrap();
+        assert_eq!(info.protocol, 48);
+        assert_eq!(info.challenge, 1680337211);
+        assert_eq!(info.players, 1);
+        assert_eq!(info.max, 8);
+        assert_eq!(info.bots, 0);
+        assert_eq!(info.gamedir, Str(&b"cstrike"[..]));
+        assert_eq!(info.map, Str(&b"cs_assault"[..]));
+        assert_eq!(info.server_type, ServerType::Dedicated);
+        assert_eq!(info.os, Os::Linux);
+        assert_eq!(info.version, Version::with_patch(0, 17, 1));
+        assert_eq!(info.region, Region::RestOfTheWorld);
+        // TODO: assert_eq!(info.product, b"cstrike");
+        assert_eq!(info.flags, ServerFlags::empty());
     }
 
     #[test]

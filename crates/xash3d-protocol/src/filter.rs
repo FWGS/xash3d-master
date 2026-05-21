@@ -535,6 +535,7 @@ mod match_tests {
                     .put_bytes(ServerAdd::HEADER).unwrap()
                     .put_key("challenge", 0).unwrap()
                     .put_bytes($info).unwrap()
+                    .put_u8(b'\n').unwrap()
                     .pos();
                 let p = ServerAdd::decode(&buf[..n]).unwrap();
                 let server = ServerInfo::new(&p);

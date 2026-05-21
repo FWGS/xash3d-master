@@ -80,8 +80,8 @@ impl Test {
         assert_eq!(r.server_challenge, challenge);
 
         let p = server::ServerAdd {
-            gamedir: "valve",
-            map: "crossfire",
+            gamedir: Str(b"valve"),
+            map: Str(b"crossfire"),
             version: cfg.master.server.min_version,
             challenge: r.master_challenge,
             server_type: server::ServerType::Dedicated,

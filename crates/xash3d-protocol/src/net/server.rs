@@ -1,7 +1,7 @@
 //! Game server packets.
 
 use crate::{
-    cursor::{Cursor, CursorMut, GetKeyValue, PutKeyValue},
+    cursor::{Cursor, CursorMut, GetKeyValue},
     filter::Version,
     wrappers::{Str, StrSlice},
     CursorError, Error,
@@ -64,7 +64,7 @@ impl Challenge {
 
 /// Add/update game server information on the master server.
 #[derive(Clone, Debug, PartialEq, Default)]
-pub struct ServerAdd<T> {
+pub struct ServerAdd<'a> {
     /// Server is running the specified modification.
     ///
     /// ## Examples:
@@ -74,9 +74,9 @@ pub struct ServerAdd<T> {
     /// * portal - Portal
     /// * dod - Day of Defeat
     /// * left4dead - Left 4 Dead
-    pub gamedir: T,
+    pub gamedir: StrSlice<'a>,
     /// Server is running `map`.
-    pub map: T,
+    pub map: StrSlice<'a>,
     /// Server version.
     pub version: Version,
     /// Master server challenge number.
@@ -99,15 +99,10 @@ pub struct ServerAdd<T> {
     pub flags: ServerFlags,
 }
 
-impl ServerAdd<()> {
+impl<'a> ServerAdd<'a> {
     /// Packet header.
     pub const HEADER: &'static [u8] = b"0\n";
-}
 
-impl<'a, T> ServerAdd<T>
-where
-    T: 'a + Default + GetKeyValue<'a>,
-{
     /// Decode packet from `src`.
     pub fn decode(src: &'a [u8]) -> Result<Self, Error> {
         trait Helper<'a> {
@@ -173,22 +168,17 @@ where
             None => Err(Error::InvalidServerValue("challenge", CursorError::Expect)),
         }
     }
-}
 
-impl<T> ServerAdd<T>
-where
-    T: PutKeyValue,
-{
     /// Encode packet to `buf`.
-    pub fn encode<'a>(&self, buf: &'a mut [u8]) -> Result<&'a [u8], Error> {
+    pub fn encode<'b>(&self, buf: &'b mut [u8]) -> Result<&'b [u8], Error> {
         let n = CursorMut::new(buf)
             .put_bytes(ServerAdd::HEADER)?
             .put_key("protocol", self.protocol)?
             .put_key("challenge", self.challenge)?
             .put_key("players", self.players)?
             .put_key("max", self.max)?
-            .put_key("gamedir", &self.gamedir)?
-            .put_key("map", &self.map)?
+            .put_key("gamedir", self.gamedir)?
+            .put_key("map", self.map)?
             .put_key("type", self.server_type)?
             .put_key("os", self.os)?
             .put_key("version", self.version)?
@@ -866,7 +856,7 @@ pub enum Packet<'a> {
     /// Sended to a master server before `ServerAdd` packet.
     Challenge(Challenge),
     /// Add/update game server information on the master server.
-    ServerAdd(ServerAdd<Str<&'a [u8]>>),
+    ServerAdd(ServerAdd<'a>),
     /// Remove the game server from a list.
     ServerRemove,
 
@@ -1144,13 +1134,13 @@ mod tests {
     #[test]
     fn server_add_bots_is_a_number() {
         let s = b"0\n\\protocol\\48\\challenge\\4161802725\\players\\0\\max\\32\\bots\\3\\gamedir\\valve\\map\\rats_bathroom\\type\\d\\password\\0\\os\\l\\secure\\0\\lan\\0\\version\\0.19.4\\region\\255\\product\\valve\\nat\\0";
-        ServerAdd::<&[u8]>::decode(s).unwrap();
+        ServerAdd::decode(s).unwrap();
     }
 
     #[test]
     fn server_add_legacy() {
         let s = b"0\n\\protocol\\48\\challenge\\1680337211\\players\\1\\max\\8\\bots\\0\\gamedir\\cstrike\\map\\cs_assault\\type\\d\\password\\0\\os\\l\\secure\\0\\lan\\0\\version\\0.17.1\\region\\255\\product\\cstrike\n";
-        ServerAdd::<&[u8]>::decode(s).unwrap();
+        ServerAdd::decode(s).unwrap();
     }
 
     #[test]

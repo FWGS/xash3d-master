@@ -4,7 +4,7 @@ mod tests;
 use std::{
     cmp::Eq,
     collections::hash_map,
-    fmt::Display,
+    fmt::{self, Display},
     hash::Hash,
     io,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, ToSocketAddrs, UdpSocket},
@@ -122,8 +122,10 @@ pub enum Error {
     AdminChallengeNotFound,
     #[error("Undefined packet")]
     UndefinedPacket,
-    #[error("Unexpected packet")]
-    UnexpectedPacket,
+    #[error("Rate limit game request")]
+    GameRateLimit(u32),
+    #[error("Admin limit game request")]
+    AdminRateLimit,
 }
 
 fn resolve_socket_addr<A>(addr: A, is_ipv4: bool) -> io::Result<Option<SocketAddr>>
@@ -293,10 +295,25 @@ impl<Addr: AddrExt> MasterServer<Addr> {
                 Err(_) => continue,
             };
 
+            if self.is_blocked(from.ip()) {
+                continue;
+            }
+
             let src = &buf[..n];
-            if let Err(e) = self.handle_packet(from, src) {
-                debug!("{}: {}: \"{}\"", from, e, Str(src));
+            if let Err(err) = self.handle_packet(&from, src) {
                 self.stats.on_error();
+
+                match err {
+                    Error::GameRateLimit(counter) => {
+                        trace!("{from}: client rate limit {}", counter);
+                    }
+                    Error::AdminRateLimit => {
+                        trace!("{from}: admin rate limit");
+                    }
+                    _ => {
+                        trace!("{from}: {err}: {:?}", Str(src));
+                    }
+                }
             }
         }
         Ok(())
@@ -311,52 +328,57 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         self.client_rate_limit.clear();
     }
 
-    fn handle_server_packet(&mut self, from: Addr, p: server::Packet) -> Result<(), Error> {
-        trace!("{from}: recv {p:?}");
+    fn handle_server_challenge(
+        &mut self,
+        from: &Addr,
+        msg: &server::Challenge,
+    ) -> Result<(), Error> {
+        let challenge = self.server_challenge_add(*from);
+        let resp = master::ChallengeResponse::new(challenge, msg.server_challenge);
+        trace!("{from}: send {resp:?}");
+        let mut buf = [0; 32];
+        let packet = resp.encode(&mut buf)?;
+        self.sock.send_to(packet, from)?;
+        Ok(())
+    }
 
-        match p {
-            server::Packet::Challenge(p) => {
-                let challenge = self.server_challenge_add(from);
-                let resp = master::ChallengeResponse::new(challenge, p.server_challenge);
-                trace!("{from}: send {resp:?}");
-                let mut buf = [0; 32];
-                let packet = resp.encode(&mut buf)?;
-                self.sock.send_to(packet, from)?;
-            }
-            server::Packet::ServerAdd(p) => {
-                if p.version < self.cfg.server.min_version {
-                    let min = self.cfg.server.min_version;
-                    warn!(
-                        "{from}: server version is {} but minimal allowed is {min}",
-                        p.version
-                    );
-                    return Ok(());
-                }
-                let Some(challenge) = self.server_challenge_get(&from) else {
-                    trace!("{from}: challenge does not exist");
-                    return Ok(());
-                };
-                if p.challenge != challenge {
-                    warn!(
-                        "{from}: expected challenge {challenge} but received {}",
-                        p.challenge
-                    );
-                    return Ok(());
-                }
-                if self.challenges.remove(&from).is_some() {
-                    self.add_server(from, ServerInfo::new(&p));
-                    self.stats.on_server_add();
-                    self.stats.servers_count(self.servers.len());
-                }
-            }
-            server::Packet::ServerRemove => {
-                self.stats.on_server_del();
-            }
-            _ => {
-                return Err(Error::UnexpectedPacket);
+    fn handle_server_add(&mut self, from: &Addr, msg: &server::ServerAdd) -> Result<(), Error> {
+        if msg.version < self.cfg.server.min_version {
+            let ver = msg.version;
+            let min = self.cfg.server.min_version;
+            warn!("{from}: server version is {ver} but minimal allowed is {min}",);
+            return Ok(());
+        }
+        let Some(challenge) = self.server_challenge_get(from) else {
+            trace!("{from}: challenge does not exist");
+            return Ok(());
+        };
+        if msg.challenge != challenge {
+            let c = msg.challenge;
+            warn!("{from}: expected challenge {challenge} but received {c}",);
+            return Ok(());
+        }
+        if self.challenges.remove(from).is_some() {
+            self.add_server(*from, ServerInfo::new(msg));
+            self.stats.on_server_add();
+            self.stats.servers_count(self.servers.len());
+        }
+        Ok(())
+    }
+
+    fn handle_server_remove(&mut self, _from: &Addr) -> Result<(), Error> {
+        self.stats.on_server_del();
+        Ok(())
+    }
+
+    fn allow_game_request(&mut self, from: &Addr) -> Result<(), Error> {
+        if self.cfg.server.client_rate_limit > 0 {
+            let counter = self.client_rate_limit.entry(*from.ip()).or_default();
+            counter.value = counter.value.saturating_add(1);
+            if counter.value > self.cfg.server.client_rate_limit {
+                return Err(Error::GameRateLimit(counter.value));
             }
         }
-
         Ok(())
     }
 
@@ -402,7 +424,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
 
     fn send_fake_server(
         &self,
-        from: Addr,
+        from: &Addr,
         key: Option<u32>,
         update_addr: SocketAddr,
     ) -> Result<(), Error> {
@@ -418,10 +440,15 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         Ok(())
     }
 
-    fn send_servers(&mut self, from: Addr, query: &QueryServers<Filter>) -> Result<(), Error> {
+    fn handle_game_query_servers(
+        &mut self,
+        from: &Addr,
+        query: &QueryServers<Filter>,
+    ) -> Result<(), Error> {
         let filter = &query.filter;
+        self.stats.on_query_servers();
 
-        if !self.is_query_servers_valid(&from, query) {
+        if !self.is_query_servers_valid(from, query) {
             self.save_client_gamedir(from, query.filter.gamedir);
             return self.send_fake_server(from, filter.key, self.update_addr);
         }
@@ -464,7 +491,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         Ok(())
     }
 
-    fn save_client_gamedir(&mut self, from: Addr, gamedir: Option<Str<&[u8]>>) {
+    fn save_client_gamedir(&mut self, from: &Addr, gamedir: Option<Str<&[u8]>>) {
         let err_msg = "failed to save gamedir for update message";
         let Some(gamedir) = gamedir else {
             trace!("{from}: {err_msg}, gamedir is none");
@@ -474,15 +501,19 @@ impl<Addr: AddrExt> MasterServer<Addr> {
             trace!("{from}: {err_msg}, gamedir is invalid {gamedir:?}");
             return;
         };
-        self.update_gamedir.insert(from, gamedir);
+        self.update_gamedir.insert(*from, gamedir);
     }
 
-    fn send_update_info(&mut self, from: Addr, protocol: u8) -> Result<(), Error> {
-        let gamedir = self.update_gamedir.remove(&from);
+    fn handle_game_get_server_info(
+        &mut self,
+        from: &Addr,
+        msg: &game::GetServerInfo,
+    ) -> Result<(), Error> {
+        let gamedir = self.update_gamedir.remove(from);
         let resp = server::GetServerInfoResponse {
             map: Str(self.cfg.client.update_map.as_bytes()),
             host: Str(self.cfg.client.update_title.as_bytes()),
-            protocol,
+            protocol: msg.protocol,
             dm: true,
             maxcl: 32,
             gamedir: Str(gamedir.as_ref().map_or("valve", |i| i.as_str()).as_bytes()),
@@ -495,115 +526,119 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         Ok(())
     }
 
-    fn handle_game_packet(&mut self, from: Addr, p: game::Packet) -> Result<(), Error> {
-        if self.cfg.server.client_rate_limit > 0 {
-            let counter = self.client_rate_limit.entry(*from.ip()).or_default();
-            counter.value = counter.value.saturating_add(1);
-            if counter.value > self.cfg.server.client_rate_limit {
-                trace!("{from}: client rate limit {}", counter.value);
-                return Ok(());
-            }
+    fn allow_admin_request(&mut self, from: &Addr) -> Result<(), Error> {
+        if self.admin_limit.get(from.ip()).is_none() {
+            Ok(())
+        } else {
+            Err(Error::AdminRateLimit)
         }
+    }
 
-        trace!("{from}: recv {p:?}");
-        match p {
-            game::Packet::QueryServers(p) => {
-                self.stats.on_query_servers();
-                self.send_servers(from, &p)?;
-            }
-            game::Packet::GetServerInfo(p) => {
-                self.send_update_info(from, p.protocol)?;
-            }
-            _ => {
-                // ignore other packets
-            }
-        }
+    fn handle_admin_challenge(&mut self, from: &Addr) -> Result<(), Error> {
+        let (master_challenge, hash_challenge) = self.admin_challenge_add(from);
+        let resp = master::AdminChallengeResponse::new(master_challenge, hash_challenge);
+        trace!("{from}: send {resp:?}");
+        let mut buf = [0; 64];
+        let packet = resp.encode(&mut buf)?;
+        self.sock.send_to(packet, from)?;
         Ok(())
     }
 
-    fn handle_admin_packet(&mut self, from: Addr, p: admin::Packet) -> Result<(), Error> {
-        trace!("{from}: recv {p:?}");
+    fn handle_admin_command(
+        &mut self,
+        from: &Addr,
+        msg: &admin::AdminCommand,
+    ) -> Result<(), Error> {
+        let entry = *self
+            .admin_challenges
+            .get(from.ip())
+            .ok_or(Error::AdminChallengeNotFound)?;
 
-        if self.admin_limit.get(from.ip()).is_some() {
-            trace!("{from}: admin rate limit");
+        if entry.0 != msg.master_challenge {
+            trace!("{from}: master challenge is not valid");
             return Ok(());
         }
 
-        match p {
-            admin::Packet::AdminChallenge => {
-                let (master_challenge, hash_challenge) = self.admin_challenge_add(from);
+        let state = Params::new()
+            .hash_length(self.cfg.hash.len)
+            .key(self.cfg.hash.key.as_bytes())
+            .personal(self.cfg.hash.personal.as_bytes())
+            .to_state();
 
-                let resp = master::AdminChallengeResponse::new(master_challenge, hash_challenge);
-                trace!("{from}: send {resp:?}");
-                let mut buf = [0; 64];
-                let packet = resp.encode(&mut buf)?;
-                self.sock.send_to(packet, from)?;
+        let admin = self.cfg.admin_list.iter().find(|i| {
+            let hash = state
+                .clone()
+                .update(i.password.as_bytes())
+                .update(&entry.1.to_le_bytes())
+                .finalize();
+            *msg.hash == hash.as_bytes()
+        });
+
+        match admin {
+            Some(admin) => {
+                info!("{from}: admin({}), command: {:?}", &admin.name, msg.command);
+                self.admin_command(msg.command);
+                self.admin_challenge_remove(from);
             }
-            admin::Packet::AdminCommand(p) => {
-                let entry = *self
-                    .admin_challenges
-                    .get(from.ip())
-                    .ok_or(Error::AdminChallengeNotFound)?;
-
-                if entry.0 != p.master_challenge {
-                    trace!("{from}: master challenge is not valid");
-                    return Ok(());
-                }
-
-                let state = Params::new()
-                    .hash_length(self.cfg.hash.len)
-                    .key(self.cfg.hash.key.as_bytes())
-                    .personal(self.cfg.hash.personal.as_bytes())
-                    .to_state();
-
-                let admin = self.cfg.admin_list.iter().find(|i| {
-                    let hash = state
-                        .clone()
-                        .update(i.password.as_bytes())
-                        .update(&entry.1.to_le_bytes())
-                        .finalize();
-                    *p.hash == hash.as_bytes()
-                });
-
-                match admin {
-                    Some(admin) => {
-                        info!("{from}: admin({}), command: {:?}", &admin.name, p.command);
-                        self.admin_command(p.command);
-                        self.admin_challenge_remove(from);
-                    }
-                    None => {
-                        warn!("{from}: invalid admin hash, command: {:?}", p.command);
-                        self.admin_limit.insert(*from.ip(), ());
-                    }
-                }
+            None => {
+                warn!("{from}: invalid admin hash, command: {:?}", msg.command);
+                self.admin_limit.insert(*from.ip(), ());
             }
-            _ => unreachable!(),
         }
 
         Ok(())
     }
 
-    fn handle_packet(&mut self, from: Addr, src: &[u8]) -> Result<(), Error> {
-        if self.is_blocked(from.ip()) {
-            return Ok(());
+    #[inline(always)]
+    fn dump_message(&self, from: &Addr, msg: impl fmt::Debug) {
+        trace!("{from}: recv {msg:?}");
+    }
+
+    fn handle_packet(&mut self, from: &Addr, src: &[u8]) -> Result<(), Error> {
+        if src.starts_with(server::Challenge::HEADER) {
+            let msg = server::Challenge::decode(src)?;
+            self.dump_message(from, &msg);
+            return self.handle_server_challenge(from, &msg);
         }
 
-        match server::Packet::decode(src) {
-            Ok(Some(p)) => return self.handle_server_packet(from, p),
-            Ok(None) => {}
-            Err(e) => Err(e)?,
+        if src.starts_with(server::ServerAdd::HEADER) {
+            let msg = server::ServerAdd::decode(src)?;
+            self.dump_message(from, &msg);
+            return self.handle_server_add(from, &msg);
         }
 
-        match game::Packet::decode(src) {
-            Ok(Some(p)) => return self.handle_game_packet(from, p),
-            Ok(None) => {}
-            Err(e) => Err(e)?,
+        if src.starts_with(server::ServerRemove::HEADER) {
+            let msg = server::ServerRemove::decode(src)?;
+            self.dump_message(from, &msg);
+            return self.handle_server_remove(from);
         }
 
-        match admin::Packet::decode(self.cfg.hash.len, src) {
-            Ok(Some(p)) => return self.handle_admin_packet(from, p),
-            Ok(None) => {}
-            Err(e) => Err(e)?,
+        if src.starts_with(game::QueryServers::HEADER) {
+            self.allow_game_request(from)?;
+            let msg = game::QueryServers::decode(src)?;
+            self.dump_message(from, &msg);
+            return self.handle_game_query_servers(from, &msg);
+        }
+
+        if src.starts_with(game::GetServerInfo::HEADER) {
+            self.allow_game_request(from)?;
+            let msg = game::GetServerInfo::decode(src)?;
+            self.dump_message(from, &msg);
+            return self.handle_game_get_server_info(from, &msg);
+        }
+
+        if src.starts_with(admin::AdminChallenge::HEADER) {
+            self.allow_admin_request(from)?;
+            let msg = admin::AdminChallenge::decode(src)?;
+            self.dump_message(from, &msg);
+            return self.handle_admin_challenge(from);
+        }
+
+        if src.starts_with(admin::AdminCommand::HEADER) {
+            self.allow_admin_request(from)?;
+            let msg = admin::AdminCommand::decode_with_hash_len(self.cfg.hash.len, src)?;
+            self.dump_message(from, &msg);
+            return self.handle_admin_command(from, &msg);
         }
 
         Err(Error::UndefinedPacket)
@@ -620,14 +655,14 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         self.challenges.get(addr).map(|i| i.value)
     }
 
-    fn admin_challenge_add(&mut self, addr: Addr) -> (u32, u32) {
+    fn admin_challenge_add(&mut self, addr: &Addr) -> (u32, u32) {
         let x = self.rng.u32(..);
         let y = self.rng.u32(..);
         self.admin_challenges.insert(*addr.ip(), (x, y));
         (x, y)
     }
 
-    fn admin_challenge_remove(&mut self, addr: Addr) {
+    fn admin_challenge_remove(&mut self, addr: &Addr) {
         self.admin_challenges.remove(addr.ip());
     }
 
@@ -680,7 +715,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         Ok(())
     }
 
-    fn send_client_to_nat_servers(&self, to: Addr, servers: &[Addr]) -> Result<(), Error> {
+    fn send_client_to_nat_servers(&self, to: &Addr, servers: &[Addr]) -> Result<(), Error> {
         let mut buf = [0; 64];
         let packet = master::ClientAnnounce::new(to.wrap()).encode(&mut buf)?;
         for i in servers {

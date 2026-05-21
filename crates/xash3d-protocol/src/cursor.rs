@@ -3,7 +3,7 @@ mod write;
 
 use core::fmt;
 
-pub use read::{Cursor, GetKeyValue};
+pub use read::Cursor;
 pub use write::{CursorMut, PutKeyValue};
 
 use crate::map::MapStrParseError;
@@ -138,20 +138,19 @@ mod tests {
             .put_key("host", "test")?
             .pos();
         let s = &buf[..n];
-
-        let mut cur = Cursor::new(s);
-        assert_eq!(cur.get_key(), Ok((&b"p"[..], 49_u8)));
-        assert_eq!(cur.get_key(), Ok((&b"map"[..], "crossfire")));
-        assert_eq!(cur.get_key(), Ok((&b"dm"[..], true)));
-        assert_eq!(cur.get_key(), Ok((&b"team"[..], false)));
-        assert_eq!(cur.get_key(), Ok((&b"coop"[..], false)));
-        assert_eq!(cur.get_key(), Ok((&b"numcl"[..], 4_u8)));
-        assert_eq!(cur.get_key(), Ok((&b"maxcl"[..], 32_u8)));
-        assert_eq!(cur.get_key(), Ok((&b"gamedir"[..], "valve")));
-        assert_eq!(cur.get_key(), Ok((&b"password"[..], false)));
-        assert_eq!(cur.get_key(), Ok((&b"host"[..], "test")));
-        assert_eq!(cur.get_key::<&[u8]>(), Err(CursorError::TableEnd));
-
+        let expected = concat!(
+            "\\p\\49",
+            "\\map\\crossfire",
+            "\\dm\\1",
+            "\\team\\0",
+            "\\coop\\0",
+            "\\numcl\\4",
+            "\\maxcl\\32",
+            "\\gamedir\\valve",
+            "\\password\\0",
+            "\\host\\test",
+        );
+        assert_eq!(Str(s), Str(expected.as_bytes()));
         Ok(())
     }
 }

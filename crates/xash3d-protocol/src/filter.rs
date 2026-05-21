@@ -35,7 +35,7 @@ use core::{
 use bitflags::bitflags;
 
 use crate::{
-    cursor::{Cursor, CursorError, GetKeyValue, PutKeyValue},
+    cursor::{CursorError, PutKeyValue},
     map::{MapIter, MapStr},
     server_info::ServerInfo,
     wrappers::Str,
@@ -145,12 +145,6 @@ impl FromStr for Version {
         let minor = minor.parse().map_err(|_| CursorError::InvalidNumber)?;
         let patch = patch.parse().map_err(|_| CursorError::InvalidNumber)?;
         Ok(Self::with_patch(major, minor, patch))
-    }
-}
-
-impl GetKeyValue<'_> for Version {
-    fn get_key_value(cur: &mut Cursor) -> Result<Self, CursorError> {
-        cur.get_key_value().and_then(Self::from_str)
     }
 }
 

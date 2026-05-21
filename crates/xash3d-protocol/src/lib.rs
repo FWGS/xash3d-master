@@ -1,6 +1,3 @@
-#![deny(unsafe_code)]
-#![deny(missing_docs)]
-
 //! Xash3D protocol between clients, servers and masters.
 
 #![cfg_attr(all(not(feature = "std"), not(test)), no_std)]

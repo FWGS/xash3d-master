@@ -4,9 +4,6 @@
 //!
 //! [1]: https://github.com/FWGS/xash3d-fwgs/blob/master/Documentation/extensions/steam-broker.md
 
-// TODO: document broker api
-#![allow(missing_docs)]
-
 use std::{
     fmt,
     net::SocketAddr,

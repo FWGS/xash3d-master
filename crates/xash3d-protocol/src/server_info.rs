@@ -13,7 +13,7 @@ use crate::{
 };
 
 #[cfg(feature = "net")]
-use crate::{net::server::ServerAdd, wrappers::Str};
+use crate::net::server::ServerAdd;
 
 /// The region of the world in which the server is located.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -223,7 +223,7 @@ pub struct ServerInfo<T> {
 #[cfg(feature = "net")]
 impl<'a> ServerInfo<&'a [u8]> {
     /// Creates a new `ServerInfo`.
-    pub fn new(info: &ServerAdd<Str<&'a [u8]>>) -> Self {
+    pub fn new(info: &ServerAdd<'a>) -> Self {
         Self {
             version: info.version,
             protocol: info.protocol,
@@ -239,7 +239,7 @@ impl<'a> ServerInfo<&'a [u8]> {
 #[cfg(any(feature = "alloc", test))]
 impl ServerInfo<Box<[u8]>> {
     /// Creates a new `ServerInfo`.
-    pub fn new(info: &ServerAdd<Str<&[u8]>>) -> Self {
+    pub fn new(info: &ServerAdd<'_>) -> Self {
         Self {
             version: info.version,
             protocol: info.protocol,

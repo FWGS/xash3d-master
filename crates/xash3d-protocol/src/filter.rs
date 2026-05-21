@@ -69,8 +69,8 @@ bitflags! {
 }
 
 #[cfg(feature = "net")]
-impl<T> From<&ServerAdd<T>> for FilterFlags {
-    fn from(info: &ServerAdd<T>) -> Self {
+impl From<&ServerAdd<'_>> for FilterFlags {
+    fn from(info: &ServerAdd<'_>) -> Self {
         let mut flags = Self::empty();
 
         flags.set(Self::DEDICATED, info.server_type == ServerType::Dedicated);
@@ -520,7 +520,7 @@ mod tests {
 mod match_tests {
     use std::net::SocketAddr;
 
-    use crate::{cursor::CursorMut, wrappers::Str};
+    use crate::cursor::CursorMut;
 
     use super::*;
 
@@ -536,7 +536,7 @@ mod match_tests {
                     .put_key("challenge", 0).unwrap()
                     .put_bytes($info).unwrap()
                     .pos();
-                let p = ServerAdd::<Str<&[u8]>>::decode(&buf[..n]).unwrap();
+                let p = ServerAdd::decode(&buf[..n]).unwrap();
                 let server = ServerInfo::new(&p);
                 $(
                     let mut server = server;

@@ -301,6 +301,43 @@ impl<'a> GetServerInfoResponse<'a> {
     /// Packet header.
     pub const HEADER: &'static [u8] = b"\xff\xff\xff\xffinfo\n";
 
+    fn set(&mut self, key: &MapStr, value: &'a MapStr) -> Result<bool, CursorError> {
+        match key.as_bytes() {
+            b"p" => self.protocol = value.parse()?,
+            b"map" => self.map = Str(value.as_bytes()),
+            b"dm" => self.dm = value.parse_bool()?,
+            b"team" => self.team = value.parse_bool()?,
+            b"coop" => self.coop = value.parse_bool()?,
+            b"numcl" => self.numcl = value.parse()?,
+            b"maxcl" => self.maxcl = value.parse()?,
+            b"gamedir" => self.gamedir = Str(value.as_bytes()),
+            b"password" => self.password = value.parse_bool()?,
+            b"host" => self.host = Str(value.as_bytes()),
+            b"dedicated" => self.dedicated = value.parse_bool()?,
+            _ => return Ok(false),
+        }
+        Ok(true)
+    }
+
+    #[inline(never)]
+    #[cold]
+    fn key_name_str(key: &MapStr) -> &'static str {
+        match key.as_bytes() {
+            b"p" => "p",
+            b"map" => "map",
+            b"dm" => "dm",
+            b"team" => "team",
+            b"coop" => "coop",
+            b"numcl" => "numcl",
+            b"maxcl" => "maxcl",
+            b"gamedir" => "gamedir",
+            b"password" => "password",
+            b"host" => "host",
+            b"dedicated" => "dedicated",
+            _ => "unknown",
+        }
+    }
+
     /// Decode packet from `src`.
     pub fn decode(src: &'a [u8]) -> Result<Self, Error> {
         let mut cur = Cursor::new(src);
@@ -320,40 +357,36 @@ impl<'a> GetServerInfoResponse<'a> {
             };
         }
 
-        // HACK: Some buggy servers send a response with a nul-byte at the end.
-        if cur.as_slice().ends_with(b"\0") {
-            let tail = cur.end();
-            cur = Cursor::new(&tail[..tail.len() - 1]);
-        }
+        let info = match cur.get_cstr_ffi() {
+            Ok(s) => {
+                cur.expect_empty()?;
+                s.to_bytes()
+            }
+            Err(_) => {
+                // Xash3D engine has bug and do not write `\0` at the end.
+                cur.end()
+            }
+        };
+        // FIXME: Can not use CStr because of bug in Xash3D engine.
+        let info = match info.strip_prefix(b"\\") {
+            Some(info) => info,
+            None if info.is_empty() => info,
+            None => return Err(Error::InvalidMap),
+        };
+        // SAFETY: The slice does not start with `\` and does not contain `\0` characters.
+        let map_iter = unsafe { MapIter::new_unchecked(info) };
 
         let mut ret = Self::default();
-        loop {
-            let key = match cur.get_key_raw() {
-                Ok(s) => s,
-                Err(CursorError::TableEnd) => break,
-                Err(e) => Err(e)?,
-            };
-
-            match key {
-                b"p" => ret.protocol = cur.get_key_value()?,
-                b"map" => ret.map = cur.get_key_value()?,
-                b"dm" => ret.dm = cur.get_key_value()?,
-                b"team" => ret.team = cur.get_key_value()?,
-                b"coop" => ret.coop = cur.get_key_value()?,
-                b"numcl" => ret.numcl = cur.get_key_value()?,
-                b"maxcl" => ret.maxcl = cur.get_key_value()?,
-                b"gamedir" => ret.gamedir = cur.get_key_value()?,
-                b"password" => ret.password = cur.get_key_value()?,
-                b"host" => ret.host = cur.get_key_value()?,
-                b"dedicated" => ret.dedicated = cur.get_key_value()?,
-                _ => {
-                    // skip unknown fields
-                    let value = cur.get_key_value::<Str<&[u8]>>()?;
-                    debug!(
-                        "Invalid GetServerInfo field \"{}\" = \"{}\"",
-                        Str(key),
-                        value
-                    );
+        for entry in map_iter {
+            let (key, value) = entry?;
+            match ret.set(key, value) {
+                Ok(true) => {}
+                Ok(false) => {
+                    trace!("unexpected GetServerInfoResponse field {key:?} = {value:?}");
+                }
+                Err(err) => {
+                    let name = Self::key_name_str(key);
+                    return Err(Error::InvalidServerValue(name, err));
                 }
             }
         }

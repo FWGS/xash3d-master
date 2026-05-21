@@ -1,8 +1,9 @@
 //! Game server packets.
 
 use crate::{
-    cursor::{Cursor, CursorMut, GetKeyValue},
+    cursor::{Cursor, CursorMut},
     filter::Version,
+    map::{MapIter, MapStr},
     wrappers::{Str, StrSlice},
     CursorError, Error,
 };
@@ -103,18 +104,40 @@ impl<'a> ServerAdd<'a> {
     /// Packet header.
     pub const HEADER: &'static [u8] = b"0\n";
 
+    fn set_flag(&mut self, flag: ServerFlags, value: &MapStr) -> Result<(), CursorError> {
+        self.flags.set(flag, value.parse_bool()?);
+        Ok(())
+    }
+
+    fn set(&mut self, key: &MapStr, value: &'a MapStr) -> Result<bool, CursorError> {
+        match key.as_bytes() {
+            b"protocol" => self.protocol = value.parse()?,
+            b"challenge" => self.challenge = value.parse()?,
+            b"players" => self.players = value.parse()?,
+            b"max" => self.max = value.parse()?,
+            b"gamedir" => self.gamedir = Str(value.as_bytes()),
+            b"product" => {} // legacy key, ignore
+            b"map" => self.map = Str(value.as_bytes()),
+            b"type" => self.server_type = value.into(),
+            b"os" => self.os = value.into(),
+            // TODO: return error if version is not parsed
+            b"version" => self.version = value.parse().unwrap_or_default(),
+            b"region" => self.region = value.parse::<u8>()?.try_into()?,
+            b"bots" => {
+                self.bots = value.parse()?;
+                self.flags.set(ServerFlags::BOTS, self.bots != 0);
+            }
+            b"password" => self.set_flag(ServerFlags::PASSWORD, value)?,
+            b"secure" => self.set_flag(ServerFlags::SECURE, value)?,
+            b"lan" => self.set_flag(ServerFlags::LAN, value)?,
+            b"nat" => self.set_flag(ServerFlags::NAT, value)?,
+            _ => return Ok(false),
+        }
+        Ok(true)
+    }
+
     /// Decode packet from `src`.
     pub fn decode(src: &'a [u8]) -> Result<Self, Error> {
-        trait Helper<'a> {
-            fn get<T: GetKeyValue<'a>>(&mut self, key: &'static str) -> Result<T, Error>;
-        }
-
-        impl<'a> Helper<'a> for Cursor<'a> {
-            fn get<T: GetKeyValue<'a>>(&mut self, key: &'static str) -> Result<T, Error> {
-                T::get_key_value(self).map_err(|e| Error::InvalidServerValue(key, e))
-            }
-        }
-
         let mut cur = Cursor::new(src);
         cur.expect(ServerAdd::HEADER)?;
 
@@ -132,56 +155,38 @@ impl<'a> ServerAdd<'a> {
                 cur.end()
             }
         };
+        let info = match info.strip_prefix(b"\\") {
+            Some(info) => info,
+            None if info.is_empty() => info,
+            None => return Err(Error::InvalidMap),
+        };
+        // SAFETY: The slice does not start with `\` and does not contain `\0` characters.
+        let map_iter = unsafe { MapIter::new_unchecked(info) };
 
-        let mut cur = Cursor::new(info);
         let mut ret = Self::default();
-        let mut challenge = None;
-        loop {
-            let key = match cur.get_key_raw() {
-                Ok(s) => s,
-                Err(CursorError::TableEnd) => break,
-                Err(e) => Err(e)?,
-            };
-
-            match key {
-                b"protocol" => ret.protocol = cur.get("protocol")?,
-                b"challenge" => challenge = Some(cur.get("challenge")?),
-                b"players" => ret.players = cur.get("players")?,
-                b"max" => ret.max = cur.get("max")?,
-                b"gamedir" => ret.gamedir = cur.get("gamedir")?,
-                b"product" => cur.skip_key_value::<&[u8]>()?, // legacy key, ignore
-                b"map" => ret.map = cur.get("map")?,
-                b"type" => ret.server_type = cur.get("type")?,
-                b"os" => ret.os = cur.get("os")?,
-                b"version" => {
-                    ret.version = cur
-                        .get_key_value()
-                        .inspect_err(|e| debug!("invalid server version: {e}"))
-                        .unwrap_or_default()
+        let mut has_challenge = false;
+        for entry in map_iter {
+            let (key, value) = entry?;
+            match ret.set(key, value) {
+                Ok(true) => {
+                    if key.as_bytes() == b"challenge" {
+                        has_challenge = true;
+                    }
                 }
-                b"region" => ret.region = cur.get("region")?,
-                b"bots" => {
-                    ret.bots = cur.get("bots")?;
-                    ret.flags.set(ServerFlags::BOTS, ret.bots != 0);
+                Ok(false) => {
+                    trace!("unexpected ServerAdd field {key:?} = {value:?}");
                 }
-                b"password" => ret.flags.set(ServerFlags::PASSWORD, cur.get("password")?),
-                b"secure" => ret.flags.set(ServerFlags::SECURE, cur.get("secure")?),
-                b"lan" => ret.flags.set(ServerFlags::LAN, cur.get("lan")?),
-                b"nat" => ret.flags.set(ServerFlags::NAT, cur.get("nat")?),
-                _ => {
-                    // skip unknown fields
-                    let value = cur.get_key_value::<Str<&[u8]>>()?;
-                    debug!("Invalid ServerInfo field \"{}\" = \"{}\"", Str(key), value);
+                Err(err) => {
+                    let name = server_add_key_name_str(key);
+                    return Err(Error::InvalidServerValue(name, err));
                 }
             }
         }
 
-        match challenge {
-            Some(c) => {
-                ret.challenge = c;
-                Ok(ret)
-            }
-            None => Err(Error::InvalidServerValue("challenge", CursorError::Expect)),
+        if has_challenge {
+            Ok(ret)
+        } else {
+            Err(Error::InvalidServerValue("challenge", CursorError::Expect))
         }
     }
 
@@ -207,6 +212,30 @@ impl<'a> ServerAdd<'a> {
             .put_u8(b'\n')?
             .pos();
         Ok(&buf[..n])
+    }
+}
+
+#[inline(never)]
+#[cold]
+fn server_add_key_name_str(key: &MapStr) -> &'static str {
+    match key.as_bytes() {
+        b"protocol" => "protocol",
+        b"challenge" => "challenge",
+        b"players" => "players",
+        b"max" => "max",
+        b"gamedir" => "gamedir",
+        b"product" => "product",
+        b"map" => "map",
+        b"type" => "type",
+        b"os" => "os",
+        b"version" => "version",
+        b"region" => "region",
+        b"bots" => "bots",
+        b"password" => "password",
+        b"secure" => "secure",
+        b"lan" => "lan",
+        b"nat" => "nat",
+        _ => "unknown",
     }
 }
 

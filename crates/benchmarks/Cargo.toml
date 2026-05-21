@@ -1,0 +1,15 @@
+[package]
+name = "bench"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.86"
+license = "LGPL-3.0-only"
+publish = false
+
+[dev-dependencies]
+criterion.workspace = true
+xash3d-protocol.workspace = true
+
+[[bench]]
+name = "protocol"
+harness = false

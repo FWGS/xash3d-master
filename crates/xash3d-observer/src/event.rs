@@ -60,7 +60,7 @@ pub struct ServerInfo<'a> {
     pub(crate) server: SocketAddr,
     pub(crate) ping: Duration,
     pub(crate) changed: bool,
-    pub(crate) response: GetServerInfoResponse<&'a [u8]>,
+    pub(crate) response: GetServerInfoResponse<'a>,
 }
 
 impl<'a> ServerInfo<'a> {
@@ -81,15 +81,15 @@ impl<'a> ServerInfo<'a> {
     }
 
     pub fn host(&self) -> &'a [u8] {
-        self.response.host
+        self.response.host.as_bytes()
     }
 
     pub fn gamedir(&self) -> &'a [u8] {
-        self.response.gamedir
+        self.response.gamedir.as_bytes()
     }
 
     pub fn map(&self) -> &'a [u8] {
-        self.response.map
+        self.response.map.as_bytes()
     }
 
     pub fn clients_count(&self) -> u8 {

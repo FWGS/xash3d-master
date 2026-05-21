@@ -2,122 +2,11 @@
 
 use core::{ffi::CStr, mem, str};
 
-#[cfg(feature = "alloc")]
-use alloc::{borrow::ToOwned, boxed::Box, string::String};
-
 use memchr::{memchr, memchr2};
 
-use crate::{
-    color,
-    map::MapStr,
-    wrappers::{Str, StrSlice},
-};
+use crate::wrappers::{Str, StrSlice};
 
 use super::{CursorError, Result};
-
-pub trait GetKeyValue<'a>: Sized {
-    fn get_key_value(cur: &mut Cursor<'a>) -> Result<Self>;
-}
-
-impl<'a> GetKeyValue<'a> for &'a MapStr {
-    fn get_key_value(cur: &mut Cursor<'a>) -> Result<Self> {
-        MapStr::from_slice(cur.get_key_value_raw()?).map_err(|_| CursorError::InvalidString)
-    }
-}
-
-impl<'a> GetKeyValue<'a> for &'a [u8] {
-    fn get_key_value(cur: &mut Cursor<'a>) -> Result<Self> {
-        cur.get_key_value_raw()
-    }
-}
-
-impl<'a> GetKeyValue<'a> for Str<&'a [u8]> {
-    fn get_key_value(cur: &mut Cursor<'a>) -> Result<Self> {
-        cur.get_key_value_raw().map(Str)
-    }
-}
-
-impl<'a> GetKeyValue<'a> for &'a str {
-    fn get_key_value(cur: &mut Cursor<'a>) -> Result<Self> {
-        let raw = cur.get_key_value_raw()?;
-        str::from_utf8(raw).map_err(|_| CursorError::InvalidString)
-    }
-}
-
-#[cfg(feature = "alloc")]
-impl<'a> GetKeyValue<'a> for Box<str> {
-    fn get_key_value(cur: &mut Cursor<'a>) -> Result<Self> {
-        let raw = cur.get_key_value_raw()?;
-        str::from_utf8(raw)
-            .map(|s| s.to_owned().into_boxed_str())
-            .map_err(|_| CursorError::InvalidString)
-    }
-}
-
-#[cfg(feature = "alloc")]
-impl<'a> GetKeyValue<'a> for String {
-    fn get_key_value(cur: &mut Cursor<'a>) -> Result<Self> {
-        let raw = cur.get_key_value_raw()?;
-        str::from_utf8(raw)
-            .map(|s| s.to_owned())
-            .map_err(|_| CursorError::InvalidString)
-    }
-}
-
-impl<'a> GetKeyValue<'a> for bool {
-    fn get_key_value(cur: &mut Cursor<'a>) -> Result<Self> {
-        match cur.get_key_value_raw()? {
-            b"0" => Ok(false),
-            b"1" => Ok(true),
-            _ => Err(CursorError::InvalidBool),
-        }
-    }
-}
-
-impl GetKeyValue<'_> for crate::server_info::Region {
-    fn get_key_value(cur: &mut Cursor) -> Result<Self, CursorError> {
-        cur.get_key_value::<u8>()?.try_into()
-    }
-}
-
-impl GetKeyValue<'_> for crate::server_info::ServerType {
-    fn get_key_value(cur: &mut Cursor) -> Result<Self, CursorError> {
-        cur.get_key_value_raw()?.try_into()
-    }
-}
-
-impl GetKeyValue<'_> for crate::server_info::Os {
-    fn get_key_value(cur: &mut Cursor) -> Result<Self, CursorError> {
-        cur.get_key_value_raw()?.try_into()
-    }
-}
-
-macro_rules! impl_get_value {
-    ($($t:ty),+ $(,)?) => {
-        $(impl<'a> GetKeyValue<'a> for $t {
-            fn get_key_value(cur: &mut Cursor<'a>) -> Result<Self> {
-                let s = cur.get_key_value::<&str>()?;
-                // HACK: special case for one asshole
-                let (_, s) = color::trim_start_color(s);
-                s.parse().map_err(|_| CursorError::InvalidNumber)
-            }
-        })+
-    };
-}
-
-impl_get_value! {
-    u8,
-    u16,
-    u32,
-    u64,
-
-    i8,
-    i16,
-    i32,
-    i64,
-}
-
-// TODO: impl GetKeyValue for f32 and f64
 
 #[derive(Copy, Clone)]
 pub struct Cursor<'a> {
@@ -314,49 +203,5 @@ impl<'a> Cursor<'a> {
             .position(|&i| !cond(i))
             .ok_or(CursorError::NeedMoreBytes(1))
             .and_then(|n| self.get_bytes(n))
-    }
-
-    pub fn take_while_or_all<F>(&mut self, cond: F) -> &'a [u8]
-    where
-        F: FnMut(u8) -> bool,
-    {
-        self.take_while(cond).unwrap_or_else(|_| self.get_tail())
-    }
-
-    pub fn get_key_value_raw(&mut self) -> Result<&'a [u8]> {
-        let mut cur = *self;
-        match cur.get_u8()? {
-            b'\\' => {
-                let value = cur.take_while_or_all(|c| c != b'\\' && c != b'\n');
-                *self = cur;
-                Ok(value)
-            }
-            _ => Err(CursorError::InvalidTableValue),
-        }
-    }
-
-    pub fn get_key_value<T: GetKeyValue<'a>>(&mut self) -> Result<T> {
-        T::get_key_value(self)
-    }
-
-    pub fn skip_key_value<T: GetKeyValue<'a>>(&mut self) -> Result<()> {
-        T::get_key_value(self).map(|_| ())
-    }
-
-    pub fn get_key_raw(&mut self) -> Result<&'a [u8]> {
-        let mut cur = *self;
-        match cur.get_u8() {
-            Ok(b'\\') => {
-                let value = cur.take_while(|c| c != b'\\' && c != b'\n')?;
-                *self = cur;
-                Ok(value)
-            }
-            Ok(b'\n') | Err(CursorError::NeedMoreBytes(1)) => Err(CursorError::TableEnd),
-            _ => Err(CursorError::InvalidTableKey),
-        }
-    }
-
-    pub fn get_key<T: GetKeyValue<'a>>(&mut self) -> Result<(&'a [u8], T)> {
-        Ok((self.get_key_raw()?, self.get_key_value()?))
     }
 }

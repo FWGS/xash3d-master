@@ -126,11 +126,11 @@ pub use xash3d_protocol::server::PlayerInfo;
 pub struct PlayerError(());
 
 pub struct ServerPlayers<'a> {
-    response: GetPlayersResponse<&'a [u8]>,
+    response: GetPlayersResponse<'a>,
 }
 
 impl<'a> ServerPlayers<'a> {
-    pub(crate) fn new(response: GetPlayersResponse<&'a [u8]>) -> Self {
+    pub(crate) fn new(response: GetPlayersResponse<'a>) -> Self {
         Self { response }
     }
 

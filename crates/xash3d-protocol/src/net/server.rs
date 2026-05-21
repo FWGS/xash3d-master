@@ -776,17 +776,15 @@ impl<'a> PlayerInfo<'a> {
 
 /// Response to [GetPlayers](super::game::GetPlayers) request.
 #[derive(Clone, Debug, PartialEq)]
-pub struct GetPlayersResponse<T> {
+pub struct GetPlayersResponse<'a> {
     count: u8,
-    players: T,
+    players: &'a [u8],
 }
 
-impl GetPlayersResponse<()> {
+impl<'a> GetPlayersResponse<'a> {
     /// Packet header.
     pub const HEADER: &'static [u8] = b"\xff\xff\xff\xffD";
-}
 
-impl<'a> GetPlayersResponse<&'a [u8]> {
     /// Decode packet from `src`.
     pub fn decode(src: &'a [u8]) -> Result<Self, Error> {
         let mut cur = Cursor::new(src);
@@ -813,28 +811,21 @@ impl<'a> GetPlayersResponse<&'a [u8]> {
             })
         })
     }
-}
-
-impl<'a, I> GetPlayersResponse<I>
-where
-    I: IntoIterator<Item = PlayerInfo<'a>>,
-{
-    /// Creates a new `GetPlayersResponse`.
-    pub fn new(players: I) -> Self {
-        Self { count: 0, players }
-    }
 
     /// Encode packet to `buf`.
     ///
     /// # Panics
     ///
     /// This function will panic if players count is greater than 255.
-    pub fn encode(self, buf: &mut [u8]) -> Result<&[u8], Error> {
+    pub fn encode<'b, I>(buf: &'b mut [u8], players: I) -> Result<&'b [u8], Error>
+    where
+        I: IntoIterator<Item = PlayerInfo<'a>>,
+    {
         let mut cur = CursorMut::new(buf);
         cur.put_bytes(GetPlayersResponse::HEADER)?;
         let (mut head, mut tail) = cur.split(1)?;
         let mut count = 0;
-        for info in self.players {
+        for info in players {
             assert!(count != 255);
             count += 1;
             tail.put_u8(info.id)?
@@ -869,7 +860,7 @@ pub enum Packet<'a> {
     /// Game server information to game clients.
     GetServerInfo2ResponseOld(GetServerInfo2ResponseOld<'a>),
     /// Player list to game clients.
-    GetPlayersResponse(GetPlayersResponse<&'a [u8]>),
+    GetPlayersResponse(GetPlayersResponse<'a>),
 }
 
 impl<'a> Packet<'a> {
@@ -1149,9 +1140,8 @@ mod tests {
             PlayerInfo::new(0, "freeman", 999, 999.0),
             PlayerInfo::new(1, "crab", 0, 888.0),
         ];
-        let packet = GetPlayersResponse::new(players.into_iter());
         let mut buf = [0; 512];
-        let encoded = packet.encode(&mut buf).unwrap();
+        let encoded = GetPlayersResponse::encode(&mut buf, players).unwrap();
         let decoded = Packet::decode(encoded).unwrap().unwrap();
         let Packet::GetPlayersResponse(response) = decoded else {
             panic!();

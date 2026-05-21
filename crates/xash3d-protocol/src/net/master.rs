@@ -61,19 +61,34 @@ impl ChallengeResponse {
     }
 }
 
-/// Helper trait for dealing with server addresses.
-pub trait ServerAddress: Sized {
-    /// Size of IP and port in bytes.
-    fn size() -> usize;
+mod private {
+    use crate::{
+        cursor::{Cursor, CursorMut},
+        Error,
+    };
 
-    /// Read address from a cursor.
-    fn get(cur: &mut Cursor) -> Result<Self, Error>;
+    /// Helper trait for dealing with server addresses.
+    pub trait Sealed: Sized {
+        /// Size of IP and port in bytes.
+        fn size() -> usize;
 
-    /// Write address to a cursor.
-    fn put(&self, cur: &mut CursorMut) -> Result<(), Error>;
+        /// Read address from a cursor.
+        fn get(cur: &mut Cursor) -> Result<Self, Error>;
+
+        /// Write address to a cursor.
+        fn put(&self, cur: &mut CursorMut) -> Result<(), Error>;
+    }
 }
 
-impl ServerAddress for SocketAddrV4 {
+use self::private::Sealed as ServerAddressSealed;
+
+/// Helper trait for dealing with server addresses.
+pub trait ServerAddress: self::private::Sealed {}
+
+impl ServerAddress for SocketAddrV4 {}
+impl ServerAddress for SocketAddrV6 {}
+
+impl ServerAddressSealed for SocketAddrV4 {
     fn size() -> usize {
         6
     }
@@ -91,7 +106,7 @@ impl ServerAddress for SocketAddrV4 {
     }
 }
 
-impl ServerAddress for SocketAddrV6 {
+impl ServerAddressSealed for SocketAddrV6 {
     fn size() -> usize {
         18
     }

@@ -10,6 +10,7 @@ use bitflags::bitflags;
 use crate::{
     cursor::CursorError,
     filter::{FilterFlags, Version},
+    map::MapStr,
 };
 
 #[cfg(feature = "net")]
@@ -110,6 +111,16 @@ impl TryFrom<&[u8]> for ServerType {
     }
 }
 
+impl From<&MapStr> for ServerType {
+    fn from(value: &MapStr) -> Self {
+        if let &[c] = value.as_bytes() {
+            Self::from(c)
+        } else {
+            Self::Unknown
+        }
+    }
+}
+
 impl fmt::Display for ServerType {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         use ServerType as E;
@@ -187,6 +198,16 @@ impl TryFrom<&[u8]> for Os {
             Ok(Self::from(c))
         } else {
             Ok(Self::Unknown)
+        }
+    }
+}
+
+impl From<&MapStr> for Os {
+    fn from(value: &MapStr) -> Self {
+        if let &[c] = value.as_bytes() {
+            Self::from(c)
+        } else {
+            Self::Unknown
         }
     }
 }

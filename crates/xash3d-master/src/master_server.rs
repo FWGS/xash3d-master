@@ -677,7 +677,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         A: ToSocketAddrs,
         S: ServerAddress,
     {
-        let mut list = master::QueryServersResponse::new(key);
+        let list = master::QueryServersResponse::new(key);
         let mut buf = Addr::mtu_buffer();
         let mut offset = 0;
         loop {

@@ -9,8 +9,11 @@ extern crate alloc;
 #[macro_use]
 extern crate log;
 
-mod cursor;
 mod error;
+
+// Used in benchmarks.
+#[doc(hidden)]
+pub mod cursor;
 
 #[cfg(feature = "net")]
 pub mod net;

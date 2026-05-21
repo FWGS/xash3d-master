@@ -34,6 +34,10 @@ audit-as-crates-io = true
 [policy.xash3d-query]
 audit-as-crates-io = true
 
+[[exemptions.criterion]]
+version = "0.4.0"
+criteria = "safe-to-run"
+
 [[exemptions.crossterm_winapi]]
 version = "0.9.1"
 criteria = "safe-to-deploy"

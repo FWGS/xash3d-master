@@ -19,6 +19,13 @@ pub type StrSlice<'a> = Str<&'a [u8]>;
 #[derive(Copy, Clone, PartialEq, Eq, Default)]
 pub struct Str<T>(pub T);
 
+impl<'a> Str<&'a [u8]> {
+    /// Returns a byte slice of this string's content.
+    pub fn as_bytes(&self) -> &'a [u8] {
+        self.0
+    }
+}
+
 impl<T> From<T> for Str<T> {
     fn from(value: T) -> Self {
         Self(value)

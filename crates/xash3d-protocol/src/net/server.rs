@@ -228,7 +228,7 @@ impl ServerRemove {
 
 /// Game server information to game clients.
 #[derive(Clone, Debug, PartialEq, Default)]
-pub struct GetServerInfoResponse<T> {
+pub struct GetServerInfoResponse<'a> {
     /// Server is running the specified modification.
     ///
     /// ## Examples:
@@ -238,11 +238,11 @@ pub struct GetServerInfoResponse<T> {
     /// * portal - Portal
     /// * dod - Day of Defeat
     /// * left4dead - Left 4 Dead
-    pub gamedir: T,
+    pub gamedir: StrSlice<'a>,
     /// Server is running `map`.
-    pub map: T,
+    pub map: StrSlice<'a>,
     /// Server title.
-    pub host: T,
+    pub host: StrSlice<'a>,
     /// Server protocol version.
     pub protocol: u8,
     /// Current number of players on the server.
@@ -261,15 +261,10 @@ pub struct GetServerInfoResponse<T> {
     pub dedicated: bool,
 }
 
-impl GetServerInfoResponse<()> {
+impl<'a> GetServerInfoResponse<'a> {
     /// Packet header.
     pub const HEADER: &'static [u8] = b"\xff\xff\xff\xffinfo\n";
-}
 
-impl<'a, T> GetServerInfoResponse<T>
-where
-    T: 'a + Default + GetKeyValue<'a>,
-{
     /// Decode packet from `src`.
     pub fn decode(src: &'a [u8]) -> Result<Self, Error> {
         let mut cur = Cursor::new(src);
@@ -329,27 +324,22 @@ where
 
         Ok(ret)
     }
-}
 
-impl<T> GetServerInfoResponse<T>
-where
-    T: PutKeyValue,
-{
     /// Encode packet to `buf`.
-    pub fn encode<'a>(&self, buf: &'a mut [u8]) -> Result<&'a [u8], Error> {
+    pub fn encode<'b>(&self, buf: &'b mut [u8]) -> Result<&'b [u8], Error> {
         let n = CursorMut::new(buf)
             .put_bytes(GetServerInfoResponse::HEADER)?
             .put_key("p", self.protocol)?
-            .put_key("map", &self.map)?
+            .put_key("map", self.map)?
             .put_key("dm", self.dm)?
             .put_key("team", self.team)?
             .put_key("coop", self.coop)?
             .put_key("numcl", self.numcl)?
             .put_key("maxcl", self.maxcl)?
-            .put_key("gamedir", &self.gamedir)?
+            .put_key("gamedir", self.gamedir)?
             .put_key("password", self.password)?
             .put_key("dedicated", self.dedicated)?
-            .put_key("host", &self.host)?
+            .put_key("host", self.host)?
             .pos();
         Ok(&buf[..n])
     }
@@ -883,7 +873,7 @@ pub enum Packet<'a> {
     /// A challenge response.
     GetChallengeResponse(GetChallengeResponse),
     /// Game server information to game clients.
-    GetServerInfoResponse(GetServerInfoResponse<Str<&'a [u8]>>),
+    GetServerInfoResponse(GetServerInfoResponse<'a>),
     /// Game server information.
     GetServerInfo2Response(GetServerInfo2Response<'a>),
     /// Game server information to game clients.

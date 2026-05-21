@@ -480,12 +480,12 @@ impl<Addr: AddrExt> MasterServer<Addr> {
     fn send_update_info(&mut self, from: Addr, protocol: u8) -> Result<(), Error> {
         let gamedir = self.update_gamedir.remove(&from);
         let resp = server::GetServerInfoResponse {
-            map: self.cfg.client.update_map.as_ref(),
-            host: self.cfg.client.update_title.as_ref(),
+            map: Str(self.cfg.client.update_map.as_bytes()),
+            host: Str(self.cfg.client.update_title.as_bytes()),
             protocol,
             dm: true,
             maxcl: 32,
-            gamedir: gamedir.as_ref().map_or("valve", |i| i.as_str()),
+            gamedir: Str(gamedir.as_ref().map_or("valve", |i| i.as_str()).as_bytes()),
             ..Default::default()
         };
         trace!("{from}: send {resp:?}");

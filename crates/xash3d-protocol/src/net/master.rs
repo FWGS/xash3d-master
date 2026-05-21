@@ -184,11 +184,7 @@ impl QueryServersResponse<()> {
     /// Encode packet to `buf`.
     ///
     /// Returns number of bytes written into `buf` and how many items was written.
-    pub fn encode<'a, A>(
-        &mut self,
-        buf: &'a mut [u8],
-        list: &[A],
-    ) -> Result<(&'a [u8], usize), Error>
+    pub fn encode<'a, A>(&self, buf: &'a mut [u8], list: &[A]) -> Result<(&'a [u8], usize), Error>
     where
         A: ServerAddress,
     {
@@ -367,7 +363,7 @@ mod tests {
             "1.2.3.4:27003".parse().unwrap(),
             "1.2.3.4:27004".parse().unwrap(),
         ];
-        let mut p = QueryServersResponse::new(Some(0xdeadbeef));
+        let p = QueryServersResponse::new(Some(0xdeadbeef));
         let mut buf = [0; 512];
         let (t, c) = p.encode(&mut buf, servers).unwrap();
         assert_eq!(c, servers.len());
@@ -385,7 +381,7 @@ mod tests {
             "[::3]:27003".parse().unwrap(),
             "[::4]:27004".parse().unwrap(),
         ];
-        let mut p = QueryServersResponse::new(Some(0xdeadbeef));
+        let p = QueryServersResponse::new(Some(0xdeadbeef));
         let mut buf = [0; 512];
         let (t, c) = p.encode(&mut buf, servers).unwrap();
         assert_eq!(c, servers.len());

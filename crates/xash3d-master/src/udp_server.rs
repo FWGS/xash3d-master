@@ -29,7 +29,7 @@ use xash3d_protocol::{
 use crate::{
     config::{Config, MasterConfig},
     hash_map::{Timed, TimedHashMap},
-    signal_flags::SignalFlags,
+    signals::SignalFlags,
     stats::Stats,
     str_arr::StrArr,
 };

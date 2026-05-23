@@ -1,5 +1,3 @@
-#![deny(unsafe_code)]
-
 #[macro_use]
 extern crate log;
 
@@ -9,7 +7,7 @@ mod config;
 mod hash_map;
 mod logger;
 mod periodic;
-mod signal_flags;
+mod signals;
 mod stats;
 mod str_arr;
 mod time;

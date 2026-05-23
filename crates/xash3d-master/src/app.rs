@@ -4,7 +4,7 @@ use crate::{
     cli::{self, Cli},
     config::{self, Config},
     logger::{self, Logger},
-    signal_flags::SignalFlags,
+    signals::{SignalFlags, Signals},
     udp_server::{UdpServer, UdpServerError},
 };
 
@@ -52,11 +52,14 @@ pub fn run() -> Result<(), UdpServerError> {
     });
 
     let mut udp_server = UdpServer::new(cfg)?;
-    let sig_flags = SignalFlags::init()?;
-    while !sig_flags.is_exit() {
+    let signals = Signals::init()?;
+    let signal_flags = SignalFlags::get();
+    while !signal_flags.is_exit() {
         udp_server.run()?;
 
-        if sig_flags.remove_reload() {
+        signals.wait();
+
+        if signal_flags.remove_reload() {
             if let Some(config_path) = cli.config_path.as_deref() {
                 info!("Reloading config from {}", config_path);
 

@@ -30,7 +30,8 @@ use crate::{
     config::{Config, MasterConfig},
     hash_map::{Timed, TimedHashMap},
     signal_flags::SignalFlags,
-    Stats, StrArr,
+    stats::Stats,
+    str_arr::StrArr,
 };
 
 type ServerInfo = xash3d_protocol::ServerInfo<Box<[u8]>>;

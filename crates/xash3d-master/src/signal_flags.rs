@@ -9,7 +9,7 @@ use std::{
 use bitflags::bitflags;
 use signal_hook::{consts::signal::*, SigId};
 
-use crate::Error;
+use crate::master_server::Error;
 
 bitflags! {
     #[derive(Copy, Clone)]

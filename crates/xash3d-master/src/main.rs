@@ -8,12 +8,12 @@ mod cli;
 mod config;
 mod hash_map;
 mod logger;
-mod master_server;
 mod periodic;
 mod signal_flags;
 mod stats;
 mod str_arr;
 mod time;
+mod udp_server;
 
 fn main() {
     if let Err(e) = app::run() {

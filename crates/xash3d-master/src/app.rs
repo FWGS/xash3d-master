@@ -4,8 +4,8 @@ use crate::{
     cli::{self, Cli},
     config::{self, Config},
     logger::{self, Logger},
-    master_server::{Error, Master},
     signal_flags::SignalFlags,
+    udp_server::{UdpServer, UdpServerError},
 };
 
 fn load_config(cli: &Cli, logger: &Logger) -> Result<Config, config::Error> {
@@ -35,7 +35,7 @@ fn load_config(cli: &Cli, logger: &Logger) -> Result<Config, config::Error> {
     Ok(cfg)
 }
 
-pub fn run() -> Result<(), Error> {
+pub fn run() -> Result<(), UdpServerError> {
     let cli = cli::parse().unwrap_or_else(|e| {
         eprintln!("{e}");
         process::exit(1);
@@ -51,10 +51,10 @@ pub fn run() -> Result<(), Error> {
         process::exit(1);
     });
 
-    let mut master = Master::new(cfg)?;
+    let mut udp_server = UdpServer::new(cfg)?;
     let sig_flags = SignalFlags::init()?;
     while !sig_flags.is_exit() {
-        master.run()?;
+        udp_server.run()?;
 
         if sig_flags.remove_reload() {
             if let Some(config_path) = cli.config_path.as_deref() {
@@ -62,7 +62,7 @@ pub fn run() -> Result<(), Error> {
 
                 match load_config(&cli, logger) {
                     Ok(cfg) => {
-                        if let Err(e) = master.update_config(cfg) {
+                        if let Err(e) = udp_server.update_config(cfg) {
                             error!("{}", e);
                         }
                     }

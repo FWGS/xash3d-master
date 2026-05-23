@@ -16,6 +16,7 @@ use xash3d_protocol::{
 use crate::{
     config::Config,
     udp_server::{ServerInfo, UdpServer, UdpServerV4},
+    worker::Worker,
 };
 
 const UNSPECIFIED: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0);
@@ -61,9 +62,9 @@ impl Test {
     }
 
     fn create_master(&mut self, cfg: &Config) {
-        let mut master = UdpServer::with_address(cfg.clone(), UNSPECIFIED).unwrap();
-        self.master_addr = master.local_addr().unwrap();
-        thread::spawn(move || master.run().unwrap());
+        let udp_server = UdpServer::with_address(cfg.clone(), UNSPECIFIED).unwrap();
+        self.master_addr = udp_server.local_addr().unwrap();
+        thread::spawn(move || Worker::builder()?.udp_server(udp_server)?.build().run());
     }
 
     fn add_server(&mut self, cfg: &Config) {

@@ -7,14 +7,15 @@ use std::{
     fmt::{self, Display},
     hash::Hash,
     io,
-    net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, ToSocketAddrs, UdpSocket},
+    net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, ToSocketAddrs},
     str::{self, FromStr},
-    time::Duration,
+    sync::{Arc, RwLock},
 };
 
 use ahash::AHashSet as HashSet;
 use blake2b_simd::Params;
 use fastrand::Rng;
+use mio::net::UdpSocket;
 use thiserror::Error;
 use xash3d_protocol::{
     admin,
@@ -127,6 +128,8 @@ pub enum UdpServerError {
     GameRateLimit(u32),
     #[error("Admin limit game request")]
     AdminRateLimit,
+    #[error("Ip version changed")]
+    IpVersion,
 }
 
 fn resolve_socket_addr<A>(addr: A, is_ipv4: bool) -> io::Result<Option<SocketAddr>>
@@ -176,6 +179,20 @@ impl UdpServer {
         Self::with_address(cfg, addr)
     }
 
+    pub fn try_clone(&self) -> Result<Self, UdpServerError> {
+        match self {
+            Self::V4(inner) => inner.try_clone().map(Self::V4),
+            Self::V6(inner) => inner.try_clone().map(Self::V6),
+        }
+    }
+
+    pub fn socket_mut(&mut self) -> &mut UdpSocket {
+        match self {
+            Self::V4(inner) => &mut inner.sock,
+            Self::V6(inner) => &mut inner.sock,
+        }
+    }
+
     #[allow(dead_code)]
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
         match self {
@@ -185,15 +202,10 @@ impl UdpServer {
     }
 
     pub fn update_config(&mut self, cfg: Config) -> Result<(), UdpServerError> {
-        let cfg = match self {
-            Self::V4(inner) => inner.update_config(cfg)?,
-            Self::V6(inner) => inner.update_config(cfg)?,
-        };
-        if let Some(cfg) = cfg {
-            info!("Server IP version changed, full restart");
-            *self = Self::new(cfg)?;
+        match self {
+            Self::V4(inner) => inner.update_config(cfg),
+            Self::V6(inner) => inner.update_config(cfg),
         }
-        Ok(())
     }
 
     pub fn run(&mut self) -> Result<(), UdpServerError> {
@@ -204,28 +216,95 @@ impl UdpServer {
     }
 }
 
+fn bind(addr: SocketAddr) -> Result<UdpSocket, UdpServerError> {
+    fn f(addr: SocketAddr) -> io::Result<UdpSocket> {
+        let domain = socket2::Domain::for_address(addr);
+        let ty = socket2::Type::DGRAM;
+        let protocol = socket2::Protocol::UDP;
+        let sock = socket2::Socket::new(domain, ty, Some(protocol))?;
+        sock.set_nonblocking(true)?;
+        #[cfg(not(windows))]
+        sock.set_reuse_port(true)?;
+        #[cfg(windows)]
+        sock.set_reuse_address(true)?;
+        sock.bind(&addr.into())?;
+        Ok(UdpSocket::from_std(sock.into()))
+    }
+    f(addr).map_err(UdpServerError::BindSocket)
+}
+
 pub type UdpServerV4 = UdpServerGeneric<SocketAddrV4>;
 pub type UdpServerV6 = UdpServerGeneric<SocketAddrV6>;
 
+struct UdpServerState<Addr: AddrExt> {
+    update_addr: RwLock<SocketAddr>,
+
+    blocklist: RwLock<HashSet<Addr::Ip>>,
+
+    challenges: RwLock<TimedHashMap<Addr, u32>>,
+    servers: RwLock<TimedHashMap<Addr, ServerInfo>>,
+
+    admin_challenges: RwLock<TimedHashMap<Addr::Ip, (u32, u32)>>,
+    // rate limit if hash is invalid
+    admin_limit: RwLock<TimedHashMap<Addr::Ip, ()>>,
+
+    client_rate_limit: RwLock<TimedHashMap<Addr::Ip, u32>>,
+    update_gamedir: RwLock<TimedHashMap<Addr, StrArr<GAMEDIR_MAX_SIZE>>>,
+}
+
+impl<Addr: AddrExt> UdpServerState<Addr> {
+    fn new(cfg: &Config, addr: &Addr) -> Self {
+        let update_addr = resolve_update_addr(&cfg.master, addr.wrap());
+        let timeout = &cfg.master.server.timeout;
+        Self {
+            update_addr: RwLock::new(update_addr),
+            blocklist: Default::default(),
+            challenges: RwLock::new(TimedHashMap::new(timeout.challenge)),
+            servers: RwLock::new(TimedHashMap::new(timeout.server)),
+            admin_challenges: RwLock::new(TimedHashMap::new(timeout.challenge)),
+            admin_limit: RwLock::new(TimedHashMap::new(timeout.admin)),
+            update_gamedir: RwLock::new(TimedHashMap::new(5)),
+            client_rate_limit: RwLock::new(TimedHashMap::new(1)),
+        }
+    }
+
+    fn update_config(&self, cfg: &Config, addr: SocketAddr) {
+        *self.update_addr.write().unwrap() = resolve_update_addr(&cfg.master, addr);
+
+        // set timeouts from new config
+        let timeout = &cfg.master.server.timeout;
+        self.challenges
+            .write()
+            .unwrap()
+            .set_timeout(timeout.challenge);
+        self.servers.write().unwrap().set_timeout(timeout.server);
+        self.admin_challenges
+            .write()
+            .unwrap()
+            .set_timeout(timeout.challenge);
+        self.admin_limit.write().unwrap().set_timeout(timeout.admin);
+    }
+
+    fn clear(&self) {
+        self.challenges.write().unwrap().clear();
+        self.servers.write().unwrap().clear();
+        self.admin_challenges.write().unwrap().clear();
+        self.admin_limit.write().unwrap().clear();
+        self.client_rate_limit.write().unwrap().clear();
+        self.update_gamedir.write().unwrap().clear();
+    }
+}
+
 pub struct UdpServerGeneric<Addr: AddrExt> {
+    main: bool,
+
     cfg: MasterConfig,
     rng: Rng,
 
     sock: UdpSocket,
-    challenges: TimedHashMap<Addr, u32>,
-    servers: TimedHashMap<Addr, ServerInfo>,
 
-    admin_challenges: TimedHashMap<Addr::Ip, (u32, u32)>,
-    // rate limit if hash is invalid
-    admin_limit: TimedHashMap<Addr::Ip, ()>,
-
-    update_addr: SocketAddr,
-    update_gamedir: TimedHashMap<Addr, StrArr<GAMEDIR_MAX_SIZE>>,
-    client_rate_limit: TimedHashMap<Addr::Ip, u32>,
-
-    blocklist: HashSet<Addr::Ip>,
-
-    stats: Stats,
+    state: Arc<UdpServerState<Addr>>,
+    stats: Arc<Stats>,
 
     // temporary data
     filtered_servers: Vec<Addr>,
@@ -236,25 +315,16 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
     pub fn new(cfg: Config, addr: Addr) -> Result<Self, UdpServerError> {
         info!("Listen address: {addr}");
 
-        let sock = UdpSocket::bind(addr).map_err(UdpServerError::BindSocket)?;
-        // make socket interruptable by singals
-        sock.set_read_timeout(Some(Duration::from_secs(u32::MAX as u64)))?;
-
-        let update_addr = resolve_update_addr(&cfg.master, addr.wrap());
-        let timeout = &cfg.master.server.timeout;
+        let state = Arc::new(UdpServerState::new(&cfg, &addr));
+        let sock = bind(addr.wrap())?;
 
         Ok(Self {
+            main: true,
+
             sock,
-            challenges: TimedHashMap::new(timeout.challenge),
-            servers: TimedHashMap::new(timeout.server),
             rng: Rng::new(),
-            update_addr,
-            update_gamedir: TimedHashMap::new(5),
-            client_rate_limit: TimedHashMap::new(1),
-            admin_challenges: TimedHashMap::new(timeout.challenge),
-            admin_limit: TimedHashMap::new(timeout.admin),
-            blocklist: Default::default(),
-            stats: Stats::new(cfg.stat),
+            state,
+            stats: Arc::new(Stats::new(cfg.stat)),
 
             filtered_servers: Default::default(),
             filtered_servers_nat: Default::default(),
@@ -263,36 +333,47 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
         })
     }
 
+    pub fn try_clone(&self) -> Result<Self, UdpServerError> {
+        Ok(Self {
+            main: false,
+            cfg: self.cfg.clone(),
+            rng: Rng::new(),
+            sock: bind(self.sock.local_addr()?)?,
+            state: Arc::clone(&self.state),
+            stats: Arc::clone(&self.stats),
+            filtered_servers: Vec::new(),
+            filtered_servers_nat: Vec::new(),
+        })
+    }
+
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
         self.sock.local_addr()
     }
 
-    pub fn update_config(&mut self, cfg: Config) -> Result<Option<Config>, UdpServerError> {
-        let local_addr = self.local_addr()?;
-        let addr = SocketAddr::new(cfg.master.server.ip, cfg.master.server.port);
-        if local_addr.is_ipv4() != addr.is_ipv4() {
-            return Ok(Some(cfg));
-        } else if local_addr != addr {
-            info!("Listen address: {addr}");
-            self.sock = UdpSocket::bind(addr).map_err(UdpServerError::BindSocket)?;
-            // make socket interruptible by signals
-            let timeout = Duration::from_secs(u32::MAX as u64);
-            self.sock.set_read_timeout(Some(timeout))?;
-            self.clear();
+    pub fn update_config(&mut self, cfg: Config) -> Result<(), UdpServerError> {
+        let old_addr = self.local_addr()?;
+        let new_addr = cfg.master.server.addr();
+        if old_addr.is_ipv4() != new_addr.is_ipv4() {
+            return Err(UdpServerError::IpVersion);
         }
 
-        self.update_addr = resolve_update_addr(&cfg.master, addr);
-        self.stats.update_config(cfg.stat);
+        if old_addr != new_addr {
+            if self.main {
+                info!("Listen address: {new_addr}");
+            }
+            self.sock = bind(new_addr)?;
+            if self.main {
+                self.clear();
+            }
+        }
+
+        if self.main {
+            self.state.update_config(&cfg, new_addr);
+            self.stats.update_config(cfg.stat);
+        }
+
         self.cfg = cfg.master;
-
-        // set timeouts from new config
-        let timeout = &self.cfg.server.timeout;
-        self.challenges.set_timeout(timeout.challenge);
-        self.servers.set_timeout(timeout.server);
-        self.admin_challenges.set_timeout(timeout.challenge);
-        self.admin_limit.set_timeout(timeout.admin);
-
-        Ok(None)
+        Ok(())
     }
 
     pub fn run(&mut self) -> Result<(), UdpServerError> {
@@ -302,7 +383,8 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
                 Ok(x) => x,
                 Err(e) => match e.kind() {
                     io::ErrorKind::Interrupted => break,
-                    io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock => continue,
+                    io::ErrorKind::TimedOut => break,
+                    io::ErrorKind::WouldBlock => break,
                     _ => Err(e)?,
                 },
             };
@@ -338,11 +420,8 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
 
     fn clear(&mut self) {
         info!("Clear all servers and challenges");
-        self.challenges.clear();
-        self.servers.clear();
-        self.admin_challenges.clear();
+        self.state.clear();
         self.stats.clear();
-        self.client_rate_limit.clear();
     }
 
     fn handle_server_challenge(
@@ -355,7 +434,7 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
         trace!("{from}: send {resp:?}");
         let mut buf = [0; 32];
         let packet = resp.encode(&mut buf)?;
-        self.sock.send_to(packet, from)?;
+        self.sock.send_to(packet, from.wrap())?;
         Ok(())
     }
 
@@ -379,11 +458,12 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
             warn!("{from}: expected challenge {challenge} but received {c}",);
             return Ok(());
         }
-        if self.challenges.remove(from).is_some() {
-            self.add_server(*from, ServerInfo::new(msg));
-            self.stats.on_server_add();
-            self.stats.servers_count(self.servers.len());
-        }
+        self.state.challenges.write().unwrap().remove(from);
+        self.add_server(*from, ServerInfo::new(msg));
+        self.stats.on_server_add();
+        // FIXME: outdated servers are also counted
+        self.stats
+            .servers_count(self.state.servers.read().unwrap().len());
         Ok(())
     }
 
@@ -394,7 +474,8 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
 
     fn allow_game_request(&mut self, from: &Addr) -> Result<(), UdpServerError> {
         if self.cfg.server.client_rate_limit > 0 {
-            let counter = self.client_rate_limit.entry(*from.ip()).or_default();
+            let mut client_rate_limit = self.state.client_rate_limit.write().unwrap();
+            let counter = client_rate_limit.entry(*from.ip()).or_default();
             counter.value = counter.value.saturating_add(1);
             if counter.value > self.cfg.server.client_rate_limit {
                 return Err(UdpServerError::GameRateLimit(counter.value));
@@ -471,7 +552,8 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
 
         if !self.is_query_servers_valid(from, query) {
             self.save_client_gamedir(from, query.filter.gamedir);
-            return self.send_fake_server(from, filter.key, self.update_addr);
+            let update_addr = self.state.update_addr.read().unwrap();
+            return self.send_fake_server(from, filter.key, *update_addr);
         }
 
         let Some(client_version) = filter.clver else {
@@ -482,7 +564,7 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
         self.filtered_servers.clear();
         self.filtered_servers_nat.clear();
 
-        for (addr, info) in self.servers.iter() {
+        for (addr, info) in self.state.servers.read().unwrap().iter() {
             // skip if server does not match filter
             if info.region != query.region || !filter.matches(info) {
                 continue;
@@ -522,7 +604,11 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
             trace!("{from}: {err_msg}, gamedir is invalid {gamedir:?}");
             return;
         };
-        self.update_gamedir.insert(*from, gamedir);
+        self.state
+            .update_gamedir
+            .write()
+            .unwrap()
+            .insert(*from, gamedir);
     }
 
     fn handle_game_get_server_info(
@@ -530,7 +616,7 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
         from: &Addr,
         msg: &game::GetServerInfo,
     ) -> Result<(), UdpServerError> {
-        let gamedir = self.update_gamedir.remove(from);
+        let gamedir = self.state.update_gamedir.write().unwrap().remove(from);
         let resp = server::GetServerInfoResponse {
             map: Str(self.cfg.client.update_map.as_bytes()),
             host: Str(self.cfg.client.update_title.as_bytes()),
@@ -543,12 +629,19 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
         trace!("{from}: send {resp:?}");
         let mut buf = Addr::mtu_buffer();
         let packet = resp.encode(buf.as_mut())?;
-        self.sock.send_to(packet, from)?;
+        self.sock.send_to(packet, from.wrap())?;
         Ok(())
     }
 
     fn allow_admin_request(&mut self, from: &Addr) -> Result<(), UdpServerError> {
-        if self.admin_limit.get(from.ip()).is_none() {
+        if self
+            .state
+            .admin_limit
+            .read()
+            .unwrap()
+            .get(from.ip())
+            .is_none()
+        {
             Ok(())
         } else {
             Err(UdpServerError::AdminRateLimit)
@@ -561,7 +654,7 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
         trace!("{from}: send {resp:?}");
         let mut buf = [0; 64];
         let packet = resp.encode(&mut buf)?;
-        self.sock.send_to(packet, from)?;
+        self.sock.send_to(packet, from.wrap())?;
         Ok(())
     }
 
@@ -571,7 +664,10 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
         msg: &admin::AdminCommand,
     ) -> Result<(), UdpServerError> {
         let entry = *self
+            .state
             .admin_challenges
+            .read()
+            .unwrap()
             .get(from.ip())
             .ok_or(UdpServerError::AdminChallengeNotFound)?;
 
@@ -603,7 +699,11 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
             }
             None => {
                 warn!("{from}: invalid admin hash, command: {:?}", msg.command);
-                self.admin_limit.insert(*from.ip(), ());
+                self.state
+                    .admin_limit
+                    .write()
+                    .unwrap()
+                    .insert(*from.ip(), ());
             }
         }
 
@@ -666,65 +766,80 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
     }
 
     fn server_challenge_add(&mut self, addr: Addr) -> u32 {
-        self.challenges
+        self.state
+            .challenges
+            .write()
+            .unwrap()
             .entry(addr)
             .or_insert_with(|| Timed::new(self.rng.u32(..)))
             .value
     }
 
     fn server_challenge_get(&self, addr: &Addr) -> Option<u32> {
-        self.challenges.get(addr).map(|i| i.value)
+        self.state
+            .challenges
+            .read()
+            .unwrap()
+            .get(addr)
+            .map(|i| i.value)
     }
 
     fn admin_challenge_add(&mut self, addr: &Addr) -> (u32, u32) {
-        let x = self.rng.u32(..);
-        let y = self.rng.u32(..);
-        self.admin_challenges.insert(*addr.ip(), (x, y));
-        (x, y)
+        let challenge = (self.rng.u32(..), self.rng.u32(..));
+        self.state
+            .admin_challenges
+            .write()
+            .unwrap()
+            .insert(*addr.ip(), challenge);
+        challenge
     }
 
     fn admin_challenge_remove(&mut self, addr: &Addr) {
-        self.admin_challenges.remove(addr.ip());
+        self.state
+            .admin_challenges
+            .write()
+            .unwrap()
+            .remove(addr.ip());
     }
 
     #[allow(dead_code)]
     fn count_all_servers(&self) -> usize {
-        self.servers.len()
-    }
-
-    fn count_servers(&self, ip: &Addr::Ip) -> u16 {
-        self.servers.keys().filter(|i| i.ip() == ip).count() as u16
+        self.state.servers.read().unwrap().len()
     }
 
     fn remove_servers_by_ip(&mut self, ip: &Addr::Ip) {
-        self.servers.retain(|addr, _| addr.ip() != ip);
+        self.state
+            .servers
+            .write()
+            .unwrap()
+            .retain(|addr, _| addr.ip() != ip);
     }
 
     fn add_server(&mut self, addr: Addr, server: ServerInfo) {
-        match self.servers.entry(addr) {
-            hash_map::Entry::Occupied(mut e) => {
-                trace!("{addr}: game server updated");
-                e.insert(Timed::new(server));
-            }
-            hash_map::Entry::Vacant(_) => {
-                if self.count_servers(addr.ip()) >= self.cfg.server.max_servers_per_ip {
+        let mut servers = self.state.servers.write().unwrap();
+        if let hash_map::Entry::Occupied(mut e) = servers.entry(addr) {
+            trace!("{addr}: game server updated");
+            e.insert(Timed::new(server));
+        } else {
+            for (i, _) in servers.keys().filter(|i| i.ip() == addr.ip()).enumerate() {
+                if i >= usize::from(self.cfg.server.max_servers_per_ip) {
                     trace!("{addr}: game server rejected, max servers per ip");
                     return;
                 }
-                trace!("{addr}: game server added");
-                self.servers.insert(addr, server);
             }
+            trace!("{addr}: game server added");
+            servers.insert(addr, server);
         }
     }
 
     fn send_server_list<A, S>(
         &self,
-        to: A,
+        to: &A,
         key: Option<u32>,
         servers: &[S],
     ) -> Result<(), UdpServerError>
     where
-        A: ToSocketAddrs,
+        A: AddrExt,
         S: ServerAddress,
     {
         let list = master::QueryServersResponse::new(key);
@@ -732,7 +847,7 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
         let mut offset = 0;
         loop {
             let (packet, count) = list.encode(buf.as_mut(), &servers[offset..])?;
-            self.sock.send_to(packet, &to)?;
+            self.sock.send_to(packet, to.wrap())?;
             offset += count;
             if offset >= servers.len() {
                 break;
@@ -749,14 +864,14 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
         let mut buf = [0; 64];
         let packet = master::ClientAnnounce::new(to.wrap()).encode(&mut buf)?;
         for i in servers {
-            self.sock.send_to(packet, i)?;
+            self.sock.send_to(packet, i.wrap())?;
         }
         Ok(())
     }
 
     #[inline]
     fn is_blocked(&self, ip: &Addr::Ip) -> bool {
-        self.blocklist.contains(ip)
+        self.state.blocklist.read().unwrap().contains(ip)
     }
 
     fn admin_command(&mut self, cmd: &str) {
@@ -779,7 +894,7 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
         match args[0] {
             "ban" => {
                 helper::<Addr, _>(&args[1..], |_, ip| {
-                    if self.blocklist.insert(ip) {
+                    if self.state.blocklist.write().unwrap().insert(ip) {
                         info!("ban ip: {ip}");
 
                         self.remove_servers_by_ip(&ip);
@@ -788,7 +903,7 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
             }
             "unban" => {
                 helper::<Addr, _>(&args[1..], |_, ip| {
-                    if self.blocklist.remove(&ip) {
+                    if self.state.blocklist.write().unwrap().remove(&ip) {
                         info!("unban ip: {ip}");
                     }
                 });

@@ -1,5 +1,4 @@
-use std::net::IpAddr;
-use std::process;
+use std::{net::IpAddr, process, thread};
 
 use getopts::Options;
 use log::LevelFilter;
@@ -19,6 +18,8 @@ pub enum Error {
     InvalidPort(String),
     #[error("Invalid stats interval \"{0}\"")]
     InvalidStatsInterval(String),
+    #[error("Invalid threads \"{0}\"")]
+    InvalidThreads(String),
     #[error(transparent)]
     Options(#[from] getopts::Fail),
 }
@@ -31,6 +32,7 @@ pub struct Cli {
     pub config_path: Option<Box<str>>,
     pub stats_format: Option<Box<str>>,
     pub stats_interval: Option<u32>,
+    pub threads: usize,
 }
 
 fn print_usage(opts: Options) {
@@ -63,6 +65,7 @@ pub fn parse() -> Result<Cli, Error> {
     opts.optflag("", "print-default-config", "print default config");
     opts.optopt("s", "stats-format", "stats format string", "FMT");
     opts.optopt("I", "stats-interval", "stats interval", "SECONDS");
+    opts.optopt("t", "threads", "threads count [default: 0 (auto)]", "COUNT");
 
     let matches = opts.parse(&args[1..])?;
 
@@ -109,6 +112,14 @@ pub fn parse() -> Result<Cli, Error> {
 
     if let Some(s) = matches.opt_str("stats-interval") {
         cli.stats_interval = Some(s.parse().map_err(|_| Error::InvalidStatsInterval(s))?);
+    }
+
+    if let Some(s) = matches.opt_str("threads") {
+        cli.threads = s.parse().map_err(|_| Error::InvalidThreads(s))?;
+    }
+
+    if cli.threads == 0 {
+        cli.threads = thread::available_parallelism().map_or(1, |i| i.get().min(8));
     }
 
     Ok(cli)

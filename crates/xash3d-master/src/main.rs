@@ -12,6 +12,7 @@ mod stats;
 mod str_arr;
 mod time;
 mod udp_server;
+mod worker;
 
 fn main() {
     if let Err(e) = app::run() {

@@ -15,7 +15,7 @@ use xash3d_protocol::{
 
 use crate::{
     config::Config,
-    master_server::{MasterServer, ServerInfo},
+    udp_server::{ServerInfo, UdpServer, UdpServerV4},
 };
 
 const UNSPECIFIED: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0);
@@ -61,7 +61,7 @@ impl Test {
     }
 
     fn create_master(&mut self, cfg: &Config) {
-        let mut master = MasterServer::new(cfg.clone(), UNSPECIFIED).unwrap();
+        let mut master = UdpServer::with_address(cfg.clone(), UNSPECIFIED).unwrap();
         self.master_addr = master.local_addr().unwrap();
         thread::spawn(move || master.run().unwrap());
     }
@@ -103,7 +103,7 @@ fn check_remove_server_by_ip() {
     use server::{Os, ServerAdd, ServerFlags, ServerType};
 
     let cfg = Config::default();
-    let mut master = MasterServer::new(cfg, UNSPECIFIED).unwrap();
+    let mut master = UdpServerV4::new(cfg, UNSPECIFIED).unwrap();
 
     let server_add = ServerAdd {
         gamedir: Str(b"valve"),
@@ -158,7 +158,7 @@ fn check_query_servers() {
     cfg.master.client.min_old_engine_buildnum = BUILDNUM_OLD;
 
     let addr = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0);
-    let master = MasterServer::new(cfg, addr).unwrap();
+    let master = UdpServerV4::new(cfg, addr).unwrap();
 
     let mut query = QueryServers::default();
 

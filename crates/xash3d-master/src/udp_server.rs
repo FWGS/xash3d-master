@@ -112,7 +112,7 @@ impl AddrExt for SocketAddrV6 {
 const GAMEDIR_MAX_SIZE: usize = 31;
 
 #[derive(Error, Debug)]
-pub enum Error {
+pub enum UdpServerError {
     #[error("Failed to bind server socket: {0}")]
     BindSocket(io::Error),
     #[error(transparent)]
@@ -158,20 +158,33 @@ fn resolve_update_addr(cfg: &MasterConfig, local_addr: SocketAddr) -> SocketAddr
     local_addr
 }
 
-pub enum Master {
-    V4(MasterServer<SocketAddrV4>),
-    V6(MasterServer<SocketAddrV6>),
+pub enum UdpServer {
+    V4(UdpServerV4),
+    V6(UdpServerV6),
 }
 
-impl Master {
-    pub fn new(cfg: Config) -> Result<Self, Error> {
-        match SocketAddr::new(cfg.master.server.ip, cfg.master.server.port) {
-            SocketAddr::V4(addr) => MasterServer::new(cfg, addr).map(Self::V4),
-            SocketAddr::V6(addr) => MasterServer::new(cfg, addr).map(Self::V6),
+impl UdpServer {
+    pub fn with_address(cfg: Config, addr: impl Into<SocketAddr>) -> Result<Self, UdpServerError> {
+        match addr.into() {
+            SocketAddr::V4(addr) => UdpServerV4::new(cfg, addr).map(Self::V4),
+            SocketAddr::V6(addr) => UdpServerV6::new(cfg, addr).map(Self::V6),
         }
     }
 
-    pub fn update_config(&mut self, cfg: Config) -> Result<(), Error> {
+    pub fn new(cfg: Config) -> Result<Self, UdpServerError> {
+        let addr = SocketAddr::new(cfg.master.server.ip, cfg.master.server.port);
+        Self::with_address(cfg, addr)
+    }
+
+    #[allow(dead_code)]
+    pub fn local_addr(&self) -> io::Result<SocketAddr> {
+        match self {
+            Self::V4(inner) => inner.local_addr(),
+            Self::V6(inner) => inner.local_addr(),
+        }
+    }
+
+    pub fn update_config(&mut self, cfg: Config) -> Result<(), UdpServerError> {
         let cfg = match self {
             Self::V4(inner) => inner.update_config(cfg)?,
             Self::V6(inner) => inner.update_config(cfg)?,
@@ -183,7 +196,7 @@ impl Master {
         Ok(())
     }
 
-    pub fn run(&mut self) -> Result<(), Error> {
+    pub fn run(&mut self) -> Result<(), UdpServerError> {
         match self {
             Self::V4(inner) => inner.run(),
             Self::V6(inner) => inner.run(),
@@ -191,7 +204,10 @@ impl Master {
     }
 }
 
-pub struct MasterServer<Addr: AddrExt> {
+pub type UdpServerV4 = UdpServerGeneric<SocketAddrV4>;
+pub type UdpServerV6 = UdpServerGeneric<SocketAddrV6>;
+
+pub struct UdpServerGeneric<Addr: AddrExt> {
     cfg: MasterConfig,
     rng: Rng,
 
@@ -216,11 +232,11 @@ pub struct MasterServer<Addr: AddrExt> {
     filtered_servers_nat: Vec<Addr>,
 }
 
-impl<Addr: AddrExt> MasterServer<Addr> {
-    pub fn new(cfg: Config, addr: Addr) -> Result<Self, Error> {
+impl<Addr: AddrExt> UdpServerGeneric<Addr> {
+    pub fn new(cfg: Config, addr: Addr) -> Result<Self, UdpServerError> {
         info!("Listen address: {addr}");
 
-        let sock = UdpSocket::bind(addr).map_err(Error::BindSocket)?;
+        let sock = UdpSocket::bind(addr).map_err(UdpServerError::BindSocket)?;
         // make socket interruptable by singals
         sock.set_read_timeout(Some(Duration::from_secs(u32::MAX as u64)))?;
 
@@ -251,14 +267,14 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         self.sock.local_addr()
     }
 
-    pub fn update_config(&mut self, cfg: Config) -> Result<Option<Config>, Error> {
+    pub fn update_config(&mut self, cfg: Config) -> Result<Option<Config>, UdpServerError> {
         let local_addr = self.local_addr()?;
         let addr = SocketAddr::new(cfg.master.server.ip, cfg.master.server.port);
         if local_addr.is_ipv4() != addr.is_ipv4() {
             return Ok(Some(cfg));
         } else if local_addr != addr {
             info!("Listen address: {addr}");
-            self.sock = UdpSocket::bind(addr).map_err(Error::BindSocket)?;
+            self.sock = UdpSocket::bind(addr).map_err(UdpServerError::BindSocket)?;
             // make socket interruptible by signals
             let timeout = Duration::from_secs(u32::MAX as u64);
             self.sock.set_read_timeout(Some(timeout))?;
@@ -279,7 +295,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         Ok(None)
     }
 
-    pub fn run(&mut self) -> Result<(), Error> {
+    pub fn run(&mut self) -> Result<(), UdpServerError> {
         let mut buf = [0; 2048];
         while SignalFlags::get().is_empty() {
             let (n, from) = match self.sock.recv_from(&mut buf) {
@@ -305,10 +321,10 @@ impl<Addr: AddrExt> MasterServer<Addr> {
                 self.stats.on_error();
 
                 match err {
-                    Error::GameRateLimit(counter) => {
+                    UdpServerError::GameRateLimit(counter) => {
                         trace!("{from}: client rate limit {}", counter);
                     }
-                    Error::AdminRateLimit => {
+                    UdpServerError::AdminRateLimit => {
                         trace!("{from}: admin rate limit");
                     }
                     _ => {
@@ -333,7 +349,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         &mut self,
         from: &Addr,
         msg: &server::Challenge,
-    ) -> Result<(), Error> {
+    ) -> Result<(), UdpServerError> {
         let challenge = self.server_challenge_add(*from);
         let resp = master::ChallengeResponse::new(challenge, msg.server_challenge);
         trace!("{from}: send {resp:?}");
@@ -343,7 +359,11 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         Ok(())
     }
 
-    fn handle_server_add(&mut self, from: &Addr, msg: &server::ServerAdd) -> Result<(), Error> {
+    fn handle_server_add(
+        &mut self,
+        from: &Addr,
+        msg: &server::ServerAdd,
+    ) -> Result<(), UdpServerError> {
         if msg.version < self.cfg.server.min_version {
             let ver = msg.version;
             let min = self.cfg.server.min_version;
@@ -367,17 +387,17 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         Ok(())
     }
 
-    fn handle_server_remove(&mut self, _from: &Addr) -> Result<(), Error> {
+    fn handle_server_remove(&mut self, _from: &Addr) -> Result<(), UdpServerError> {
         self.stats.on_server_del();
         Ok(())
     }
 
-    fn allow_game_request(&mut self, from: &Addr) -> Result<(), Error> {
+    fn allow_game_request(&mut self, from: &Addr) -> Result<(), UdpServerError> {
         if self.cfg.server.client_rate_limit > 0 {
             let counter = self.client_rate_limit.entry(*from.ip()).or_default();
             counter.value = counter.value.saturating_add(1);
             if counter.value > self.cfg.server.client_rate_limit {
-                return Err(Error::GameRateLimit(counter.value));
+                return Err(UdpServerError::GameRateLimit(counter.value));
             }
         }
         Ok(())
@@ -428,7 +448,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         from: &Addr,
         key: Option<u32>,
         update_addr: SocketAddr,
-    ) -> Result<(), Error> {
+    ) -> Result<(), UdpServerError> {
         trace!("{from}: send fake server ({key:?}, {update_addr})");
         match update_addr {
             SocketAddr::V4(addr) => {
@@ -445,7 +465,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         &mut self,
         from: &Addr,
         query: &QueryServers<Filter>,
-    ) -> Result<(), Error> {
+    ) -> Result<(), UdpServerError> {
         let filter = &query.filter;
         self.stats.on_query_servers();
 
@@ -509,7 +529,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         &mut self,
         from: &Addr,
         msg: &game::GetServerInfo,
-    ) -> Result<(), Error> {
+    ) -> Result<(), UdpServerError> {
         let gamedir = self.update_gamedir.remove(from);
         let resp = server::GetServerInfoResponse {
             map: Str(self.cfg.client.update_map.as_bytes()),
@@ -527,15 +547,15 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         Ok(())
     }
 
-    fn allow_admin_request(&mut self, from: &Addr) -> Result<(), Error> {
+    fn allow_admin_request(&mut self, from: &Addr) -> Result<(), UdpServerError> {
         if self.admin_limit.get(from.ip()).is_none() {
             Ok(())
         } else {
-            Err(Error::AdminRateLimit)
+            Err(UdpServerError::AdminRateLimit)
         }
     }
 
-    fn handle_admin_challenge(&mut self, from: &Addr) -> Result<(), Error> {
+    fn handle_admin_challenge(&mut self, from: &Addr) -> Result<(), UdpServerError> {
         let (master_challenge, hash_challenge) = self.admin_challenge_add(from);
         let resp = master::AdminChallengeResponse::new(master_challenge, hash_challenge);
         trace!("{from}: send {resp:?}");
@@ -549,11 +569,11 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         &mut self,
         from: &Addr,
         msg: &admin::AdminCommand,
-    ) -> Result<(), Error> {
+    ) -> Result<(), UdpServerError> {
         let entry = *self
             .admin_challenges
             .get(from.ip())
-            .ok_or(Error::AdminChallengeNotFound)?;
+            .ok_or(UdpServerError::AdminChallengeNotFound)?;
 
         if entry.0 != msg.master_challenge {
             trace!("{from}: master challenge is not valid");
@@ -595,7 +615,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         trace!("{from}: recv {msg:?}");
     }
 
-    fn handle_packet(&mut self, from: &Addr, src: &[u8]) -> Result<(), Error> {
+    fn handle_packet(&mut self, from: &Addr, src: &[u8]) -> Result<(), UdpServerError> {
         if src.starts_with(server::Challenge::HEADER) {
             let msg = server::Challenge::decode(src)?;
             self.dump_message(from, &msg);
@@ -642,7 +662,7 @@ impl<Addr: AddrExt> MasterServer<Addr> {
             return self.handle_admin_command(from, &msg);
         }
 
-        Err(Error::UndefinedPacket)
+        Err(UdpServerError::UndefinedPacket)
     }
 
     fn server_challenge_add(&mut self, addr: Addr) -> u32 {
@@ -697,7 +717,12 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         }
     }
 
-    fn send_server_list<A, S>(&self, to: A, key: Option<u32>, servers: &[S]) -> Result<(), Error>
+    fn send_server_list<A, S>(
+        &self,
+        to: A,
+        key: Option<u32>,
+        servers: &[S],
+    ) -> Result<(), UdpServerError>
     where
         A: ToSocketAddrs,
         S: ServerAddress,
@@ -716,7 +741,11 @@ impl<Addr: AddrExt> MasterServer<Addr> {
         Ok(())
     }
 
-    fn send_client_to_nat_servers(&self, to: &Addr, servers: &[Addr]) -> Result<(), Error> {
+    fn send_client_to_nat_servers(
+        &self,
+        to: &Addr,
+        servers: &[Addr],
+    ) -> Result<(), UdpServerError> {
         let mut buf = [0; 64];
         let packet = master::ClientAnnounce::new(to.wrap()).encode(&mut buf)?;
         for i in servers {

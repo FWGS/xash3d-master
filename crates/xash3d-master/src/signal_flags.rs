@@ -1,5 +1,6 @@
 use std::{
     ffi::c_int,
+    io,
     sync::{
         atomic::{AtomicU32, Ordering},
         OnceLock,
@@ -8,8 +9,6 @@ use std::{
 
 use bitflags::bitflags;
 use signal_hook::{consts::signal::*, SigId};
-
-use crate::master_server::Error;
 
 bitflags! {
     #[derive(Copy, Clone)]
@@ -30,7 +29,7 @@ impl SignalFlags {
         Self(())
     }
 
-    fn register_flag(&self, signal: c_int, flags: Flags) -> Result<SigId, Error> {
+    fn register_flag(&self, signal: c_int, flags: Flags) -> io::Result<SigId> {
         let flags = flags.bits();
         #[allow(unsafe_code)]
         // SAFETY: Only a single atomic operation is used.
@@ -42,7 +41,7 @@ impl SignalFlags {
         Ok(signal_id)
     }
 
-    fn register(&self) -> Result<(), Error> {
+    fn register(&self) -> io::Result<()> {
         #[cfg(not(windows))]
         {
             self.register_flag(SIGINT, Flags::EXIT)?;
@@ -60,7 +59,7 @@ impl SignalFlags {
         Ok(())
     }
 
-    pub fn init() -> Result<Self, Error> {
+    pub fn init() -> io::Result<Self> {
         let mut result = None;
         SIGNAL_FLAGS_INIT.get_or_init(|| {
             result = Some(Self::get().register());

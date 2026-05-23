@@ -1,6 +1,6 @@
 use std::{
     fs, io,
-    net::{IpAddr, Ipv4Addr},
+    net::{IpAddr, Ipv4Addr, SocketAddr},
     path::Path,
 };
 
@@ -107,6 +107,12 @@ impl Default for ServerConfig {
             timeout: Default::default(),
             client_rate_limit: 0,
         }
+    }
+}
+
+impl ServerConfig {
+    pub fn addr(&self) -> SocketAddr {
+        SocketAddr::new(self.ip, self.port)
     }
 }
 

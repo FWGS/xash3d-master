@@ -1,11 +1,12 @@
-use std::fmt::{self, Write};
-use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering::Relaxed};
-use std::sync::mpsc;
-use std::sync::Arc;
-use std::thread;
-use std::time::{Duration, Instant};
-
-use log::info;
+use std::{
+    fmt::{self, Write},
+    sync::{
+        atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering, Ordering::Relaxed},
+        mpsc, Arc,
+    },
+    thread,
+    time::{Duration, Instant},
+};
 
 use crate::config::StatConfig;
 
@@ -72,7 +73,7 @@ impl Counters {
 }
 
 pub struct Stats {
-    enabled: bool,
+    enabled: AtomicBool,
     tx: mpsc::Sender<StatConfig>,
     counters: Arc<Counters>,
 }
@@ -82,7 +83,7 @@ impl Stats {
         let counters_ = Arc::new(Counters::default());
         let (tx, rx) = mpsc::channel();
 
-        let enabled = config.interval != 0;
+        let enabled = AtomicBool::new(config.interval != 0);
         let counters = counters_.clone();
         thread::spawn(move || -> fmt::Result {
             let buf = &mut String::new();
@@ -114,8 +115,8 @@ impl Stats {
         }
     }
 
-    pub fn update_config(&mut self, config: StatConfig) {
-        self.enabled = config.interval != 0;
+    pub fn update_config(&self, config: StatConfig) {
+        self.enabled.store(config.interval != 0, Ordering::Release);
         self.tx.send(config).unwrap();
     }
 
@@ -123,32 +124,37 @@ impl Stats {
         self.counters.clear();
     }
 
+    #[inline(always)]
+    fn enabled(&self) -> bool {
+        self.enabled.load(Ordering::Acquire)
+    }
+
     pub fn servers_count(&self, n: usize) {
-        if self.enabled {
+        if self.enabled() {
             self.counters.servers.store(n, Relaxed);
         }
     }
 
     pub fn on_server_add(&self) {
-        if self.enabled {
+        if self.enabled() {
             self.counters.server_add.fetch_add(1, Relaxed);
         }
     }
 
     pub fn on_server_del(&self) {
-        if self.enabled {
+        if self.enabled() {
             self.counters.server_del.fetch_add(1, Relaxed);
         }
     }
 
     pub fn on_query_servers(&self) {
-        if self.enabled {
+        if self.enabled() {
             self.counters.query_servers.fetch_add(1, Relaxed);
         }
     }
 
     pub fn on_error(&self) {
-        if self.enabled {
+        if self.enabled() {
             self.counters.errors.fetch_add(1, Relaxed);
         }
     }

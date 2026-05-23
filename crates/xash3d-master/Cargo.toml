@@ -28,4 +28,6 @@ toml.workspace = true
 blake2b_simd.workspace = true
 ahash.workspace = true
 signal-hook.workspace = true
+socket2.workspace = true
+mio.workspace = true
 xash3d-protocol.workspace = true

@@ -587,7 +587,9 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
 
         // NOTE: If NAT is not set in a filter then by default the client is announced
         // to filtered servers behind NAT.
-        if filter.contains_flags(FilterFlags::NAT).unwrap_or(true) {
+        if !self.filtered_servers_nat.is_empty()
+            && filter.contains_flags(FilterFlags::NAT).unwrap_or(true)
+        {
             self.send_client_to_nat_servers(from, &self.filtered_servers_nat)?;
         }
 

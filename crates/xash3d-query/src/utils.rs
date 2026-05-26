@@ -1,6 +1,6 @@
 use std::{
     io::{self, Write},
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4, ToSocketAddrs},
+    net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, ToSocketAddrs},
     process,
 };
 
@@ -9,9 +9,41 @@ use xash3d_observer::{Master, Observer};
 
 use crate::cli::Cli;
 
+enum IpVersion {
+    Any,
+    V4,
+    V6,
+    Both,
+}
+
+/// Detects an IP version from a list of addresses.
+fn ip_version_for(addrs: &[Box<str>]) -> io::Result<IpVersion> {
+    let mut version = IpVersion::Any;
+    for i in addrs {
+        if let Some(addr) = i.to_socket_addrs()?.next() {
+            match version {
+                IpVersion::Any | IpVersion::V4 if addr.is_ipv4() => {
+                    version = IpVersion::V4;
+                }
+                IpVersion::Any | IpVersion::V6 if addr.is_ipv6() => {
+                    version = IpVersion::V6;
+                }
+                _ => return Ok(IpVersion::Both),
+            }
+        }
+    }
+    Ok(version)
+}
+
 pub fn create_observer(cli: &Cli) -> io::Result<Observer> {
-    // TODO: ipv6
-    let unspecified = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0));
+    let unspecified = match ip_version_for(&cli.masters)? {
+        IpVersion::Both => {
+            eprintln!("error: master servers with different IP versions is not supported");
+            process::exit(1);
+        }
+        IpVersion::V6 => SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, 0, 0, 0)),
+        _ => SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)),
+    };
     let mut observer = Observer::bind(unspecified)?;
     observer.set_filter_raw(cli.filter.clone());
     Ok(observer)

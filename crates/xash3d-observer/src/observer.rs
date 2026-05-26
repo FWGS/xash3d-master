@@ -154,6 +154,7 @@ pub struct Observer {
 }
 
 impl Observer {
+    // TODO: bind ipv4 and ipv6 at the same time
     pub fn bind(addr: SocketAddr) -> io::Result<Self> {
         let sock = Socket::bind(addr)?;
         let connections = HashMap::new();

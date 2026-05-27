@@ -460,7 +460,6 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
         }
         self.state.challenges.write().unwrap().remove(from);
         self.add_server(*from, ServerInfo::new(msg));
-        self.stats.on_server_add();
         // FIXME: outdated servers are also counted
         self.stats
             .servers_count(self.state.servers.read().unwrap().len());
@@ -468,7 +467,6 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
     }
 
     fn handle_server_remove(&mut self, _from: &Addr) -> Result<(), UdpServerError> {
-        self.stats.on_server_del();
         Ok(())
     }
 
@@ -548,7 +546,6 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
         query: &QueryServers<Filter>,
     ) -> Result<(), UdpServerError> {
         let filter = &query.filter;
-        self.stats.on_query_servers();
 
         if !self.is_query_servers_valid(from, query) {
             self.save_client_gamedir(from, query.filter.gamedir);
@@ -719,24 +716,28 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
 
     fn handle_packet(&mut self, from: &Addr, src: &[u8]) -> Result<(), UdpServerError> {
         if src.starts_with(server::Challenge::HEADER) {
+            self.stats.on_server_challenge();
             let msg = server::Challenge::decode(src)?;
             self.dump_message(from, &msg);
             return self.handle_server_challenge(from, &msg);
         }
 
         if src.starts_with(server::ServerAdd::HEADER) {
+            self.stats.on_server_add();
             let msg = server::ServerAdd::decode(src)?;
             self.dump_message(from, &msg);
             return self.handle_server_add(from, &msg);
         }
 
         if src.starts_with(server::ServerRemove::HEADER) {
+            self.stats.on_server_del();
             let msg = server::ServerRemove::decode(src)?;
             self.dump_message(from, &msg);
             return self.handle_server_remove(from);
         }
 
         if src.starts_with(game::QueryServers::HEADER) {
+            self.stats.on_query_servers();
             self.allow_game_request(from)?;
             let msg = game::QueryServers::decode(src)?;
             self.dump_message(from, &msg);
@@ -744,6 +745,7 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
         }
 
         if src.starts_with(game::GetServerInfo::HEADER) {
+            self.stats.on_query_info();
             self.allow_game_request(from)?;
             let msg = game::GetServerInfo::decode(src)?;
             self.dump_message(from, &msg);

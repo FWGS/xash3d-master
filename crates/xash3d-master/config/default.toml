@@ -37,15 +37,19 @@
 # %s - servers count
 #
 # Requests per second
+# %c - server challenge
 # %a - add server
 # %d - remove server
 # %q - query servers
+# %i - query info (update message)
 # %e - errors
 #
 # Requests per interval time
+# %C - server challenge
 # %A - add server
 # %D - remove server
 # %Q - query servers
+# %I - query info (update message)
 # %E - errors
 #format = "stats: %s servers, %a add/s, %d del/s, %q query/s, %e error/s"
 

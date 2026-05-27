@@ -10,23 +10,45 @@ use std::{
 
 use crate::config::StatConfig;
 
+enum Metric {
+    Count(usize),
+    PerSecond(u32),
+    PerInterval(u32),
+}
+
 #[derive(Default)]
 struct Counters {
     servers: AtomicUsize,
+    server_challenge: AtomicU32,
     server_add: AtomicU32,
     server_del: AtomicU32,
     query_servers: AtomicU32,
+    query_info: AtomicU32,
     errors: AtomicU32,
 }
 
 impl Counters {
+    fn get_metric(&self, c: char) -> Option<Metric> {
+        Some(match c {
+            's' => Metric::Count(self.servers.load(Ordering::Relaxed)),
+            'c' => Metric::PerSecond(self.server_challenge.load(Ordering::Relaxed)),
+            'a' => Metric::PerSecond(self.server_add.load(Ordering::Relaxed)),
+            'd' => Metric::PerSecond(self.server_del.load(Ordering::Relaxed)),
+            'q' => Metric::PerSecond(self.query_servers.load(Ordering::Relaxed)),
+            'i' => Metric::PerSecond(self.query_info.load(Ordering::Relaxed)),
+            'e' => Metric::PerSecond(self.errors.load(Ordering::Relaxed)),
+            'C' => Metric::PerInterval(self.server_challenge.load(Ordering::Relaxed)),
+            'A' => Metric::PerInterval(self.server_add.load(Ordering::Relaxed)),
+            'D' => Metric::PerInterval(self.server_del.load(Ordering::Relaxed)),
+            'Q' => Metric::PerInterval(self.query_servers.load(Ordering::Relaxed)),
+            'I' => Metric::PerInterval(self.query_info.load(Ordering::Relaxed)),
+            'E' => Metric::PerInterval(self.errors.load(Ordering::Relaxed)),
+            _ => return None,
+        })
+    }
+
     fn print(&self, mut format: &str, buf: &mut String, time: Duration) -> fmt::Result {
         let time = time.as_secs_f64();
-        let servers = self.servers.load(Relaxed);
-        let server_add = self.server_add.swap(0, Relaxed);
-        let server_del = self.server_del.swap(0, Relaxed);
-        let query_servers = self.query_servers.swap(0, Relaxed);
-        let errors = self.errors.swap(0, Relaxed);
 
         loop {
             // TODO: precompile format string
@@ -36,16 +58,23 @@ impl Counters {
                     write!(buf, "{head}")?;
                     let mut chars = format.char_indices();
                     match chars.next().map(|(_, c)| c) {
-                        Some('s') => write!(buf, "{servers}")?,
-                        Some('A') => write!(buf, "{server_add}")?,
-                        Some('D') => write!(buf, "{server_del}")?,
-                        Some('Q') => write!(buf, "{query_servers}")?,
-                        Some('E') => write!(buf, "{errors}")?,
-                        Some('a') => write!(buf, "{:.1}", server_add as f64 / time)?,
-                        Some('d') => write!(buf, "{:.1}", server_del as f64 / time)?,
-                        Some('q') => write!(buf, "{:.1}", query_servers as f64 / time)?,
-                        Some('e') => write!(buf, "{:.1}", errors as f64 / time)?,
-                        Some(c) => write!(buf, "%{c}")?,
+                        Some('s') => {
+                            write!(buf, "{}", self.servers.load(Ordering::Relaxed))?;
+                        }
+                        Some(c) => match self.get_metric(c) {
+                            Some(Metric::Count(value)) => {
+                                write!(buf, "{value}")?;
+                            }
+                            Some(Metric::PerSecond(value)) => {
+                                write!(buf, "{:.1}", value as f64 / time)?;
+                            }
+                            Some(Metric::PerInterval(value)) => {
+                                write!(buf, "{value}")?;
+                            }
+                            None => {
+                                write!(buf, "%{c}")?;
+                            }
+                        },
                         None => write!(buf, "%")?,
                     }
                     match chars.next() {
@@ -60,15 +89,45 @@ impl Counters {
             }
         }
 
+        // reset counters
+        let Self {
+            servers: _,
+            server_challenge,
+            server_add,
+            server_del,
+            query_servers,
+            query_info,
+            errors,
+        } = self;
+
+        server_challenge.store(0, Relaxed);
+        server_add.store(0, Relaxed);
+        server_del.store(0, Relaxed);
+        query_servers.store(0, Relaxed);
+        query_info.store(0, Relaxed);
+        errors.store(0, Relaxed);
+
         Ok(())
     }
 
     fn clear(&self) {
-        self.servers.store(0, Relaxed);
-        self.server_add.store(0, Relaxed);
-        self.server_del.store(0, Relaxed);
-        self.query_servers.store(0, Relaxed);
-        self.errors.store(0, Relaxed);
+        let Self {
+            servers,
+            server_challenge,
+            server_add,
+            server_del,
+            query_servers,
+            query_info,
+            errors,
+        } = self;
+
+        servers.store(0, Relaxed);
+        server_challenge.store(0, Relaxed);
+        server_add.store(0, Relaxed);
+        server_del.store(0, Relaxed);
+        query_servers.store(0, Relaxed);
+        query_info.store(0, Relaxed);
+        errors.store(0, Relaxed);
     }
 }
 
@@ -76,6 +135,16 @@ pub struct Stats {
     enabled: AtomicBool,
     tx: mpsc::Sender<StatConfig>,
     counters: Arc<Counters>,
+}
+
+macro_rules! impl_counter_inc {
+    ($vis:vis fn $meth:ident = $field:ident) => {
+        $vis fn $meth(&self) {
+            if self.enabled() {
+                self.counters.$field.fetch_add(1, Relaxed);
+            }
+        }
+    }
 }
 
 impl Stats {
@@ -135,27 +204,10 @@ impl Stats {
         }
     }
 
-    pub fn on_server_add(&self) {
-        if self.enabled() {
-            self.counters.server_add.fetch_add(1, Relaxed);
-        }
-    }
-
-    pub fn on_server_del(&self) {
-        if self.enabled() {
-            self.counters.server_del.fetch_add(1, Relaxed);
-        }
-    }
-
-    pub fn on_query_servers(&self) {
-        if self.enabled() {
-            self.counters.query_servers.fetch_add(1, Relaxed);
-        }
-    }
-
-    pub fn on_error(&self) {
-        if self.enabled() {
-            self.counters.errors.fetch_add(1, Relaxed);
-        }
-    }
+    impl_counter_inc!(pub fn on_server_challenge = server_challenge);
+    impl_counter_inc!(pub fn on_server_add = server_add);
+    impl_counter_inc!(pub fn on_server_del = server_del);
+    impl_counter_inc!(pub fn on_query_servers = query_servers);
+    impl_counter_inc!(pub fn on_query_info = query_info);
+    impl_counter_inc!(pub fn on_error = errors);
 }

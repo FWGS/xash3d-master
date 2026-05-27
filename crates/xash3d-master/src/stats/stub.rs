@@ -13,8 +13,10 @@ impl Stats {
     pub fn update_config(&self, _: StatConfig) {}
     pub fn clear(&self) {}
     pub fn servers_count(&self, _: usize) {}
+    pub fn on_server_challenge(&self) {}
     pub fn on_server_add(&self) {}
     pub fn on_server_del(&self) {}
     pub fn on_query_servers(&self) {}
+    pub fn on_query_info(&self) {}
     pub fn on_error(&self) {}
 }

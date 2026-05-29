@@ -7,6 +7,7 @@ use std::{
     fmt::{self, Display},
     hash::Hash,
     io,
+    mem::MaybeUninit,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, ToSocketAddrs},
     str::{self, FromStr},
     sync::{Arc, RwLock},
@@ -365,9 +366,10 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
     }
 
     pub fn run(&mut self) -> Result<(), UdpServerError> {
-        let mut buf = [0; 2048];
+        let mut buf = MaybeUninit::<[u8; 2048]>::uninit();
         while SignalFlags::get().is_empty() {
-            let (n, from) = match self.sock.recv_from(&mut buf) {
+            // SAFETY: recv_from only writes to the byte slice.
+            let (n, from) = match self.sock.recv_from(unsafe { buf.assume_init_mut() }) {
                 Ok(x) => x,
                 Err(e) => match e.kind() {
                     io::ErrorKind::Interrupted => break,
@@ -386,7 +388,8 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
                 continue;
             }
 
-            let src = &buf[..n];
+            // SAFETY: Bytes up to n were written by recv_from.
+            let src = unsafe { &buf.assume_init()[..n] };
             if let Err(err) = self.handle_packet(&from, src) {
                 self.stats.on_error();
 

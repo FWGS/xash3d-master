@@ -2,6 +2,7 @@
 extern crate log;
 
 mod app;
+mod challenge;
 mod cli;
 mod config;
 mod hash_map;

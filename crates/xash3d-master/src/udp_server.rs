@@ -28,6 +28,7 @@ use xash3d_protocol::{
 };
 
 use crate::{
+    challenge::{self, ChallengeKey},
     config::{Config, MasterConfig},
     hash_map::{Timed, TimedHashMap},
     signals::SignalFlags,
@@ -241,8 +242,8 @@ struct UdpServerState<Addr: AddrExt> {
 
     blocklist: RwLock<HashSet<Addr::Ip>>,
 
-    challenges: RwLock<TimedHashMap<Addr, u32>>,
     servers: RwLock<TimedHashMap<Addr, ServerInfo>>,
+    challenge_key: ChallengeKey,
 
     admin_challenges: RwLock<TimedHashMap<Addr::Ip, (u32, u32)>>,
     // rate limit if hash is invalid
@@ -256,11 +257,12 @@ impl<Addr: AddrExt> UdpServerState<Addr> {
     fn new(cfg: &Config, addr: &Addr) -> Self {
         let update_addr = resolve_update_addr(&cfg.master, addr.wrap());
         let timeout = &cfg.master.server.timeout;
+        let challenge_key = ChallengeKey::random(&mut Rng::new());
         Self {
             update_addr: RwLock::new(update_addr),
             blocklist: Default::default(),
-            challenges: RwLock::new(TimedHashMap::new(timeout.challenge)),
             servers: RwLock::new(TimedHashMap::new(timeout.server)),
+            challenge_key,
             admin_challenges: RwLock::new(TimedHashMap::new(timeout.challenge)),
             admin_limit: RwLock::new(TimedHashMap::new(timeout.admin)),
             update_gamedir: RwLock::new(TimedHashMap::new(5)),
@@ -273,10 +275,6 @@ impl<Addr: AddrExt> UdpServerState<Addr> {
 
         // set timeouts from new config
         let timeout = &cfg.master.server.timeout;
-        self.challenges
-            .write()
-            .unwrap()
-            .set_timeout(timeout.challenge);
         self.servers.write().unwrap().set_timeout(timeout.server);
         self.admin_challenges
             .write()
@@ -286,7 +284,6 @@ impl<Addr: AddrExt> UdpServerState<Addr> {
     }
 
     fn clear(&self) {
-        self.challenges.write().unwrap().clear();
         self.servers.write().unwrap().clear();
         self.admin_challenges.write().unwrap().clear();
         self.admin_limit.write().unwrap().clear();
@@ -429,7 +426,8 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
         from: &Addr,
         msg: &server::Challenge,
     ) -> Result<(), UdpServerError> {
-        let challenge = self.server_challenge_add(*from);
+        let window = challenge::current_time_window(self.cfg.server.challenge_window);
+        let challenge = self.state.challenge_key.compute(from.wrap(), window);
         let resp = master::ChallengeResponse::new(challenge, msg.server_challenge);
         trace!("{from}: send {resp:?}");
         let mut buf = [0; 32];
@@ -449,16 +447,16 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
             warn!("{from}: server version is {ver} but minimal allowed is {min}",);
             return Ok(());
         }
-        let Some(challenge) = self.server_challenge_get(from) else {
-            trace!("{from}: challenge does not exist");
-            return Ok(());
-        };
-        if msg.challenge != challenge {
+        let window = challenge::current_time_window(self.cfg.server.challenge_window);
+        let valid = self
+            .state
+            .challenge_key
+            .validate(from.wrap(), window, msg.challenge);
+        if !valid {
             let c = msg.challenge;
-            warn!("{from}: expected challenge {challenge} but received {c}",);
+            warn!("{from}: challenge {c} is not valid for this source",);
             return Ok(());
         }
-        self.state.challenges.write().unwrap().remove(from);
         self.add_server(*from, ServerInfo::new(msg));
         // FIXME: outdated servers are also counted
         self.stats
@@ -767,25 +765,6 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
         }
 
         Err(UdpServerError::UndefinedPacket)
-    }
-
-    fn server_challenge_add(&mut self, addr: Addr) -> u32 {
-        self.state
-            .challenges
-            .write()
-            .unwrap()
-            .entry(addr)
-            .or_insert_with(|| Timed::new(self.rng.u32(..)))
-            .value
-    }
-
-    fn server_challenge_get(&self, addr: &Addr) -> Option<u32> {
-        self.state
-            .challenges
-            .read()
-            .unwrap()
-            .get(addr)
-            .map(|i| i.value)
     }
 
     fn admin_challenge_add(&mut self, addr: &Addr) -> (u32, u32) {

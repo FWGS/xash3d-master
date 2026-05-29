@@ -1,4 +1,10 @@
-use std::{fmt, io, mem, sync::Arc};
+use std::{
+    fmt, io, mem,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+};
 
 use mio::{Events, Interest, Poll, Token, Waker};
 
@@ -11,7 +17,14 @@ const WAKER_TOKEN: Token = Token(0);
 const UDP_SERVER_TOKEN: Token = Token(1);
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-struct WorkerId(pub usize);
+struct WorkerId(usize);
+
+impl WorkerId {
+    fn new() -> Self {
+        static CURRENT: AtomicUsize = AtomicUsize::new(0);
+        Self(CURRENT.fetch_add(1, Ordering::Relaxed))
+    }
+}
 
 impl fmt::Display for WorkerId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -48,7 +61,7 @@ impl WorkerBuilder {
 
     pub fn build(self) -> Worker {
         Worker {
-            id: WorkerId(0),
+            id: WorkerId::new(),
             poll: self.poll,
             waker: self.waker,
             udp_server: self.udp_server.expect("UdpServer is not registered"),
@@ -77,10 +90,9 @@ impl Worker {
     }
 
     pub fn try_clone(&self) -> Result<Self, UdpServerError> {
-        let mut worker = Self::builder()?
+        let worker = Self::builder()?
             .udp_server(self.udp_server.try_clone()?)?
             .build();
-        worker.id = WorkerId(self.id.0 + 1);
         Ok(worker)
     }
 

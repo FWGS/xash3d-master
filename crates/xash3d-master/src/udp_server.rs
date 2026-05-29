@@ -16,7 +16,7 @@ use std::{
 use ahash::AHashSet as HashSet;
 use blake2b_simd::Params;
 use fastrand::Rng;
-use mio::net::UdpSocket;
+use mio::{net::UdpSocket, Interest, Registry, Token};
 use thiserror::Error;
 use xash3d_protocol::{
     admin,
@@ -169,14 +169,14 @@ pub enum UdpServer {
 }
 
 impl UdpServer {
-    pub fn with_address(cfg: Config, addr: impl Into<SocketAddr>) -> Result<Self, UdpServerError> {
+    pub fn with_address(cfg: &Config, addr: impl Into<SocketAddr>) -> Result<Self, UdpServerError> {
         match addr.into() {
             SocketAddr::V4(addr) => UdpServerV4::new(cfg, addr).map(Self::V4),
             SocketAddr::V6(addr) => UdpServerV6::new(cfg, addr).map(Self::V6),
         }
     }
 
-    pub fn new(cfg: Config) -> Result<Self, UdpServerError> {
+    pub fn new(cfg: &Config) -> Result<Self, UdpServerError> {
         let addr = SocketAddr::new(cfg.master.server.ip, cfg.master.server.port);
         Self::with_address(cfg, addr)
     }
@@ -188,11 +188,20 @@ impl UdpServer {
         }
     }
 
-    pub fn socket_mut(&mut self) -> &mut UdpSocket {
-        match self {
+    pub fn register(&mut self, registry: &Registry, token: Token) -> io::Result<()> {
+        let sock = match self {
             Self::V4(inner) => &mut inner.sock,
             Self::V6(inner) => &mut inner.sock,
-        }
+        };
+        registry.register(sock, token, Interest::READABLE)
+    }
+
+    pub fn deregister(&mut self, registry: &Registry) -> io::Result<()> {
+        let sock = match self {
+            Self::V4(inner) => &mut inner.sock,
+            Self::V6(inner) => &mut inner.sock,
+        };
+        registry.deregister(sock)
     }
 
     #[allow(dead_code)]
@@ -203,7 +212,7 @@ impl UdpServer {
         }
     }
 
-    pub fn update_config(&mut self, cfg: Config) -> Result<(), UdpServerError> {
+    pub fn update_config(&mut self, cfg: &Config) -> Result<(), UdpServerError> {
         match self {
             Self::V4(inner) => inner.update_config(cfg),
             Self::V6(inner) => inner.update_config(cfg),
@@ -303,10 +312,10 @@ pub struct UdpServerGeneric<Addr: AddrExt> {
 }
 
 impl<Addr: AddrExt> UdpServerGeneric<Addr> {
-    pub fn new(cfg: Config, addr: Addr) -> Result<Self, UdpServerError> {
+    pub fn new(cfg: &Config, addr: Addr) -> Result<Self, UdpServerError> {
         info!("Listen address: {addr}");
 
-        let state = Arc::new(UdpServerState::new(&cfg, &addr));
+        let state = Arc::new(UdpServerState::new(cfg, &addr));
         let sock = bind(addr.wrap())?;
 
         Ok(Self {
@@ -314,12 +323,12 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
 
             sock,
             state,
-            stats: Arc::new(Stats::new(cfg.stat)),
+            stats: Arc::new(Stats::new(cfg.stat.clone())),
 
             filtered_servers: Default::default(),
             filtered_servers_nat: Default::default(),
 
-            cfg: cfg.master,
+            cfg: cfg.master.clone(),
         })
     }
 
@@ -339,7 +348,7 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
         self.sock.local_addr()
     }
 
-    pub fn update_config(&mut self, cfg: Config) -> Result<(), UdpServerError> {
+    pub fn update_config(&mut self, cfg: &Config) -> Result<(), UdpServerError> {
         let old_addr = self.local_addr()?;
         let new_addr = cfg.master.server.addr();
         if old_addr.is_ipv4() != new_addr.is_ipv4() {
@@ -357,11 +366,11 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
         }
 
         if self.main {
-            self.state.update_config(&cfg, new_addr);
-            self.stats.update_config(cfg.stat);
+            self.state.update_config(cfg, new_addr);
+            self.stats.update_config(cfg.stat.clone());
         }
 
-        self.cfg = cfg.master;
+        self.cfg = cfg.master.clone();
         Ok(())
     }
 

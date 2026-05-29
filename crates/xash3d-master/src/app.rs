@@ -59,14 +59,14 @@ impl App {
         Ok(cfg)
     }
 
-    fn udp_server_update_config(&mut self, cfg: Config) -> Result<(), UdpServerError> {
+    fn udp_server_update_config(&mut self, cfg: &Config) -> Result<(), UdpServerError> {
         let old_addr = self.workers[0].udp_server().local_addr()?;
         let new_addr = cfg.master.server.addr();
         if old_addr.is_ipv4() != new_addr.is_ipv4() {
             info!("UDP server IP version changed, full restart");
             for i in 0..self.workers.len() {
                 let udp_server = if i == 0 {
-                    UdpServer::new(cfg.clone())?
+                    UdpServer::new(cfg)?
                 } else {
                     self.workers[0].udp_server().try_clone()?
                 };
@@ -74,7 +74,7 @@ impl App {
             }
         } else {
             for worker in self.workers.iter_mut() {
-                worker.udp_server_update_config(cfg.clone())?;
+                worker.udp_server_update_config(cfg)?;
             }
         }
         Ok(())
@@ -92,7 +92,7 @@ impl App {
         for i in 0..self.cli.threads {
             let worker = if i == 0 {
                 Worker::builder()?
-                    .udp_server(UdpServer::new(cfg.clone())?)?
+                    .udp_server(UdpServer::new(&cfg)?)?
                     .build()
             } else {
                 self.workers[0].try_clone()?
@@ -134,7 +134,7 @@ impl App {
 
                     match self.load_config() {
                         Ok(cfg) => {
-                            self.udp_server_update_config(cfg)?;
+                            self.udp_server_update_config(&cfg)?;
                         }
                         Err(e) => error!("failed to load config: {}", e),
                     }

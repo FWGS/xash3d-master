@@ -62,7 +62,7 @@ impl Test {
     }
 
     fn create_master(&mut self, cfg: &Config) {
-        let udp_server = UdpServer::with_address(cfg.clone(), UNSPECIFIED).unwrap();
+        let udp_server = UdpServer::with_address(cfg, UNSPECIFIED).unwrap();
         self.master_addr = udp_server.local_addr().unwrap();
         thread::spawn(move || Worker::builder()?.udp_server(udp_server)?.build().run());
     }
@@ -104,7 +104,7 @@ fn check_remove_server_by_ip() {
     use server::{Os, ServerAdd, ServerFlags, ServerType};
 
     let cfg = Config::default();
-    let mut master = UdpServerV4::new(cfg, UNSPECIFIED).unwrap();
+    let mut master = UdpServerV4::new(&cfg, UNSPECIFIED).unwrap();
 
     let server_add = ServerAdd {
         gamedir: Str(b"valve"),
@@ -159,7 +159,7 @@ fn check_query_servers() {
     cfg.master.client.min_old_engine_buildnum = BUILDNUM_OLD;
 
     let addr = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0);
-    let master = UdpServerV4::new(cfg, addr).unwrap();
+    let master = UdpServerV4::new(&cfg, addr).unwrap();
 
     let mut query = QueryServers::default();
 

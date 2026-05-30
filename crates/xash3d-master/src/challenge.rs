@@ -6,7 +6,7 @@
 //! requests near the boundary still succeed.
 
 use std::{
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
     sync::OnceLock,
     time::Instant,
 };
@@ -40,10 +40,26 @@ impl Target for IpAddr {
     }
 }
 
-impl Target for SocketAddr {
+impl Target for SocketAddrV4 {
     fn update_state(&self, state: &mut State) {
         self.ip().update_state(state);
         state.update(&self.port().to_ne_bytes());
+    }
+}
+
+impl Target for SocketAddrV6 {
+    fn update_state(&self, state: &mut State) {
+        self.ip().update_state(state);
+        state.update(&self.port().to_ne_bytes());
+    }
+}
+
+impl Target for SocketAddr {
+    fn update_state(&self, state: &mut State) {
+        match self {
+            SocketAddr::V4(v4) => v4.update_state(state),
+            SocketAddr::V6(v6) => v6.update_state(state),
+        }
     }
 }
 
@@ -96,10 +112,6 @@ impl ChallengeKey {
 
     pub fn compute_u32<T: Target>(&self, target: &T, time_window: u64) -> u32 {
         self.compute::<T, u32>(target, time_window)
-    }
-
-    pub fn compute_u32_pair<T: Target>(&self, target: &T, time_window: u64) -> (u32, u32) {
-        self.compute::<T, (u32, u32)>(target, time_window)
     }
 
     pub fn validate<T: Target, C: Challenge>(

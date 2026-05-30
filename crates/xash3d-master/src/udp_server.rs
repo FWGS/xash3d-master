@@ -38,8 +38,10 @@ use crate::{
 
 type ServerInfo = xash3d_protocol::ServerInfo<Box<[u8]>>;
 
-pub trait AddrExt: Sized + Eq + Hash + Display + Copy + ToSocketAddrs + ServerAddress {
-    type Ip: Eq + Hash + Display + Copy + FromStr;
+pub trait AddrExt:
+    Sized + Eq + Hash + Display + Copy + ToSocketAddrs + ServerAddress + challenge::Target
+{
+    type Ip: Eq + Hash + Display + Copy + FromStr + challenge::Target;
     type MtuBuffer: AsMut<[u8]>;
 
     fn extract(addr: SocketAddr) -> Result<Self, SocketAddr>;
@@ -416,7 +418,7 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
         msg: &server::Challenge,
     ) -> Result<(), UdpServerError> {
         let window = challenge::current_time_window(self.cfg.server.challenge_window);
-        let challenge = self.state.challenge_key.compute_u32(&from.wrap(), window);
+        let challenge = self.state.challenge_key.compute_u32(from, window);
         let resp = master::ChallengeResponse::new(challenge, msg.server_challenge);
         trace!("{from}: send {resp:?}");
         let mut buf = [0; 32];
@@ -440,7 +442,7 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
         let valid = self
             .state
             .challenge_key
-            .validate_u32(&from.wrap(), window, msg.challenge);
+            .validate_u32(from, window, msg.challenge);
         if !valid {
             let c = msg.challenge;
             warn!("{from}: challenge {c} is not valid for this source",);
@@ -636,9 +638,8 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
 
     fn handle_admin_challenge(&mut self, from: &Addr) -> Result<(), UdpServerError> {
         let window = challenge::current_time_window(self.cfg.server.challenge_window);
-        let ip = from.wrap().ip();
-        let (master_challenge, hash_challenge) =
-            self.state.challenge_key.compute_u32_pair(&ip, window);
+        let (master_challenge, hash_challenge): (u32, u32) =
+            self.state.challenge_key.compute(from.ip(), window);
         let resp = master::AdminChallengeResponse::new(master_challenge, hash_challenge);
         trace!("{from}: send {resp:?}");
         let mut buf = [0; 64];
@@ -653,9 +654,8 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
         msg: &admin::AdminCommand,
     ) -> Result<(), UdpServerError> {
         let window = challenge::current_time_window(self.cfg.server.challenge_window);
-        let ip = from.wrap().ip();
         let hash_challenge = [window, window.wrapping_sub(1)].into_iter().find_map(|w| {
-            let (mc, hc) = self.state.challenge_key.compute_u32_pair(&ip, w);
+            let (mc, hc): (u32, u32) = self.state.challenge_key.compute(from.ip(), w);
             (mc == msg.master_challenge).then_some(hc)
         });
         let Some(hash_challenge) = hash_challenge else {

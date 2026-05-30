@@ -95,6 +95,7 @@ pub struct ServerConfig {
     pub min_version: Version,
     pub timeout: TimeoutConfig,
     pub client_rate_limit: u32,
+    pub challenge_window: u64,
 }
 
 impl Default for ServerConfig {
@@ -106,6 +107,7 @@ impl Default for ServerConfig {
             min_version: DEFAULT_SERVER_MIN_VERSION,
             timeout: Default::default(),
             client_rate_limit: 0,
+            challenge_window: 60,
         }
     }
 }

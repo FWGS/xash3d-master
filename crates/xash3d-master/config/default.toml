@@ -19,6 +19,9 @@
 # Set 0 to disable.
 #client-rate-limit = 0
 
+# Challenge time window, in seconds.
+#challenge-window = 60
+
 [server.timeout]
 # Time in seconds while challenge is valid
 #challenge = 10

@@ -7,6 +7,7 @@ mod cli;
 mod config;
 mod hash_map;
 mod logger;
+mod metrics;
 mod periodic;
 mod signals;
 mod stats;

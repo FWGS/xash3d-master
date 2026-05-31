@@ -1,10 +1,11 @@
-use std::{process, thread};
+use std::{process, thread, time::Duration};
 
 use crate::{
     cli::{self, Cli},
     config::{self, Config},
     logger::{self, Logger},
     signals::{SignalFlags, Signals},
+    stats::Stats,
     udp_server::{UdpServer, UdpServerError},
     worker::Worker,
 };
@@ -81,7 +82,7 @@ impl App {
     }
 
     fn run(&mut self) -> Result<(), UdpServerError> {
-        let cfg = self.load_config().unwrap_or_else(|e| {
+        let mut cfg = self.load_config().unwrap_or_else(|e| {
             match self.cli.config_path.as_deref() {
                 Some(p) => eprintln!("Failed to load config \"{p}\": {e}"),
                 None => eprintln!("{e}"),
@@ -105,6 +106,8 @@ impl App {
             info!("Starting {} workers", self.workers.len());
 
             thread::scope(|s| {
+                let udp_state = self.workers[0].udp_server().state();
+
                 let mut threads = Vec::with_capacity(self.workers.len());
                 for worker in self.workers.iter_mut() {
                     let waker = worker.waker();
@@ -113,7 +116,16 @@ impl App {
                 }
 
                 debug!("main: wait signals");
-                self.signals.wait();
+                if cfg.stat.interval != 0 {
+                    let counters = udp_state.get_stat_counters();
+                    let interval = Duration::from_secs(cfg.stat.interval as u64);
+                    let mut stats = Stats::new(&cfg.stat.format, interval, counters);
+                    while self.signals.wait_timeout(interval) {
+                        stats.update(udp_state.get_stat_counters());
+                    }
+                } else {
+                    self.signals.wait();
+                }
 
                 debug!("main: stop workers");
                 for (waker, _) in threads.iter() {
@@ -133,7 +145,8 @@ impl App {
                     info!("Reloading config from {}", config_path);
 
                     match self.load_config() {
-                        Ok(cfg) => {
+                        Ok(new_cfg) => {
+                            cfg = new_cfg;
                             self.udp_server_update_config(&cfg)?;
                         }
                         Err(e) => error!("failed to load config: {}", e),

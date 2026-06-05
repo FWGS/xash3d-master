@@ -17,10 +17,16 @@ enum IpVersion {
 }
 
 /// Detects an IP version from a list of addresses.
+///
+/// Masters that fail to resolve are skipped with a warning.
 fn ip_version_for(addrs: &[Box<str>]) -> io::Result<IpVersion> {
     let mut version = IpVersion::Any;
     for i in addrs {
-        if let Some(addr) = i.to_socket_addrs()?.next() {
+        let Ok(mut it) = i.to_socket_addrs() else {
+            eprintln!("warning: failed to resolve master {i}");
+            continue;
+        };
+        if let Some(addr) = it.next() {
             match version {
                 IpVersion::Any | IpVersion::V4 if addr.is_ipv4() => {
                     version = IpVersion::V4;
@@ -52,14 +58,21 @@ pub fn create_observer(cli: &Cli) -> io::Result<Observer> {
 pub fn create_observer_with_masters(cli: &Cli) -> io::Result<Observer> {
     let mut observer = create_observer(cli)?;
     let local_addr = observer.local_addr()?;
+    let mut inserted = 0;
     for i in &cli.masters {
-        for addr in i.to_socket_addrs()? {
+        let Ok(addrs) = i.to_socket_addrs() else { continue };
+        for addr in addrs {
             if addr.is_ipv4() == local_addr.is_ipv4() {
                 let master = Master::new(addr);
                 observer.insert_master(master);
+                inserted += 1;
                 break;
             }
         }
+    }
+    if inserted == 0 {
+        eprintln!("error: no master servers could be resolved");
+        process::exit(1);
     }
     Ok(observer)
 }

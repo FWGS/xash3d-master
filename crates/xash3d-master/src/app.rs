@@ -1,10 +1,11 @@
-use std::{process, thread};
+use std::{process, thread, time::Duration};
 
 use crate::{
     cli::{self, Cli},
     config::{self, Config},
     logger::{self, Logger},
     signals::{SignalFlags, Signals},
+    stats::Stats,
     udp_server::{UdpServer, UdpServerError},
     worker::Worker,
 };
@@ -59,14 +60,14 @@ impl App {
         Ok(cfg)
     }
 
-    fn udp_server_update_config(&mut self, cfg: Config) -> Result<(), UdpServerError> {
+    fn udp_server_update_config(&mut self, cfg: &Config) -> Result<(), UdpServerError> {
         let old_addr = self.workers[0].udp_server().local_addr()?;
         let new_addr = cfg.master.server.addr();
         if old_addr.is_ipv4() != new_addr.is_ipv4() {
             info!("UDP server IP version changed, full restart");
             for i in 0..self.workers.len() {
                 let udp_server = if i == 0 {
-                    UdpServer::new(cfg.clone())?
+                    UdpServer::new(cfg)?
                 } else {
                     self.workers[0].udp_server().try_clone()?
                 };
@@ -74,14 +75,14 @@ impl App {
             }
         } else {
             for worker in self.workers.iter_mut() {
-                worker.udp_server_update_config(cfg.clone())?;
+                worker.udp_server_update_config(cfg)?;
             }
         }
         Ok(())
     }
 
     fn run(&mut self) -> Result<(), UdpServerError> {
-        let cfg = self.load_config().unwrap_or_else(|e| {
+        let mut cfg = self.load_config().unwrap_or_else(|e| {
             match self.cli.config_path.as_deref() {
                 Some(p) => eprintln!("Failed to load config \"{p}\": {e}"),
                 None => eprintln!("{e}"),
@@ -92,7 +93,7 @@ impl App {
         for i in 0..self.cli.threads {
             let worker = if i == 0 {
                 Worker::builder()?
-                    .udp_server(UdpServer::new(cfg.clone())?)?
+                    .udp_server(UdpServer::new(&cfg)?)?
                     .build()
             } else {
                 self.workers[0].try_clone()?
@@ -105,6 +106,8 @@ impl App {
             info!("Starting {} workers", self.workers.len());
 
             thread::scope(|s| {
+                let udp_state = self.workers[0].udp_server().state();
+
                 let mut threads = Vec::with_capacity(self.workers.len());
                 for worker in self.workers.iter_mut() {
                     let waker = worker.waker();
@@ -113,7 +116,16 @@ impl App {
                 }
 
                 debug!("main: wait signals");
-                self.signals.wait();
+                if cfg.stat.interval != 0 {
+                    let counters = udp_state.get_stat_counters();
+                    let interval = Duration::from_secs(cfg.stat.interval as u64);
+                    let mut stats = Stats::new(&cfg.stat.format, interval, counters);
+                    while self.signals.wait_timeout(interval) {
+                        stats.update(udp_state.get_stat_counters());
+                    }
+                } else {
+                    self.signals.wait();
+                }
 
                 debug!("main: stop workers");
                 for (waker, _) in threads.iter() {
@@ -133,8 +145,9 @@ impl App {
                     info!("Reloading config from {}", config_path);
 
                     match self.load_config() {
-                        Ok(cfg) => {
-                            self.udp_server_update_config(cfg)?;
+                        Ok(new_cfg) => {
+                            cfg = new_cfg;
+                            self.udp_server_update_config(&cfg)?;
                         }
                         Err(e) => error!("failed to load config: {}", e),
                     }

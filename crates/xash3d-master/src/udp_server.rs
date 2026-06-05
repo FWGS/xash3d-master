@@ -7,6 +7,7 @@ use std::{
     fmt::{self, Display},
     hash::Hash,
     io,
+    mem::MaybeUninit,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, ToSocketAddrs},
     str::{self, FromStr},
     sync::{Arc, RwLock},
@@ -15,7 +16,7 @@ use std::{
 use ahash::AHashSet as HashSet;
 use blake2b_simd::Params;
 use fastrand::Rng;
-use mio::net::UdpSocket;
+use mio::{net::UdpSocket, Interest, Registry, Token};
 use thiserror::Error;
 use xash3d_protocol::{
     admin,
@@ -31,8 +32,9 @@ use crate::{
     challenge::{self, ChallengeKey},
     config::{Config, MasterConfig},
     hash_map::{Timed, TimedHashMap},
+    metrics::{LazyCounter, LazyGauge, MetricInfo},
     signals::SignalFlags,
-    stats::Stats,
+    stats::Counters,
     str_arr::StrArr,
 };
 
@@ -168,14 +170,14 @@ pub enum UdpServer {
 }
 
 impl UdpServer {
-    pub fn with_address(cfg: Config, addr: impl Into<SocketAddr>) -> Result<Self, UdpServerError> {
+    pub fn with_address(cfg: &Config, addr: impl Into<SocketAddr>) -> Result<Self, UdpServerError> {
         match addr.into() {
             SocketAddr::V4(addr) => UdpServerV4::new(cfg, addr).map(Self::V4),
             SocketAddr::V6(addr) => UdpServerV6::new(cfg, addr).map(Self::V6),
         }
     }
 
-    pub fn new(cfg: Config) -> Result<Self, UdpServerError> {
+    pub fn new(cfg: &Config) -> Result<Self, UdpServerError> {
         let addr = SocketAddr::new(cfg.master.server.ip, cfg.master.server.port);
         Self::with_address(cfg, addr)
     }
@@ -187,11 +189,20 @@ impl UdpServer {
         }
     }
 
-    pub fn socket_mut(&mut self) -> &mut UdpSocket {
-        match self {
+    pub fn register(&mut self, registry: &Registry, token: Token) -> io::Result<()> {
+        let sock = match self {
             Self::V4(inner) => &mut inner.sock,
             Self::V6(inner) => &mut inner.sock,
-        }
+        };
+        registry.register(sock, token, Interest::READABLE)
+    }
+
+    pub fn deregister(&mut self, registry: &Registry) -> io::Result<()> {
+        let sock = match self {
+            Self::V4(inner) => &mut inner.sock,
+            Self::V6(inner) => &mut inner.sock,
+        };
+        registry.deregister(sock)
     }
 
     #[allow(dead_code)]
@@ -202,11 +213,19 @@ impl UdpServer {
         }
     }
 
-    pub fn update_config(&mut self, cfg: Config) -> Result<(), UdpServerError> {
+    pub fn update_config(&mut self, cfg: &Config) -> Result<(), UdpServerError> {
         match self {
             Self::V4(inner) => inner.update_config(cfg),
             Self::V6(inner) => inner.update_config(cfg),
         }
+    }
+
+    pub fn state(&self) -> UdpServerState {
+        let kind = match self {
+            UdpServer::V4(inner) => UdpServerStateKind::V4(Arc::clone(&inner.state)),
+            UdpServer::V6(inner) => UdpServerStateKind::V6(Arc::clone(&inner.state)),
+        };
+        UdpServerState { kind }
     }
 
     pub fn run(&mut self) -> Result<(), UdpServerError> {
@@ -237,7 +256,7 @@ fn bind(addr: SocketAddr) -> Result<UdpSocket, UdpServerError> {
 pub type UdpServerV4 = UdpServerGeneric<SocketAddrV4>;
 pub type UdpServerV6 = UdpServerGeneric<SocketAddrV6>;
 
-struct UdpServerState<Addr: AddrExt> {
+struct UdpServerStateGeneric<Addr: AddrExt> {
     update_addr: RwLock<SocketAddr>,
 
     blocklist: RwLock<HashSet<Addr::Ip>>,
@@ -253,7 +272,7 @@ struct UdpServerState<Addr: AddrExt> {
     challenge_key: ChallengeKey,
 }
 
-impl<Addr: AddrExt> UdpServerState<Addr> {
+impl<Addr: AddrExt> UdpServerStateGeneric<Addr> {
     fn new(cfg: &Config, addr: &Addr) -> Self {
         let update_addr = resolve_update_addr(&cfg.master, addr.wrap());
         let timeout = &cfg.master.server.timeout;
@@ -284,6 +303,59 @@ impl<Addr: AddrExt> UdpServerState<Addr> {
         self.client_rate_limit.write().unwrap().clear();
         self.update_gamedir.write().unwrap().clear();
     }
+
+    fn update_metrics(&self) {
+        let mut total = 0;
+        let mut valve = 0;
+        let mut cstrike = 0;
+        let mut other = 0;
+
+        for (_, server) in self.servers.read().unwrap().iter() {
+            total += 1;
+            match server.gamedir.as_ref() {
+                b"valve" => valve += 1,
+                b"cstrike" => cstrike += 1,
+                _ => other += 1,
+            }
+        }
+
+        SERVERS_TOTAL.get().set(total);
+        SERVERS_VALVE_COUNT.get().set(valve);
+        SERVERS_CSTRIKE_COUNT.get().set(cstrike);
+        SERVERS_OTHER_COUNT.get().set(other);
+    }
+
+    fn get_stat_counters(&self) -> Counters {
+        self.update_metrics();
+
+        Counters {
+            servers: SERVERS_TOTAL.get().get() as u64,
+            server_challenge: REQUESTS_SERVER_CHALLENGE_TOTAL.get().get(),
+            server_add: REQUESTS_SERVER_ADD_TOTAL.get().get(),
+            server_del: REQUESTS_SERVER_DELETE_TOTAL.get().get(),
+            query_servers: REQUESTS_QUERY_SERVERS_TOTAL.get().get(),
+            query_info: REQUESTS_QUERY_INFO_TOTAL.get().get(),
+            errors: ERRORS_TOTAL.get().get(),
+        }
+    }
+}
+
+enum UdpServerStateKind {
+    V4(Arc<UdpServerStateGeneric<SocketAddrV4>>),
+    V6(Arc<UdpServerStateGeneric<SocketAddrV6>>),
+}
+
+pub struct UdpServerState {
+    kind: UdpServerStateKind,
+}
+
+impl UdpServerState {
+    pub fn get_stat_counters(&self) -> Counters {
+        match &self.kind {
+            UdpServerStateKind::V4(state) => state.get_stat_counters(),
+            UdpServerStateKind::V6(state) => state.get_stat_counters(),
+        }
+    }
 }
 
 pub struct UdpServerGeneric<Addr: AddrExt> {
@@ -293,8 +365,7 @@ pub struct UdpServerGeneric<Addr: AddrExt> {
 
     sock: UdpSocket,
 
-    state: Arc<UdpServerState<Addr>>,
-    stats: Arc<Stats>,
+    state: Arc<UdpServerStateGeneric<Addr>>,
 
     // temporary data
     filtered_servers: Vec<Addr>,
@@ -302,10 +373,10 @@ pub struct UdpServerGeneric<Addr: AddrExt> {
 }
 
 impl<Addr: AddrExt> UdpServerGeneric<Addr> {
-    pub fn new(cfg: Config, addr: Addr) -> Result<Self, UdpServerError> {
+    pub fn new(cfg: &Config, addr: Addr) -> Result<Self, UdpServerError> {
         info!("Listen address: {addr}");
 
-        let state = Arc::new(UdpServerState::new(&cfg, &addr));
+        let state = Arc::new(UdpServerStateGeneric::new(cfg, &addr));
         let sock = bind(addr.wrap())?;
 
         Ok(Self {
@@ -313,12 +384,11 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
 
             sock,
             state,
-            stats: Arc::new(Stats::new(cfg.stat)),
 
             filtered_servers: Default::default(),
             filtered_servers_nat: Default::default(),
 
-            cfg: cfg.master,
+            cfg: cfg.master.clone(),
         })
     }
 
@@ -328,7 +398,6 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
             cfg: self.cfg.clone(),
             sock: bind(self.sock.local_addr()?)?,
             state: Arc::clone(&self.state),
-            stats: Arc::clone(&self.stats),
             filtered_servers: Vec::new(),
             filtered_servers_nat: Vec::new(),
         })
@@ -338,7 +407,7 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
         self.sock.local_addr()
     }
 
-    pub fn update_config(&mut self, cfg: Config) -> Result<(), UdpServerError> {
+    pub fn update_config(&mut self, cfg: &Config) -> Result<(), UdpServerError> {
         let old_addr = self.local_addr()?;
         let new_addr = cfg.master.server.addr();
         if old_addr.is_ipv4() != new_addr.is_ipv4() {
@@ -356,18 +425,18 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
         }
 
         if self.main {
-            self.state.update_config(&cfg, new_addr);
-            self.stats.update_config(cfg.stat);
+            self.state.update_config(cfg, new_addr);
         }
 
-        self.cfg = cfg.master;
+        self.cfg = cfg.master.clone();
         Ok(())
     }
 
     pub fn run(&mut self) -> Result<(), UdpServerError> {
-        let mut buf = [0; 2048];
+        let mut buf = MaybeUninit::<[u8; 2048]>::uninit();
         while SignalFlags::get().is_empty() {
-            let (n, from) = match self.sock.recv_from(&mut buf) {
+            // SAFETY: recv_from only writes to the byte slice.
+            let (n, from) = match self.sock.recv_from(unsafe { buf.assume_init_mut() }) {
                 Ok(x) => x,
                 Err(e) => match e.kind() {
                     io::ErrorKind::Interrupted => break,
@@ -386,9 +455,10 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
                 continue;
             }
 
-            let src = &buf[..n];
+            // SAFETY: Bytes up to n were written by recv_from.
+            let src = unsafe { &buf.assume_init()[..n] };
             if let Err(err) = self.handle_packet(&from, src) {
-                self.stats.on_error();
+                ERRORS_TOTAL.get().inc();
 
                 match err {
                     UdpServerError::GameRateLimit(counter) => {
@@ -409,7 +479,6 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
     fn clear(&mut self) {
         info!("Clear all servers and challenges");
         self.state.clear();
-        self.stats.clear();
     }
 
     fn handle_server_challenge(
@@ -449,9 +518,6 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
             return Ok(());
         }
         self.add_server(*from, ServerInfo::new(msg));
-        // FIXME: outdated servers are also counted
-        self.stats
-            .servers_count(self.state.servers.read().unwrap().len());
         Ok(())
     }
 
@@ -703,28 +769,28 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
 
     fn handle_packet(&mut self, from: &Addr, src: &[u8]) -> Result<(), UdpServerError> {
         if src.starts_with(server::Challenge::HEADER) {
-            self.stats.on_server_challenge();
+            REQUESTS_SERVER_CHALLENGE_TOTAL.get().inc();
             let msg = server::Challenge::decode(src)?;
             self.dump_message(from, &msg);
             return self.handle_server_challenge(from, &msg);
         }
 
         if src.starts_with(server::ServerAdd::HEADER) {
-            self.stats.on_server_add();
+            REQUESTS_SERVER_ADD_TOTAL.get().inc();
             let msg = server::ServerAdd::decode(src)?;
             self.dump_message(from, &msg);
             return self.handle_server_add(from, &msg);
         }
 
         if src.starts_with(server::ServerRemove::HEADER) {
-            self.stats.on_server_del();
+            REQUESTS_SERVER_DELETE_TOTAL.get().inc();
             let msg = server::ServerRemove::decode(src)?;
             self.dump_message(from, &msg);
             return self.handle_server_remove(from);
         }
 
         if src.starts_with(game::QueryServers::HEADER) {
-            self.stats.on_query_servers();
+            REQUESTS_QUERY_SERVERS_TOTAL.get().inc();
             self.allow_game_request(from)?;
             let msg = game::QueryServers::decode(src)?;
             self.dump_message(from, &msg);
@@ -732,7 +798,7 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
         }
 
         if src.starts_with(game::GetServerInfo::HEADER) {
-            self.stats.on_query_info();
+            REQUESTS_QUERY_INFO_TOTAL.get().inc();
             self.allow_game_request(from)?;
             let msg = game::GetServerInfo::decode(src)?;
             self.dump_message(from, &msg);
@@ -740,6 +806,7 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
         }
 
         if src.starts_with(admin::AdminChallenge::HEADER) {
+            REQUESTS_ADMIN_CHALLENGE_TOTAL.get().inc();
             self.allow_admin_request(from)?;
             let msg = admin::AdminChallenge::decode(src)?;
             self.dump_message(from, &msg);
@@ -747,6 +814,7 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
         }
 
         if src.starts_with(admin::AdminCommand::HEADER) {
+            REQUESTS_ADMIN_COMMAND_TOTAL.get().inc();
             self.allow_admin_request(from)?;
             let msg = admin::AdminCommand::decode_with_hash_len(self.cfg.hash.len, src)?;
             self.dump_message(from, &msg);
@@ -868,3 +936,50 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
         }
     }
 }
+
+fn metric_info(name: &str) -> MetricInfo {
+    MetricInfo::new(format!("udp_server_{name}"))
+}
+
+static SERVERS_TOTAL: LazyGauge =
+    LazyGauge::new(|| metric_info("servers_total").help("The total number of servers."));
+
+fn metric_info_servers(gamedir: &str) -> MetricInfo {
+    metric_info("servers_count")
+        .help("The number of servers.")
+        .label("gamedir", gamedir)
+}
+
+static SERVERS_VALVE_COUNT: LazyGauge = LazyGauge::new(|| metric_info_servers("valve"));
+static SERVERS_CSTRIKE_COUNT: LazyGauge = LazyGauge::new(|| metric_info_servers("cstrike"));
+static SERVERS_OTHER_COUNT: LazyGauge = LazyGauge::new(|| metric_info_servers("unknown"));
+
+fn metric_info_requests(handler: &str) -> MetricInfo {
+    metric_info("requests_total")
+        .help("Counter of requests.")
+        .label("handler", handler)
+}
+
+static REQUESTS_SERVER_CHALLENGE_TOTAL: LazyCounter =
+    LazyCounter::new(|| metric_info_requests("server_challenge"));
+
+static REQUESTS_SERVER_ADD_TOTAL: LazyCounter =
+    LazyCounter::new(|| metric_info_requests("server_add"));
+
+static REQUESTS_SERVER_DELETE_TOTAL: LazyCounter =
+    LazyCounter::new(|| metric_info_requests("server_delete"));
+
+static REQUESTS_QUERY_SERVERS_TOTAL: LazyCounter =
+    LazyCounter::new(|| metric_info_requests("query_servers"));
+
+static REQUESTS_QUERY_INFO_TOTAL: LazyCounter =
+    LazyCounter::new(|| metric_info_requests("query_info"));
+
+static REQUESTS_ADMIN_CHALLENGE_TOTAL: LazyCounter =
+    LazyCounter::new(|| metric_info_requests("admin_challenge"));
+
+static REQUESTS_ADMIN_COMMAND_TOTAL: LazyCounter =
+    LazyCounter::new(|| metric_info_requests("admin_command"));
+
+static ERRORS_TOTAL: LazyCounter =
+    LazyCounter::new(|| metric_info("errors_total").help("Counter of errors."));

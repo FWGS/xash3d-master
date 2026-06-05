@@ -4,6 +4,7 @@ use std::{
     marker::PhantomData,
     sync::atomic::{AtomicBool, AtomicU32, Ordering},
     thread,
+    time::{Duration, Instant},
 };
 
 use bitflags::bitflags;
@@ -109,5 +110,19 @@ impl Signals {
             thread::park();
         }
         STOP.store(false, Ordering::SeqCst);
+    }
+
+    pub fn wait_timeout(&self, dur: Duration) -> bool {
+        let start = Instant::now();
+        let mut remaining = dur;
+        while !STOP.load(Ordering::SeqCst) {
+            thread::park_timeout(remaining);
+            if let Some(r) = dur.checked_sub(start.elapsed()) {
+                remaining = r;
+            } else {
+                break;
+            }
+        }
+        !STOP.swap(false, Ordering::SeqCst)
     }
 }

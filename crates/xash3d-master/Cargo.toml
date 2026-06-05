@@ -15,6 +15,7 @@ repository.workspace = true
 default = ["logtime", "stats"]
 # unused in this version
 logtime = []
+# unused in this version
 stats = []
 
 [dependencies]

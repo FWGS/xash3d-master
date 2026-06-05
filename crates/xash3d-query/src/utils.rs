@@ -77,7 +77,9 @@ pub fn create_observer_with_masters(cli: &Cli) -> io::Result<Observer> {
     let local_addr = observer.local_addr()?;
     let mut inserted = 0;
     for i in &cli.masters {
-        let Ok(addrs) = i.to_socket_addrs() else { continue };
+        let Ok(addrs) = i.to_socket_addrs() else {
+            continue;
+        };
         for addr in addrs {
             if addr.is_ipv4() == local_addr.is_ipv4() {
                 let master = Master::new(addr);

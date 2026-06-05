@@ -55,6 +55,23 @@ pub fn create_observer(cli: &Cli) -> io::Result<Observer> {
     Ok(observer)
 }
 
+/// Creates an observer for querying specific servers, without contacting masters.
+pub fn create_observer_for_servers(cli: &Cli, servers: &[SocketAddr]) -> io::Result<Observer> {
+    let v6 = servers.iter().any(|a| a.is_ipv6());
+    if v6 && servers.iter().any(|a| a.is_ipv4()) {
+        eprintln!("error: servers with different IP versions is not supported");
+        process::exit(1);
+    }
+    let unspecified = if v6 {
+        SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, 0, 0, 0))
+    } else {
+        SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0))
+    };
+    let mut observer = Observer::bind(unspecified)?;
+    observer.set_filter_raw(cli.filter.clone());
+    Ok(observer)
+}
+
 pub fn create_observer_with_masters(cli: &Cli) -> io::Result<Observer> {
     let mut observer = create_observer(cli)?;
     let local_addr = observer.local_addr()?;

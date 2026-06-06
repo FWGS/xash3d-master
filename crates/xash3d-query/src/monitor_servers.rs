@@ -17,7 +17,7 @@ pub(crate) fn run(cli: &Cli, servers: Vec<SocketAddr>) -> Result<(), QueryError>
     let mut observer = if servers.is_empty() {
         utils::create_observer_with_masters(cli)?
     } else {
-        utils::create_observer(cli)?
+        utils::create_observer_for_servers(cli, &servers)?
     };
 
     for addr in servers {

@@ -218,6 +218,11 @@ impl Observer {
         self.connections.remove(addr);
     }
 
+    #[inline(always)]
+    pub fn masters(&self) -> &[Master] {
+        &self.masters
+    }
+
     fn get_master(&self, addr: &SocketAddr) -> Option<&Master> {
         self.masters.iter().find(|master| master.addr.eq(addr))
     }

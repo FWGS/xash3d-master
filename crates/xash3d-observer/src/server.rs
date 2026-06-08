@@ -21,7 +21,7 @@ use crate::{
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 #[repr(u8)]
-pub enum ConnectionState {
+enum ServerState {
     /// Server protocol version is not known yet.
     ProtocolDetection,
     /// No packets is expected from a server.
@@ -30,11 +30,11 @@ pub enum ConnectionState {
     WaitingInfo,
 }
 
-pub struct Connection {
+pub struct Server {
     address: SocketAddr,
     protocol: u8,
     players: bool,
-    state: ConnectionState,
+    state: ServerState,
     request_time: Instant,
     response_time: Instant,
     challenge: Option<u32>,
@@ -42,14 +42,14 @@ pub struct Connection {
     data: Vec<u8>,
 }
 
-impl Connection {
-    pub fn new(address: SocketAddr, players: bool) -> Self {
+impl Server {
+    pub fn new(address: SocketAddr) -> Self {
         let now = Instant::now();
         Self {
             address,
             protocol: xash3d_protocol::PROTOCOL_VERSION,
-            players,
-            state: ConnectionState::ProtocolDetection,
+            players: false,
+            state: ServerState::ProtocolDetection,
             request_time: now,
             response_time: now,
             wait_players: false,
@@ -58,19 +58,28 @@ impl Connection {
         }
     }
 
-    pub fn protocol(&self) -> u8 {
+    pub fn with_players(mut self, players: bool) -> Self {
+        self.players = players;
+        self
+    }
+
+    pub(crate) fn address(&self) -> &SocketAddr {
+        &self.address
+    }
+
+    pub(crate) fn protocol(&self) -> u8 {
         self.protocol
     }
 
-    pub fn set_legacy_protocol(&mut self) {
+    pub(crate) fn set_legacy_protocol(&mut self) {
         self.protocol = xash3d_protocol::PROTOCOL_VERSION - 1;
     }
 
-    pub fn state(&self) -> ConnectionState {
-        self.state
+    pub(crate) fn is_idle(&self) -> bool {
+        self.state == ServerState::Idle
     }
 
-    pub fn is_valid(&self, now: Instant) -> bool {
+    pub(crate) fn is_valid(&self, now: Instant) -> bool {
         now.duration_since(self.response_time) < SERVER_TIMEOUT
     }
 
@@ -79,7 +88,7 @@ impl Connection {
     }
 
     fn update_raw_info(&mut self, buf: &[u8]) -> bool {
-        self.state = ConnectionState::Idle;
+        self.state = ServerState::Idle;
         if self.data == buf {
             return false;
         }
@@ -88,7 +97,7 @@ impl Connection {
         true
     }
 
-    pub fn ping(&self) -> Duration {
+    pub(crate) fn ping(&self) -> Duration {
         self.response_time.duration_since(self.request_time)
     }
 
@@ -100,8 +109,8 @@ impl Connection {
     fn query_info(&mut self, sock: &Socket, buf: &mut [u8]) -> io::Result<()> {
         self.request_time = Instant::now();
 
-        if self.state == ConnectionState::Idle {
-            self.state = ConnectionState::WaitingInfo;
+        if self.state == ServerState::Idle {
+            self.state = ServerState::WaitingInfo;
         }
 
         if true {
@@ -135,7 +144,7 @@ impl Connection {
         self.send(sock, data)
     }
 
-    pub fn query(&mut self, sock: &Socket, buf: &mut [u8]) -> io::Result<()> {
+    pub(crate) fn query(&mut self, sock: &Socket, buf: &mut [u8]) -> io::Result<()> {
         self.query_info(sock, buf)?;
         if self.players {
             self.query_players(sock, buf)?;
@@ -195,7 +204,7 @@ impl Connection {
                 Ok(Some(Event::ServerInfo(info)))
             }
             Err(ProtocolError::InvalidProtocolVersion) => {
-                if self.state() == ConnectionState::ProtocolDetection
+                if self.state == ServerState::ProtocolDetection
                     && self.protocol() == xash3d_protocol::PROTOCOL_VERSION
                 {
                     // try legacy protocol version

@@ -11,10 +11,10 @@ use xash3d_protocol::{
 };
 
 use crate::{
-    connection::{Connection, ConnectionState},
     event::{Event, ServerInfo, ServerList},
     filter::Filter,
     net::Socket,
+    server::Server,
 };
 
 pub(crate) const MASTER_INTERVAL: Duration = Duration::from_secs(8);
@@ -56,25 +56,6 @@ impl Master {
 
         // TODO: handle error, filter may not fit
         packet.encode(buf).unwrap()
-    }
-}
-
-pub struct Server {
-    addr: SocketAddr,
-    players: bool,
-}
-
-impl Server {
-    pub fn new(addr: SocketAddr) -> Self {
-        Self {
-            addr,
-            players: false,
-        }
-    }
-
-    pub fn with_players(mut self, players: bool) -> Self {
-        self.players = players;
-        self
     }
 }
 
@@ -142,13 +123,13 @@ enum Pending {
 }
 
 pub struct Observer {
-    pub(crate) sock: Socket,
+    sock: Socket,
     filter: String,
     masters: Vec<Master>,
     query_servers_task: Task,
     query_info_task: Task,
     cleanup_task: Task,
-    pub(crate) connections: HashMap<SocketAddr, Connection>,
+    servers: HashMap<SocketAddr, Server>,
     delayed_events: Vec<DelayedEvent>,
     pending: Vec<Pending>,
 }
@@ -157,7 +138,7 @@ impl Observer {
     // TODO: bind ipv4 and ipv6 at the same time
     pub fn bind(addr: SocketAddr) -> io::Result<Self> {
         let sock = Socket::bind(addr)?;
-        let connections = HashMap::new();
+        let servers = HashMap::new();
         let now = Instant::now();
 
         Ok(Self {
@@ -167,7 +148,7 @@ impl Observer {
             query_servers_task: Task::new(now, MASTER_INTERVAL),
             query_info_task: Task::new(now, SERVER_INTERVAL),
             cleanup_task: Task::new(now, SERVER_CLEAN_INTERVAL),
-            connections,
+            servers,
             delayed_events: Vec::new(),
             pending: Vec::new(),
         })
@@ -207,15 +188,16 @@ impl Observer {
     }
 
     pub fn insert_server(&mut self, server: Server) {
-        if let Entry::Vacant(e) = self.connections.entry(server.addr) {
-            self.pending.push(Pending::Server(server.addr));
-            e.insert(Connection::new(server.addr, server.players));
+        let addr = *server.address();
+        if let Entry::Vacant(e) = self.servers.entry(addr) {
+            self.pending.push(Pending::Server(addr));
+            e.insert(server);
         }
     }
 
     pub fn remove_server(&mut self, addr: &SocketAddr) {
         self.remove_pending(Pending::Server(*addr));
-        self.connections.remove(addr);
+        self.servers.remove(addr);
     }
 
     #[inline(always)]
@@ -243,11 +225,11 @@ impl Observer {
 
     fn query_info_from_servers(&mut self, buffer: &mut [u8]) -> io::Result<()> {
         let now = Instant::now();
-        for (addr, con) in self.connections.iter_mut() {
-            // Invalid connections will be removed later by cleanup task. Master servers can send
+        for (addr, server) in self.servers.iter_mut() {
+            // Invalid servers will be removed later by cleanup task. Master servers can send
             // such servers again. Servers will become invalid if no response will be received in
             // SERVER_TIMEOUT seconds.
-            if !con.is_valid(now) {
+            if !server.is_valid(now) {
                 continue;
             }
 
@@ -257,11 +239,11 @@ impl Observer {
             }
 
             // This server did not send a response to the last request.
-            if con.state() != ConnectionState::Idle {
+            if !server.is_idle() {
                 self.delayed_events.push(DelayedEvent::ServerTimeout(*addr));
             }
 
-            con.query(&self.sock, buffer)?;
+            server.query(&self.sock, buffer)?;
         }
 
         Ok(())
@@ -305,11 +287,11 @@ impl Observer {
         from: &SocketAddr,
         data: &'a [u8],
     ) -> io::Result<Option<Event<'a>>> {
-        match self.connections.get_mut(from) {
-            Some(con) => {
-                let result = con.handle_packet(&self.sock, data);
+        match self.servers.get_mut(from) {
+            Some(server) => {
+                let result = server.handle_packet(&self.sock, data);
                 if let Ok(Some(Event::ServerInvalidProtocol(..))) = &result {
-                    self.connections.remove(from);
+                    self.servers.remove(from);
                 }
                 result
             }
@@ -380,8 +362,8 @@ impl Observer {
                     }
                 }
                 Pending::Server(addr) => {
-                    if let Some(con) = self.connections.get_mut(&addr) {
-                        con.query(&self.sock, buffer)?;
+                    if let Some(server) = self.servers.get_mut(&addr) {
+                        server.query(&self.sock, buffer)?;
                     }
                 }
             }
@@ -390,8 +372,8 @@ impl Observer {
     }
 
     fn cleanup_servers(&mut self, now: Instant) {
-        self.connections.retain(|&addr, con| {
-            if !con.is_valid(now) {
+        self.servers.retain(|&addr, server| {
+            if !server.is_valid(now) {
                 self.delayed_events.push(DelayedEvent::ServerRemove(addr));
                 false
             } else {

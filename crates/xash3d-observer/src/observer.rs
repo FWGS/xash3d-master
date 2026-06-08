@@ -1,63 +1,17 @@
 use std::{
     cmp,
     collections::{hash_map::Entry, HashMap},
-    fmt, io,
+    io,
     net::SocketAddr,
     time::{Duration, Instant},
 };
 
-use xash3d_protocol::{
-    game::QueryServers, master::QueryServersResponse, server::GetServerInfoResponse,
-};
-
-use crate::{
-    event::{Event, ServerInfo, ServerList},
-    filter::Filter,
-    net::Socket,
-    server::Server,
-};
+use crate::{event::Event, filter::Filter, master::Master, net::Socket, server::Server};
 
 pub(crate) const MASTER_INTERVAL: Duration = Duration::from_secs(8);
 pub(crate) const SERVER_INTERVAL: Duration = Duration::from_secs(2);
 pub(crate) const SERVER_TIMEOUT: Duration = Duration::from_secs(16);
 pub(crate) const SERVER_CLEAN_INTERVAL: Duration = Duration::from_secs(16);
-
-pub struct Master {
-    addr: SocketAddr,
-    key: u32,
-}
-
-impl Master {
-    pub fn new(addr: SocketAddr) -> Self {
-        Self { addr, key: 0 }
-    }
-
-    fn encode_query_servers_packet<'a>(&mut self, filter: &str, buf: &'a mut [u8]) -> &'a [u8] {
-        struct FilterKey<'b> {
-            filter: &'b str,
-            key: u32,
-        }
-
-        impl fmt::Display for FilterKey<'_> {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                write!(f, "{}", self.filter)?;
-                write!(f, "\\key\\{:x}", self.key)?;
-                Ok(())
-            }
-        }
-
-        // generate a fresh key for each request
-        self.key = fastrand::u32(..);
-
-        let packet = QueryServers::new(FilterKey {
-            filter,
-            key: self.key,
-        });
-
-        // TODO: handle error, filter may not fit
-        packet.encode(buf).unwrap()
-    }
-}
 
 enum DelayedEvent {
     ServerTimeout(SocketAddr),
@@ -173,15 +127,15 @@ impl Observer {
     }
 
     pub fn insert_master(&mut self, master: Master) {
-        if self.get_master(&master.addr).is_none() {
-            self.pending.push(Pending::Master(master.addr));
+        if self.get_master_mut(master.address()).is_none() {
+            self.pending.push(Pending::Master(*master.address()));
             self.masters.push(master);
         }
     }
 
     pub fn remove_master(&mut self, addr: &SocketAddr) -> Option<Master> {
         self.remove_pending(Pending::Master(*addr));
-        match self.masters.iter().position(|i| i.addr == *addr) {
+        match self.masters.iter().position(|i| i.address() == addr) {
             Some(i) => Some(self.masters.swap_remove(i)),
             None => None,
         }
@@ -205,8 +159,10 @@ impl Observer {
         &self.masters
     }
 
-    fn get_master(&self, addr: &SocketAddr) -> Option<&Master> {
-        self.masters.iter().find(|master| master.addr.eq(addr))
+    fn get_master_mut(&mut self, addr: &SocketAddr) -> Option<&mut Master> {
+        self.masters
+            .iter_mut()
+            .find(|master| master.address().eq(addr))
     }
 
     fn query_servers_from_masters(&mut self, buf: &mut [u8]) -> io::Result<()> {
@@ -214,11 +170,11 @@ impl Observer {
             let packet = master.encode_query_servers_packet(&self.filter, buf);
 
             // Do not send queries twice.
-            if self.pending.contains(&Pending::Master(master.addr)) {
+            if self.pending.contains(&Pending::Master(*master.address())) {
                 continue;
             }
 
-            self.sock.send_to(packet, master.addr)?;
+            self.sock.send_to(packet, *master.address())?;
         }
         Ok(())
     }
@@ -249,66 +205,24 @@ impl Observer {
         Ok(())
     }
 
-    fn handle_master_packet<'a>(
-        &mut self,
-        from: &SocketAddr,
-        data: &'a [u8],
-        key: u32,
-    ) -> Option<Event<'a>> {
-        match QueryServersResponse::decode(data) {
-            Ok(response) => {
-                if response.key != Some(key) {
-                    // ignore if invalid or missing challenge key in the response
-                    return None;
-                }
-
-                Some(Event::ServerList(ServerList::new(*from, response)))
-            }
-            Err(_) => {
-                // The master server can respond with a fake server at same address. It's used
-                // for update messages.
-                if let Ok(response) = GetServerInfoResponse::decode(data) {
-                    let info = ServerInfo {
-                        server: *from,
-                        ping: Duration::default(),
-                        changed: true,
-                        response,
-                    };
-                    Some(Event::ServerInfo(info))
-                } else {
-                    Some(Event::MasterInvalidPacket(*from, data))
-                }
-            }
-        }
-    }
-
-    fn handle_server_packet<'a>(
-        &mut self,
-        from: &SocketAddr,
-        data: &'a [u8],
-    ) -> io::Result<Option<Event<'a>>> {
-        match self.servers.get_mut(from) {
-            Some(server) => {
-                let result = server.handle_packet(&self.sock, data);
-                if let Ok(Some(Event::ServerInvalidProtocol(..))) = &result {
-                    self.servers.remove(from);
-                }
-                result
-            }
-            None => Ok(None),
-        }
-    }
-
     fn handle_packet<'a>(
         &mut self,
         from: &SocketAddr,
         buffer: &'a [u8],
     ) -> io::Result<Option<Event<'a>>> {
-        if let Some(master) = self.get_master(from) {
-            Ok(self.handle_master_packet(from, buffer, master.key))
-        } else {
-            self.handle_server_packet(from, buffer)
+        if let Some(master) = self.get_master_mut(from) {
+            return Ok(master.handle_packet(from, buffer));
         }
+
+        if let Some(server) = self.servers.get_mut(from) {
+            return server.handle_packet(&self.sock, buffer).inspect(|event| {
+                if let Some(Event::ServerInvalidProtocol(..)) = &event {
+                    self.servers.remove(from);
+                }
+            });
+        }
+
+        Ok(None)
     }
 
     fn receive<'a>(
@@ -354,9 +268,9 @@ impl Observer {
             match i {
                 Pending::Master(addr) => {
                     for master in self.masters.iter_mut() {
-                        if master.addr == addr {
+                        if *master.address() == addr {
                             let packet = master.encode_query_servers_packet(&self.filter, buffer);
-                            self.sock.send_to(packet, master.addr)?;
+                            self.sock.send_to(packet, addr)?;
                             break;
                         }
                     }

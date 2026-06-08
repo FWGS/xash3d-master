@@ -1,6 +1,7 @@
 #[macro_use]
 extern crate log;
 
+mod master;
 mod net;
 mod observer;
 mod server;
@@ -8,6 +9,7 @@ mod server;
 pub mod event;
 pub mod filter;
 
+pub use crate::master::Master;
 pub use crate::observer::*;
 pub use crate::server::Server;
 

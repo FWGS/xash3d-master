@@ -162,7 +162,7 @@ impl<K: Eq + Hash, V> TimedHashMap<K, V> {
 
     /// Retains only the elements specified by the predicate.
     ///
-    /// See [AHashMap::retain].
+    /// See [HashMap::retain](std::collections::hash_map::HashMap::retain).
     pub fn retain<F>(&mut self, mut f: F)
     where
         F: FnMut(&K, &mut V) -> bool,

@@ -1,7 +1,7 @@
 use std::{
     collections::{hash_map::Entry, HashMap},
     fmt, io,
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4, ToSocketAddrs},
+    net::ToSocketAddrs,
 };
 
 use xash3d_observer::{
@@ -89,8 +89,7 @@ impl MyServerInfo {
 }
 
 fn main() -> io::Result<()> {
-    let addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0));
-    let mut observer = Observer::bind(addr)?;
+    let mut observer = Observer::new()?;
 
     let masters = &["mentality.rip:27010", "mentality.rip:27011"];
     for i in masters {

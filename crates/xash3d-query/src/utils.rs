@@ -1,7 +1,6 @@
 use std::{
-    fmt,
     io::{self, Write},
-    net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, ToSocketAddrs},
+    net::{SocketAddr, ToSocketAddrs},
     process,
 };
 
@@ -10,95 +9,23 @@ use xash3d_observer::{Master, Observer};
 
 use crate::cli::Cli;
 
-enum IpVersion {
-    Any,
-    V4,
-    V6,
-    Both,
-}
-
-impl IpVersion {
-    fn bind_addr(&self) -> Option<SocketAddr> {
-        match self {
-            Self::Both => None,
-            Self::V6 => Some(SocketAddr::V6(SocketAddrV6::new(
-                Ipv6Addr::UNSPECIFIED,
-                0,
-                0,
-                0,
-            ))),
-            _ => Some(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0))),
-        }
-    }
-}
-
-/// Detects an IP version from a list of addresses.
-///
-/// Masters that fail to resolve are skipped with a warning.
-fn ip_version_for<T>(addrs: impl Iterator<Item = T>) -> io::Result<IpVersion>
-where
-    T: ToSocketAddrs + fmt::Display,
-{
-    let mut version = IpVersion::Any;
-    for i in addrs {
-        let Ok(mut it) = i.to_socket_addrs() else {
-            eprintln!("warning: failed to resolve master {i}");
-            continue;
-        };
-        if let Some(addr) = it.next() {
-            match version {
-                IpVersion::Any | IpVersion::V4 if addr.is_ipv4() => {
-                    version = IpVersion::V4;
-                }
-                IpVersion::Any | IpVersion::V6 if addr.is_ipv6() => {
-                    version = IpVersion::V6;
-                }
-                _ => return Ok(IpVersion::Both),
-            }
-        }
-    }
-    Ok(version)
-}
-
 pub fn create_observer(cli: &Cli) -> io::Result<Observer> {
-    let unspecified = ip_version_for(cli.masters.iter().map(|s| s.as_ref() as &str))?
-        .bind_addr()
-        .unwrap_or_else(|| {
-            eprintln!("error: master servers with different IP versions is not supported");
-            process::exit(1);
-        });
-    let mut observer = Observer::bind(unspecified)?;
-    observer.set_filter_raw(cli.filter.clone());
-    Ok(observer)
-}
-
-/// Creates an observer for querying specific servers, without contacting masters.
-pub fn create_observer_for_servers(cli: &Cli, servers: &[SocketAddr]) -> io::Result<Observer> {
-    let unspecified = ip_version_for(servers.iter())?
-        .bind_addr()
-        .unwrap_or_else(|| {
-            eprintln!("error: servers with different IP versions is not supported");
-            process::exit(1);
-        });
-    let mut observer = Observer::bind(unspecified)?;
+    let mut observer = Observer::new()?;
     observer.set_filter_raw(cli.filter.clone());
     Ok(observer)
 }
 
 pub fn create_observer_with_masters(cli: &Cli) -> io::Result<Observer> {
     let mut observer = create_observer(cli)?;
-    let local_addr = observer.local_addr()?;
     for i in &cli.masters {
-        let Ok(addrs) = i.to_socket_addrs() else {
+        let Ok(mut addrs) = i.to_socket_addrs() else {
             eprintln!("warning: failed to resolve master {i}");
             continue;
         };
-        for addr in addrs {
-            if addr.is_ipv4() == local_addr.is_ipv4() {
-                let master = Master::new(addr);
-                observer.insert_master(master);
-                break;
-            }
+        // TODO: add a CLI option to select IPv4 or IPv6?
+        if let Some(addr) = addrs.next() {
+            let master = Master::new(addr);
+            observer.insert_master(master);
         }
     }
     if observer.masters().is_empty() {

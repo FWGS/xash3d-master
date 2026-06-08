@@ -855,6 +855,7 @@ version = "0.1.0"
 dependencies = [
  "fastrand",
  "log",
+ "mio",
  "xash3d-protocol",
 ]
 

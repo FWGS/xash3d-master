@@ -364,7 +364,7 @@ pub(crate) fn run_custom_servers(cli: &Cli, servers: Vec<SocketAddr>) -> Result<
         return Ok(());
     }
 
-    let observer = utils::create_observer_for_servers(cli, &servers)?;
+    let observer = utils::create_observer(cli)?;
     let mut query = QueryServersInfo::new(cli, observer, true);
     for addr in servers {
         query.insert_custom_server(addr);

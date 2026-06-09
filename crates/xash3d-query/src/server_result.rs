@@ -16,6 +16,8 @@ pub enum ServerResultKind {
         #[serde(flatten)]
         info: ServerInfo,
     },
+    /// An internal enum variant.
+    #[serde(rename = "ok")]
     OkWithPlayers {
         #[serde(flatten)]
         info: ServerInfo,

@@ -276,6 +276,31 @@ impl GetPlayers {
     }
 }
 
+/// A ping request.
+///
+/// See [PingResponse](super::server::PingResponse).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Ping;
+
+impl Ping {
+    /// Packet header.
+    pub const HEADER: &'static [u8] = b"\xff\xff\xff\xffi";
+
+    /// Decode packet from `src`.
+    pub fn decode(src: &[u8]) -> Result<Self, Error> {
+        let mut cur = Cursor::new(src);
+        cur.expect(Self::HEADER)?;
+        cur.expect_empty()?;
+        Ok(Self)
+    }
+
+    /// Encode packet to `buf`.
+    pub fn encode(buf: &mut [u8]) -> Result<&[u8], Error> {
+        let n = CursorMut::new(buf).put_bytes(Self::HEADER)?.pos();
+        Ok(&buf[..n])
+    }
+}
+
 /// Game client packets.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
@@ -291,6 +316,8 @@ pub enum Packet<'a> {
     GetServerInfo2(GetServerInfo2),
     /// Request player list from a game server.
     GetPlayers(GetPlayers),
+    /// Ping request.
+    Ping,
 }
 
 impl<'a> Packet<'a> {
@@ -307,6 +334,8 @@ impl<'a> Packet<'a> {
             GetServerInfo2::decode(src).map(Self::GetServerInfo2)
         } else if src.starts_with(GetPlayers::HEADER) {
             GetPlayers::decode(src).map(Self::GetPlayers)
+        } else if src.starts_with(Ping::HEADER) {
+            Ping::decode(src).map(|_| Self::Ping)
         } else {
             return Ok(None);
         }
@@ -398,5 +427,12 @@ mod tests {
         let mut buf = [0; 32];
         let t = p.encode(&mut buf).unwrap();
         assert_eq!(Packet::decode(t), Ok(Some(Packet::GetPlayers(p))));
+    }
+
+    #[test]
+    fn ping_request() {
+        let mut buf = [0; 32];
+        let t = Ping::encode(&mut buf).unwrap();
+        assert_eq!(Packet::decode(t), Ok(Some(Packet::Ping)));
     }
 }

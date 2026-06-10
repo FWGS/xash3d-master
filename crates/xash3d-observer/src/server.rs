@@ -8,7 +8,7 @@ use xash3d_protocol::{
     game::{GetChallenge, GetPlayers, GetServerInfo, GetServerInfo2},
     server::{
         GetChallengeResponse, GetPlayersResponse, GetServerInfo2Response,
-        GetServerInfo2ResponseOld, GetServerInfoResponse,
+        GetServerInfo2ResponseOld, GetServerInfoResponse, PingResponse,
     },
     Error as ProtocolError,
 };
@@ -18,6 +18,24 @@ use crate::{
     net::Socket,
     observer::SERVER_TIMEOUT,
 };
+
+fn is_valid_protocol(protocol: u8) -> bool {
+    protocol == xash3d_protocol::PROTOCOL_VERSION
+        || protocol == xash3d_protocol::PROTOCOL_VERSION - 1
+}
+
+/// Used to select the best info request/response type for a server.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum InfoKind {
+    /// `GetServerInfoResponse`.
+    Info,
+    /// `GetServerInfo2Response` or `GetServerInfo2ResponseOld`.
+    TSourceEngineQueryAny,
+    /// `GetServerInfo2ResponseOld`.
+    TSourceEngineQueryOld,
+    /// `GetServerInfo2Response`.
+    TSourceEngineQueryNew,
+}
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 #[repr(u8)]
@@ -34,6 +52,7 @@ pub struct Server {
     address: SocketAddr,
     protocol: u8,
     players: bool,
+    info_kind: InfoKind,
     state: ServerState,
     request_time: Instant,
     response_time: Instant,
@@ -49,6 +68,7 @@ impl Server {
             address,
             protocol: xash3d_protocol::PROTOCOL_VERSION,
             players: false,
+            info_kind: InfoKind::Info,
             state: ServerState::ProtocolDetection,
             request_time: now,
             response_time: now,
@@ -83,6 +103,11 @@ impl Server {
         now.duration_since(self.response_time) < SERVER_TIMEOUT
     }
 
+    fn set_info_kind(&mut self, info_kind: InfoKind) {
+        trace!("{}: switch to {info_kind:?}", self.address);
+        self.info_kind = info_kind;
+    }
+
     fn update_response_time(&mut self) {
         self.response_time = Instant::now();
     }
@@ -113,23 +138,17 @@ impl Server {
             self.state = ServerState::WaitingInfo;
         }
 
-        if true {
-            let req = GetServerInfo::new(self.protocol);
-            let data = req.encode(buf).unwrap();
-            self.send(sock, data)?;
-        }
-
-        // TODO: Xash3D engine has bug and will not respond to this query. Enable only for testing.
-        if log_enabled!(log::Level::Trace) {
-            let req = self
-                .challenge
+        let data = if InfoKind::Info == self.info_kind {
+            GetServerInfo::new(self.protocol).encode(buf).unwrap()
+        } else {
+            self.challenge
                 .map(GetServerInfo2::with_challenge)
-                .unwrap_or_else(GetServerInfo2::new);
-            let data = req.encode(buf).unwrap();
-            self.send(sock, data)?;
-        }
+                .unwrap_or_else(GetServerInfo2::new)
+                .encode(buf)
+                .unwrap()
+        };
 
-        Ok(())
+        self.send(sock, data)
     }
 
     fn query_players(&mut self, sock: &Socket, buf: &mut [u8]) -> io::Result<()> {
@@ -157,6 +176,18 @@ impl Server {
         sock: &Socket,
         data: &'a [u8],
     ) -> io::Result<Option<Event<'a>>> {
+        // GoldSrc servers may respond with `PingResponse` to `GetServerInfo` request.
+        if PingResponse::decode(data).is_ok() {
+            if self.info_kind == InfoKind::Info {
+                // This server does not support `info` request. Try `TSource Engine Query` info
+                // request type.
+                self.info_kind = InfoKind::TSourceEngineQueryAny;
+                let mut buf = [0; 512];
+                self.query_info(sock, &mut buf)?;
+            }
+            return Ok(None);
+        }
+
         if let Ok(response) = GetChallengeResponse::decode(data) {
             self.challenge = Some(response.challenge);
 
@@ -170,15 +201,65 @@ impl Server {
         }
 
         if data.starts_with(GetServerInfo2Response::HEADER) {
-            let response = GetServerInfo2Response::decode(data);
-            trace!("recv info {} {response:?}", self.address);
-            return Ok(None);
+            let Ok(response) = GetServerInfo2Response::decode(data) else {
+                return Ok(Some(Event::ServerInvalidPacket(self.address, data)));
+            };
+            trace!("{}: recv info {response:?}", self.address);
+
+            if !is_valid_protocol(response.protocol) {
+                trace!("{}: ignoring info with unsupported protocol", self.address);
+                return Ok(None);
+            }
+
+            match self.info_kind {
+                InfoKind::Info | InfoKind::TSourceEngineQueryAny => {
+                    self.set_info_kind(InfoKind::TSourceEngineQueryNew);
+                }
+                InfoKind::TSourceEngineQueryOld => {
+                    // Remember the response to check if changed next time and start ignoring
+                    // responses with the old format.
+                    self.set_info_kind(InfoKind::TSourceEngineQueryNew);
+                    self.update_raw_info(data);
+                    return Ok(None);
+                }
+                InfoKind::TSourceEngineQueryNew => {}
+            }
+
+            self.update_response_time();
+            let changed = self.update_raw_info(data);
+            let info = ServerInfo::from_info2(self.address, self.ping(), changed, response);
+            return Ok(Some(Event::ServerInfo(info)));
         }
 
         if data.starts_with(GetServerInfo2ResponseOld::HEADER) {
-            let response = GetServerInfo2ResponseOld::decode(data);
-            trace!("recv info old {} {response:?}", self.address);
-            return Ok(None);
+            let Ok(response) = GetServerInfo2ResponseOld::decode(data) else {
+                return Ok(Some(Event::ServerInvalidPacket(self.address, data)));
+            };
+            trace!("{}: recv info {response:?}", self.address);
+
+            if !is_valid_protocol(response.protocol) {
+                trace!("{}: ignoring info with unsupported protocol", self.address);
+                return Ok(None);
+            }
+
+            match self.info_kind {
+                InfoKind::Info => {
+                    self.set_info_kind(InfoKind::TSourceEngineQueryAny);
+                }
+                InfoKind::TSourceEngineQueryAny => {
+                    self.set_info_kind(InfoKind::TSourceEngineQueryOld);
+                }
+                InfoKind::TSourceEngineQueryNew => {
+                    trace!("{}: ignoring old info response", self.address);
+                    return Ok(None);
+                }
+                InfoKind::TSourceEngineQueryOld => {}
+            }
+
+            self.update_response_time();
+            let changed = self.update_raw_info(data);
+            let info = ServerInfo::from_info2_old(self.address, self.ping(), changed, response);
+            return Ok(Some(Event::ServerInfo(info)));
         }
 
         if let Ok(response) = GetPlayersResponse::decode(data) {
@@ -192,31 +273,41 @@ impl Server {
             return Ok(Some(Event::ServerPlayers(self.address, players)));
         }
 
-        match GetServerInfoResponse::decode(data) {
-            Ok(response) => {
-                self.update_response_time();
-                let info = ServerInfo {
-                    server: self.address,
-                    ping: self.ping(),
-                    changed: self.update_raw_info(data),
-                    response,
-                };
-                Ok(Some(Event::ServerInfo(info)))
+        if data.starts_with(GetServerInfoResponse::HEADER) {
+            if InfoKind::Info != self.info_kind {
+                trace!("{}: ignoring info response", self.address);
+                return Ok(None);
             }
-            Err(ProtocolError::InvalidProtocolVersion) => {
-                if self.state == ServerState::ProtocolDetection
-                    && self.protocol() == xash3d_protocol::PROTOCOL_VERSION
-                {
-                    // try legacy protocol version
-                    let mut buffer = [0; 512];
-                    self.set_legacy_protocol();
-                    self.query(sock, &mut buffer)?;
-                    Ok(None)
-                } else {
-                    Ok(Some(Event::ServerInvalidProtocol(self.address)))
+
+            match GetServerInfoResponse::decode(data) {
+                Ok(response) => {
+                    if !is_valid_protocol(response.protocol) {
+                        trace!("{}: ignoring info with unsupported protocol", self.address);
+                        return Ok(None);
+                    }
+
+                    self.update_response_time();
+                    let changed = self.update_raw_info(data);
+                    let info = ServerInfo::from_info(self.address, self.ping(), changed, response);
+                    return Ok(Some(Event::ServerInfo(info)));
                 }
+                Err(ProtocolError::InvalidProtocolVersion) => {
+                    if self.state == ServerState::ProtocolDetection
+                        && self.protocol() == xash3d_protocol::PROTOCOL_VERSION
+                    {
+                        // try legacy protocol version
+                        let mut buffer = [0; 512];
+                        self.set_legacy_protocol();
+                        self.query(sock, &mut buffer)?;
+                        return Ok(None);
+                    } else {
+                        return Ok(Some(Event::ServerInvalidProtocol(self.address)));
+                    }
+                }
+                Err(_) => {}
             }
-            Err(_) => Ok(Some(Event::ServerInvalidPacket(self.address, data))),
         }
+
+        Ok(Some(Event::ServerInvalidPacket(self.address, data)))
     }
 }

@@ -481,7 +481,7 @@ pub struct SourceTv<'a> {
 }
 
 /// Response to [GetServerInfo2](super::game::GetServerInfo2) request.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct GetServerInfo2Response<'a> {
     /// Protocol version used by the server.
     pub protocol: u8,
@@ -696,7 +696,7 @@ pub struct ModInfo<'a> {
 }
 
 /// Response to [GetServerInfo2](super::game::GetServerInfo2) request from GoldSource servers.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct GetServerInfo2ResponseOld<'a> {
     /// IP address and port of the server.
     pub address: StrSlice<'a>,

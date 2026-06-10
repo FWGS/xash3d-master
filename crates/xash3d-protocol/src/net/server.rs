@@ -396,19 +396,30 @@ impl<'a> GetServerInfoResponse<'a> {
 
     /// Encode packet to `buf`.
     pub fn encode<'b>(&self, buf: &'b mut [u8]) -> Result<&'b [u8], Error> {
+        let mut cur = CursorMut::new(buf);
+        cur.put_bytes(GetServerInfoResponse::HEADER)?;
+        if self.protocol >= 49 {
+            cur.put_key("p", self.protocol)?;
+        }
+        cur.put_key("map", self.map)?;
+        cur.put_key("dm", self.dm)?;
+        cur.put_key("team", self.team)?;
+        cur.put_key("coop", self.coop)?;
+        cur.put_key("numcl", self.numcl)?;
+        cur.put_key("maxcl", self.maxcl)?;
+        cur.put_key("gamedir", self.gamedir)?;
+        cur.put_key("password", self.password)?;
+        cur.put_key("dedicated", self.dedicated)?;
+        cur.put_key("host", self.host)?;
+        let n = cur.pos();
+        Ok(&buf[..n])
+    }
+
+    pub fn encode_wrong_version<'b>(host: &[u8], buf: &'b mut [u8]) -> Result<&'b [u8], Error> {
         let n = CursorMut::new(buf)
             .put_bytes(GetServerInfoResponse::HEADER)?
-            .put_key("p", self.protocol)?
-            .put_key("map", self.map)?
-            .put_key("dm", self.dm)?
-            .put_key("team", self.team)?
-            .put_key("coop", self.coop)?
-            .put_key("numcl", self.numcl)?
-            .put_key("maxcl", self.maxcl)?
-            .put_key("gamedir", self.gamedir)?
-            .put_key("password", self.password)?
-            .put_key("dedicated", self.dedicated)?
-            .put_key("host", self.host)?
+            .put_bytes(host)?
+            .put_bytes(b": wrong version\n")?
             .pos();
         Ok(&buf[..n])
     }
@@ -1079,6 +1090,32 @@ mod tests {
         assert_eq!(
             Packet::decode(t),
             Ok(Some(Packet::GetServerInfoResponse(p)))
+        );
+    }
+
+    #[test]
+    fn get_server_info_response_protocol_48() {
+        let p = GetServerInfoResponse {
+            protocol: 48,
+            map: Str("crossfire".as_bytes()),
+            dm: true,
+            team: true,
+            coop: true,
+            numcl: 4,
+            maxcl: 32,
+            gamedir: Str("valve".as_bytes()),
+            password: true,
+            dedicated: true,
+            host: Str("Test".as_bytes()),
+        };
+        let mut buf = [0; 512];
+        let t = p.encode(&mut buf).unwrap();
+        assert_eq!(
+            Packet::decode(t),
+            Ok(Some(Packet::GetServerInfoResponse(GetServerInfoResponse {
+                protocol: 0,
+                ..p
+            })))
         );
     }
 

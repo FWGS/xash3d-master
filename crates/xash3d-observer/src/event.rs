@@ -5,7 +5,10 @@ use std::{
 
 use xash3d_protocol::{
     master::{QueryServersResponse, QueryServersResponseIter},
-    server::{GetPlayersResponse, GetServerInfoResponse},
+    server::{
+        GetPlayersResponse, GetServerInfo2Response, GetServerInfo2ResponseOld,
+        GetServerInfoResponse, ServerType,
+    },
 };
 
 pub struct ServerList<'a> {
@@ -64,6 +67,72 @@ pub struct ServerInfo<'a> {
 }
 
 impl<'a> ServerInfo<'a> {
+    pub(crate) fn from_info(
+        address: SocketAddr,
+        ping: Duration,
+        changed: bool,
+        response: GetServerInfoResponse<'a>,
+    ) -> Self {
+        Self {
+            server: address,
+            ping,
+            changed,
+            response,
+        }
+    }
+
+    pub(crate) fn from_info2(
+        address: SocketAddr,
+        ping: Duration,
+        changed: bool,
+        response: GetServerInfo2Response<'a>,
+    ) -> Self {
+        Self {
+            server: address,
+            ping,
+            changed,
+            response: GetServerInfoResponse {
+                gamedir: response.gamedir,
+                map: response.map,
+                host: response.host,
+                protocol: response.protocol,
+                numcl: response.players,
+                maxcl: response.max_players,
+                dm: false,
+                team: false,
+                coop: false,
+                password: response.password,
+                dedicated: response.ty == ServerType::Dedicated,
+            },
+        }
+    }
+
+    pub(crate) fn from_info2_old(
+        address: SocketAddr,
+        ping: Duration,
+        changed: bool,
+        response: GetServerInfo2ResponseOld<'a>,
+    ) -> Self {
+        Self {
+            server: address,
+            ping,
+            changed,
+            response: GetServerInfoResponse {
+                gamedir: response.gamedir,
+                map: response.map,
+                host: response.host,
+                protocol: response.protocol,
+                numcl: response.players,
+                maxcl: response.max_players,
+                dm: false,
+                team: false,
+                coop: false,
+                password: response.password,
+                dedicated: response.ty == ServerType::Dedicated,
+            },
+        }
+    }
+
     pub fn address(&self) -> &SocketAddr {
         &self.server
     }

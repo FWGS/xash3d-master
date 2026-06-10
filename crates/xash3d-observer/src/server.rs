@@ -281,7 +281,8 @@ impl Server {
 
             match GetServerInfoResponse::decode(data) {
                 Ok(response) => {
-                    if !is_valid_protocol(response.protocol) {
+                    // Legacy (protocol=48) response does not have `p` (protocol) key.
+                    if response.protocol != 0 && !is_valid_protocol(response.protocol) {
                         trace!("{}: ignoring info with unsupported protocol", self.address);
                         return Ok(None);
                     }

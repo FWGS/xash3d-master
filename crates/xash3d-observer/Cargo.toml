@@ -15,4 +15,5 @@ repository.workspace = true
 log.workspace = true
 fastrand.workspace = true
 mio.workspace = true
+slab.workspace = true
 xash3d-protocol.workspace = true

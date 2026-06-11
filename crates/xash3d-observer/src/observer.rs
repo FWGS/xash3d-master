@@ -2,11 +2,12 @@ use std::{
     cmp,
     collections::{hash_map::Entry, HashMap},
     io,
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     time::{Duration, Instant},
 };
 
 use mio::{Events, Poll, Token};
+use slab::Slab;
 
 use crate::{event::Event, filter::Filter, master::Master, net::Socket, server::Server};
 
@@ -14,9 +15,6 @@ pub(crate) const MASTER_INTERVAL: Duration = Duration::from_secs(8);
 pub(crate) const SERVER_INTERVAL: Duration = Duration::from_secs(2);
 pub(crate) const SERVER_TIMEOUT: Duration = Duration::from_secs(16);
 pub(crate) const SERVER_CLEAN_INTERVAL: Duration = Duration::from_secs(16);
-
-const UDP4_TOKEN: Token = Token(0);
-const UDP6_TOKEN: Token = Token(1);
 
 enum DelayedEvent {
     ServerTimeout(SocketAddr),
@@ -82,7 +80,6 @@ enum Pending {
 }
 
 struct ObserverState {
-    sock: Socket,
     filter: String,
     masters: Vec<Master>,
     query_servers_task: Task,
@@ -94,11 +91,9 @@ struct ObserverState {
 }
 
 impl ObserverState {
-    fn new() -> io::Result<Self> {
-        let sock = Socket::bind()?;
+    fn new() -> Self {
         let now = Instant::now();
-        Ok(Self {
-            sock,
+        Self {
             filter: String::new(),
             masters: Vec::new(),
             query_servers_task: Task::new(now, MASTER_INTERVAL),
@@ -107,7 +102,7 @@ impl ObserverState {
             servers: HashMap::new(),
             delayed_events: Vec::new(),
             pending: Vec::new(),
-        })
+        }
     }
 
     fn get_master_mut(&mut self, addr: &SocketAddr) -> Option<&mut Master> {
@@ -116,7 +111,11 @@ impl ObserverState {
             .find(|master| master.address().eq(addr))
     }
 
-    fn query_servers_from_masters(&mut self, buf: &mut [u8]) -> io::Result<()> {
+    fn query_servers_from_masters(
+        &mut self,
+        sockets: &mut Sockets,
+        buf: &mut [u8],
+    ) -> io::Result<()> {
         for master in self.masters.iter_mut() {
             let packet = master.encode_query_servers_packet(&self.filter, buf);
 
@@ -125,12 +124,17 @@ impl ObserverState {
                 continue;
             }
 
-            self.sock.send_to(packet, *master.address())?;
+            let sock = sockets.get_or_create_for(master.address())?;
+            sock.send_to(packet, *master.address())?;
         }
         Ok(())
     }
 
-    fn query_info_from_servers(&mut self, buffer: &mut [u8]) -> io::Result<()> {
+    fn query_info_from_servers(
+        &mut self,
+        sockets: &mut Sockets,
+        buffer: &mut [u8],
+    ) -> io::Result<()> {
         let now = Instant::now();
         for (addr, server) in self.servers.iter_mut() {
             // Invalid servers will be removed later by cleanup task. Master servers can send
@@ -150,27 +154,30 @@ impl ObserverState {
                 self.delayed_events.push(DelayedEvent::ServerTimeout(*addr));
             }
 
-            server.query(&self.sock, buffer)?;
+            let sock = sockets.get_or_create_for(server.address())?;
+            server.query(sock, buffer)?;
         }
 
         Ok(())
     }
 
-    fn process_pending(&mut self, buffer: &mut [u8]) -> io::Result<()> {
+    fn process_pending(&mut self, sockets: &mut Sockets, buffer: &mut [u8]) -> io::Result<()> {
         while let Some(i) = self.pending.pop() {
             match i {
                 Pending::Master(addr) => {
                     for master in self.masters.iter_mut() {
                         if *master.address() == addr {
                             let packet = master.encode_query_servers_packet(&self.filter, buffer);
-                            self.sock.send_to(packet, addr)?;
+                            let sock = sockets.get_or_create_for(&addr)?;
+                            sock.send_to(packet, addr)?;
                             break;
                         }
                     }
                 }
                 Pending::Server(addr) => {
                     if let Some(server) = self.servers.get_mut(&addr) {
-                        server.query(&self.sock, buffer)?;
+                        let sock = sockets.get_or_create_for(&addr)?;
+                        server.query(sock, buffer)?;
                     }
                 }
             }
@@ -189,13 +196,18 @@ impl ObserverState {
         });
     }
 
-    fn process_tasks(&mut self, buffer: &mut [u8], now: Instant) -> io::Result<()> {
+    fn process_tasks(
+        &mut self,
+        sockets: &mut Sockets,
+        buffer: &mut [u8],
+        now: Instant,
+    ) -> io::Result<()> {
         if self.query_servers_task.update_time(now) {
-            self.query_servers_from_masters(buffer)?;
+            self.query_servers_from_masters(sockets, buffer)?;
         }
 
         if self.query_info_task.update_time(now) {
-            self.query_info_from_servers(buffer)?;
+            self.query_info_from_servers(sockets, buffer)?;
         }
 
         if self.cleanup_task.update_time(now) {
@@ -221,6 +233,7 @@ impl ObserverState {
 
     fn handle_packet<'a>(
         &mut self,
+        sock: &Socket,
         from: &SocketAddr,
         buffer: &'a [u8],
     ) -> io::Result<Option<Event<'a>>> {
@@ -229,7 +242,7 @@ impl ObserverState {
         }
 
         if let Some(server) = self.servers.get_mut(from) {
-            return server.handle_packet(&self.sock, buffer).inspect(|event| {
+            return server.handle_packet(sock, buffer).inspect(|event| {
                 if let Some(Event::ServerInvalidProtocol(..)) = &event {
                     self.servers.remove(from);
                 }
@@ -240,10 +253,48 @@ impl ObserverState {
     }
 }
 
+#[derive(Default)]
+struct SocketsData {
+    slab: Slab<Socket>,
+    map: HashMap<IpAddr, usize>,
+}
+
+impl SocketsData {
+    fn borrow_mut<'a>(&'a mut self, poll: &'a mut Poll) -> Sockets<'a> {
+        Sockets { poll, data: self }
+    }
+}
+
+struct Sockets<'a> {
+    poll: &'a mut Poll,
+    data: &'a mut SocketsData,
+}
+
+impl<'a> Sockets<'a> {
+    fn get(&self, token: Token) -> Option<&Socket> {
+        self.data.slab.get(token.0)
+    }
+
+    fn get_or_create_for(&mut self, addr: &SocketAddr) -> io::Result<&Socket> {
+        match self.data.map.entry(addr.ip()) {
+            Entry::Occupied(e) => Ok(&self.data.slab[*e.get()]),
+            Entry::Vacant(e) => {
+                trace!("creating UDP socket for {}", addr.ip());
+                let s = self.data.slab.vacant_entry();
+                let mut sock = Socket::bind_for(addr)?;
+                sock.register(self.poll.registry(), Token(s.key()))?;
+                e.insert(s.key());
+                Ok(s.insert(sock))
+            }
+        }
+    }
+}
+
 pub struct Observer {
     poll: Poll,
     net_events: Events,
     current_net_event: usize,
+    sockets: SocketsData,
     state: ObserverState,
 }
 
@@ -251,16 +302,14 @@ impl Observer {
     pub fn new() -> io::Result<Self> {
         let poll = Poll::new()?;
         let events = Events::with_capacity(2);
-
-        let mut state = ObserverState::new()?;
-        state
-            .sock
-            .register(poll.registry(), UDP4_TOKEN, UDP6_TOKEN)?;
+        let sockets = SocketsData::default();
+        let state = ObserverState::new();
 
         Ok(Self {
             poll,
             net_events: events,
             current_net_event: 0,
+            sockets,
             state,
         })
     }
@@ -322,6 +371,7 @@ impl Observer {
         }
 
         let user_deadline = timeout.map(|t| Instant::now() + t);
+        let mut sockets = self.sockets.borrow_mut(&mut self.poll);
 
         loop {
             // FIXME: Work around limitation in current borrow checker, remove when polonius
@@ -337,8 +387,8 @@ impl Observer {
                 }
             }
 
-            self.state.process_tasks(buffer, now)?;
-            self.state.process_pending(buffer)?;
+            self.state.process_tasks(&mut sockets, buffer, now)?;
+            self.state.process_pending(&mut sockets, buffer)?;
 
             if let Some(delayed_event) = self.state.delayed_events.pop() {
                 return Ok(delayed_event.into());
@@ -346,35 +396,37 @@ impl Observer {
 
             if self.net_events.is_empty() {
                 let timeout = self.state.timeout(now, user_deadline);
-                self.poll.poll(&mut self.net_events, timeout)?;
+                sockets.poll.poll(&mut self.net_events, timeout)?;
                 self.current_net_event = 0;
             }
 
             for net_event in self.net_events.iter().skip(self.current_net_event) {
-                match net_event.token() {
-                    UDP4_TOKEN | UDP6_TOKEN => {
-                        loop {
-                            // FIXME: Work around limitation in current borrow checker, remove
-                            // when polonius will become available in MSRV.
-                            //
-                            // SAFETY: Used and returned only in this iteration.
-                            let buffer = unsafe { &mut *(buffer as *mut [u8]) };
+                let Some(sock) = sockets.get(net_event.token()) else {
+                    self.current_net_event += 1;
+                    error!("unexpected poll event");
+                    continue;
+                };
 
-                            let ipv6 = net_event.token() == UDP6_TOKEN;
-                            match self.state.sock.recv_from(buffer, ipv6) {
-                                Ok((n, from)) => {
-                                    if let Some(event) =
-                                        self.state.handle_packet(&from, &buffer[..n])?
-                                    {
-                                        return Ok(event);
-                                    }
+                if net_event.is_readable() {
+                    loop {
+                        // FIXME: Work around limitation in current borrow checker, remove
+                        // when polonius will become available in MSRV.
+                        //
+                        // SAFETY: Used and returned only in this iteration.
+                        let buffer = unsafe { &mut *(buffer as *mut [u8]) };
+
+                        match sock.recv_from(buffer) {
+                            Ok((n, from)) => {
+                                if let Some(event) =
+                                    self.state.handle_packet(sock, &from, &buffer[..n])?
+                                {
+                                    return Ok(event);
                                 }
-                                Err(e) if would_block(&e) => break,
-                                Err(e) => return Err(e),
                             }
+                            Err(e) if would_block(&e) => break,
+                            Err(e) => return Err(e),
                         }
                     }
-                    _ => {}
                 }
 
                 self.current_net_event += 1;

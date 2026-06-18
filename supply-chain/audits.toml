@@ -455,6 +455,12 @@ user-id = 251561 # Denis Drakhnia (numas13)
 start = "2024-01-28"
 end = "2025-04-04"
 
+[[trusted.xash3d-colored]]
+criteria = "safe-to-deploy"
+user-id = 251561 # Denis Drakhnia (numas13)
+start = "2026-06-18"
+end = "2027-06-18"
+
 [[trusted.xash3d-master]]
 criteria = "safe-to-deploy"
 user-id = 251561 # Denis Drakhnia (numas13)

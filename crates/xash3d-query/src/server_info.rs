@@ -4,7 +4,6 @@ use std::{
 };
 
 use serde::{Serialize, Serializer};
-use xash3d_protocol::color;
 
 use crate::{cli::Cli, color::Colored};
 
@@ -151,7 +150,7 @@ fn serialize_colored<S>(s: &str, ser: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
 {
-    ser.serialize_str(color::trim_color(s).as_ref())
+    ser.serialize_str(xash3d_colored::str::remove_colors(s).as_ref())
 }
 
 fn is_zero_u8(value: &u8) -> bool {

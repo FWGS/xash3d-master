@@ -831,6 +831,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "xash3d-colored"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9047de85ae2d1080cfd3292ff491294fd71637975d5d2e3e599f8b455357d47a"
+
+[[package]]
 name = "xash3d-master"
 version = "0.2.1"
 dependencies = [
@@ -856,6 +862,7 @@ dependencies = [
  "fastrand",
  "log",
  "mio",
+ "xash3d-colored",
  "xash3d-protocol",
 ]
 
@@ -880,6 +887,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "xash3d-colored",
  "xash3d-observer",
  "xash3d-protocol",
 ]

@@ -9,7 +9,6 @@ use xash3d_observer::{
     filter::Filter,
     Buffer, Master, Observer, Server,
 };
-use xash3d_protocol::color::trim_color;
 
 #[derive(Clone, Debug)]
 pub struct MyServerInfo {
@@ -57,7 +56,7 @@ impl MyServerInfo {
     pub fn new(packet: &ServerInfo) -> Self {
         fn lossy_no_color(bytes: &[u8]) -> String {
             let s = String::from_utf8_lossy(bytes);
-            trim_color(&s).trim().to_string()
+            xash3d_colored::str::remove_colors(&s).trim().to_string()
         }
 
         let gamedir = lossy_no_color(packet.gamedir());

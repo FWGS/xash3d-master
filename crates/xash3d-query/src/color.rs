@@ -14,29 +14,27 @@ impl<'a> Colored<'a> {
 
 impl fmt::Display for Colored<'_> {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        use xash3d_protocol::color;
-
         // TODO: unicode width
         let mut width = 0;
 
         #[cfg_attr(not(feature = "color"), allow(unused_mut))]
-        let mut iter = color::ColorIter::new(self.text);
+        let mut iter = xash3d_colored::str::split(self.text);
 
         #[cfg(feature = "color")]
         if self.enable {
             use crossterm::style::Stylize;
+            use xash3d_colored::Color;
 
             for (color, text) in iter.by_ref() {
                 width += text.chars().count();
-                let colored = match color::Color::try_from(color) {
-                    Ok(color::Color::Black) => text.black(),
-                    Ok(color::Color::Red) => text.red(),
-                    Ok(color::Color::Green) => text.green(),
-                    Ok(color::Color::Yellow) => text.yellow(),
-                    Ok(color::Color::Blue) => text.blue(),
-                    Ok(color::Color::Cyan) => text.cyan(),
-                    Ok(color::Color::Magenta) => text.magenta(),
-                    Ok(color::Color::White) => text.white(),
+                let colored = match color {
+                    Color::Black => text.black(),
+                    Color::Red => text.red(),
+                    Color::Green => text.green(),
+                    Color::Yellow => text.yellow(),
+                    Color::Blue => text.blue(),
+                    Color::Cyan => text.cyan(),
+                    Color::Magenta => text.magenta(),
                     _ => text.reset(),
                 };
                 colored.fmt(fmt)?;

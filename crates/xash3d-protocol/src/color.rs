@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 //! Color codes for strings.
 
 #[cfg(feature = "alloc")]
@@ -5,6 +7,7 @@ use alloc::{borrow::Cow, string::String};
 
 /// Color codes `^digit`.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[deprecated(note = "use xash3d-colored crate instead")]
 pub enum Color {
     /// Black is coded as `^0`.
     Black,
@@ -50,6 +53,7 @@ impl TryFrom<&str> for Color {
 /// assert_eq!(is_color_code("hello"), false);
 /// assert_eq!(is_color_code("^4blue ocean"), true);
 /// ```
+#[deprecated(note = "use xash3d-colored crate instead")]
 #[inline]
 pub fn is_color_code(s: &str) -> bool {
     matches!(s.as_bytes(), [b'^', c, ..] if c.is_ascii_digit())
@@ -65,6 +69,7 @@ pub fn is_color_code(s: &str) -> bool {
 /// assert_eq!(trim_start_color("^1red apple"), ("^1", "red apple"));
 /// assert_eq!(trim_start_color("^1^2^3yellow roof"), ("^3", "yellow roof"));
 /// ```
+#[deprecated(note = "use xash3d-colored crate instead")]
 #[inline]
 pub fn trim_start_color(s: &str) -> (&str, &str) {
     let mut n = 0;
@@ -91,6 +96,7 @@ pub fn trim_start_color(s: &str) -> (&str, &str) {
 /// assert_eq!(iter.next(), Some(("^2", "green grass")));
 /// assert_eq!(iter.next(), None);
 /// ```
+#[deprecated(note = "use xash3d-colored crate instead")]
 pub struct ColorIter<'a> {
     inner: &'a str,
 }
@@ -129,6 +135,7 @@ impl<'a> Iterator for ColorIter<'a> {
 /// # use xash3d_protocol::color::trim_color;
 /// assert_eq!(trim_color("^1no^7 ^2colors^7"), "no colors");
 /// ```
+#[deprecated(note = "use xash3d-colored crate instead")]
 #[cfg(feature = "alloc")]
 pub fn trim_color(s: &str) -> Cow<'_, str> {
     let (_, s) = trim_start_color(s);

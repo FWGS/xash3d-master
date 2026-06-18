@@ -296,6 +296,13 @@ user-id = 251561
 user-login = "numas13"
 user-name = "Denis Drakhnia"
 
+[[publisher.xash3d-colored]]
+version = "0.1.0"
+when = "2026-06-18"
+user-id = 251561
+user-login = "numas13"
+user-name = "Denis Drakhnia"
+
 [[publisher.xash3d-master]]
 version = "0.2.1"
 when = "2024-09-24"

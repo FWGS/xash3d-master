@@ -24,17 +24,49 @@ fn is_valid_protocol(protocol: u8) -> bool {
         || protocol == xash3d_protocol::PROTOCOL_VERSION - 1
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum TSourceEngineQuery {
+    /// `GetServerInfo2Response` or `GetServerInfo2ResponseOld`.
+    Any,
+    /// `GetServerInfo2ResponseOld`.
+    Old,
+    /// `GetServerInfo2Response`.
+    New,
+}
+
 /// Used to select the best info request/response type for a server.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum InfoKind {
-    /// `GetServerInfoResponse`.
-    Info,
-    /// `GetServerInfo2Response` or `GetServerInfo2ResponseOld`.
-    TSourceEngineQueryAny,
-    /// `GetServerInfo2ResponseOld`.
-    TSourceEngineQueryOld,
-    /// `GetServerInfo2Response`.
-    TSourceEngineQueryNew,
+    /// Query all.
+    All,
+    /// Query `GetServerInfoResponse`.
+    Xash,
+    /// Query `GetServerInfo2Response` or `GetServerInfo2ResponseOld`.
+    GoldSrc(TSourceEngineQuery),
+}
+
+impl InfoKind {
+    fn is_xash(&self) -> bool {
+        match self {
+            InfoKind::All => true,
+            InfoKind::Xash => true,
+            InfoKind::GoldSrc(_) => false,
+        }
+    }
+
+    fn is_gold_src(&self) -> bool {
+        match self {
+            InfoKind::All => true,
+            InfoKind::Xash => false,
+            InfoKind::GoldSrc(_) => true,
+        }
+    }
+}
+
+impl From<TSourceEngineQuery> for InfoKind {
+    fn from(value: TSourceEngineQuery) -> Self {
+        Self::GoldSrc(value)
+    }
 }
 
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -68,7 +100,7 @@ impl Server {
             address,
             protocol: xash3d_protocol::PROTOCOL_VERSION,
             players: false,
-            info_kind: InfoKind::Info,
+            info_kind: InfoKind::All,
             state: ServerState::ProtocolDetection,
             request_time: now,
             response_time: now,
@@ -103,9 +135,9 @@ impl Server {
         now.duration_since(self.response_time) < SERVER_TIMEOUT
     }
 
-    fn set_info_kind(&mut self, info_kind: InfoKind) {
-        trace!("{}: switch to {info_kind:?}", self.address);
-        self.info_kind = info_kind;
+    fn set_info_kind(&mut self, info_kind: impl Into<InfoKind>) {
+        self.info_kind = info_kind.into();
+        debug!("{}: set info kind to {:?}", self.address, self.info_kind);
     }
 
     fn update_response_time(&mut self) {
@@ -138,17 +170,24 @@ impl Server {
             self.state = ServerState::WaitingInfo;
         }
 
-        let data = if InfoKind::Info == self.info_kind {
-            GetServerInfo::new(self.protocol).encode(buf).unwrap()
-        } else {
-            self.challenge
+        debug!("{}: query info kind {:?}", self.address, self.info_kind);
+
+        if self.info_kind.is_gold_src() {
+            let data = self
+                .challenge
                 .map(GetServerInfo2::with_challenge)
                 .unwrap_or_else(GetServerInfo2::new)
                 .encode(buf)
-                .unwrap()
-        };
+                .unwrap();
+            self.send(sock, data)?;
+        }
 
-        self.send(sock, data)
+        if self.info_kind.is_xash() {
+            let data = GetServerInfo::new(self.protocol).encode(buf).unwrap();
+            self.send(sock, data)?;
+        }
+
+        Ok(())
     }
 
     fn query_players(&mut self, sock: &Socket, buf: &mut [u8]) -> io::Result<()> {
@@ -178,13 +217,6 @@ impl Server {
     ) -> io::Result<Option<Event<'a>>> {
         // GoldSrc servers may respond with `PingResponse` to `GetServerInfo` request.
         if PingResponse::decode(data).is_ok() {
-            if self.info_kind == InfoKind::Info {
-                // This server does not support `info` request. Try `TSource Engine Query` info
-                // request type.
-                self.info_kind = InfoKind::TSourceEngineQueryAny;
-                let mut buf = [0; 512];
-                self.query_info(sock, &mut buf)?;
-            }
             return Ok(None);
         }
 
@@ -212,17 +244,17 @@ impl Server {
             }
 
             match self.info_kind {
-                InfoKind::Info | InfoKind::TSourceEngineQueryAny => {
-                    self.set_info_kind(InfoKind::TSourceEngineQueryNew);
+                InfoKind::All | InfoKind::Xash | InfoKind::GoldSrc(TSourceEngineQuery::Any) => {
+                    self.set_info_kind(TSourceEngineQuery::New);
                 }
-                InfoKind::TSourceEngineQueryOld => {
+                InfoKind::GoldSrc(TSourceEngineQuery::Old) => {
                     // Remember the response to check if changed next time and start ignoring
                     // responses with the old format.
-                    self.set_info_kind(InfoKind::TSourceEngineQueryNew);
+                    self.set_info_kind(TSourceEngineQuery::New);
                     self.update_raw_info(data);
                     return Ok(None);
                 }
-                InfoKind::TSourceEngineQueryNew => {}
+                InfoKind::GoldSrc(TSourceEngineQuery::New) => {}
             }
 
             self.update_response_time();
@@ -243,17 +275,19 @@ impl Server {
             }
 
             match self.info_kind {
-                InfoKind::Info => {
-                    self.set_info_kind(InfoKind::TSourceEngineQueryAny);
+                InfoKind::All | InfoKind::Xash => {
+                    self.set_info_kind(TSourceEngineQuery::Any);
                 }
-                InfoKind::TSourceEngineQueryAny => {
-                    self.set_info_kind(InfoKind::TSourceEngineQueryOld);
-                }
-                InfoKind::TSourceEngineQueryNew => {
-                    trace!("{}: ignoring old info response", self.address);
-                    return Ok(None);
-                }
-                InfoKind::TSourceEngineQueryOld => {}
+                InfoKind::GoldSrc(kind) => match kind {
+                    TSourceEngineQuery::Any => {
+                        self.set_info_kind(TSourceEngineQuery::Old);
+                    }
+                    TSourceEngineQuery::New => {
+                        trace!("{}: ignoring GoldSrc old info response", self.address);
+                        return Ok(None);
+                    }
+                    TSourceEngineQuery::Old => {}
+                },
             }
 
             self.update_response_time();
@@ -274,9 +308,12 @@ impl Server {
         }
 
         if data.starts_with(GetServerInfoResponse::HEADER) {
-            if InfoKind::Info != self.info_kind {
-                trace!("{}: ignoring info response", self.address);
-                return Ok(None);
+            match self.info_kind {
+                InfoKind::All | InfoKind::Xash => {}
+                InfoKind::GoldSrc(_) => {
+                    trace!("{}: ignoring Xash info response", self.address);
+                    return Ok(None);
+                }
             }
 
             match GetServerInfoResponse::decode(data) {
@@ -287,6 +324,7 @@ impl Server {
                         return Ok(None);
                     }
 
+                    self.set_info_kind(InfoKind::Xash);
                     self.update_response_time();
                     let changed = self.update_raw_info(data);
                     let info = ServerInfo::from_info(self.address, self.ping(), changed, response);

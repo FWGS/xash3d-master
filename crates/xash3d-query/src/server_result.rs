@@ -4,7 +4,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use serde::{Serialize, Serializer};
+use serde::{ser::SerializeStruct, Serialize, Serializer};
 
 use crate::server_info::{Players, ServerInfo};
 
@@ -48,11 +48,36 @@ fn make_millis_f32(ping: Duration) -> f32 {
     ping.as_micros() as f32 / 1000.0
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ServerAddress {
+    pub domain: Option<String>,
+    pub resolved: SocketAddr,
+}
+
+impl Serialize for ServerAddress {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        if let Some(domain) = &self.domain {
+            let mut s = serializer.serialize_struct("ServerAddress", 2)?;
+            s.serialize_field("address", &domain)?;
+            s.serialize_field("resolved", &self.resolved)?;
+            s.end()
+        } else {
+            let mut s = serializer.serialize_struct("ServerAddress", 1)?;
+            s.serialize_field("address", &self.resolved)?;
+            s.end()
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct ServerResult {
     #[serde(serialize_with = "serialize_unix_time")]
     pub time: SystemTime,
-    pub address: SocketAddr,
+    #[serde(flatten)]
+    pub address: ServerAddress,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(serialize_with = "serialize_ping")]
     pub ping: Option<Duration>,
@@ -64,10 +89,13 @@ pub struct ServerResult {
 }
 
 impl ServerResult {
-    pub fn new(address: SocketAddr, ping: Option<Duration>, kind: ServerResultKind) -> Self {
+    pub fn new(resolved: SocketAddr, ping: Option<Duration>, kind: ServerResultKind) -> Self {
         Self {
             time: SystemTime::now(),
-            address,
+            address: ServerAddress {
+                domain: None,
+                resolved,
+            },
             ping,
             kind,
             players: None,
@@ -80,20 +108,6 @@ impl ServerResult {
 
     pub fn new_timeout(address: SocketAddr) -> Self {
         Self::new(address, None, ServerResultKind::Timeout)
-    }
-
-    pub fn new_invalid_protocol(address: SocketAddr) -> Self {
-        Self::new(address, None, ServerResultKind::InvalidProtocol)
-    }
-
-    pub fn new_invalid_packet(address: SocketAddr, response: &[u8]) -> Self {
-        Self::new(
-            address,
-            None,
-            ServerResultKind::InvalidPacket {
-                data: response.into(),
-            },
-        )
     }
 
     pub fn ping_millis_f32(&self) -> Option<f32> {

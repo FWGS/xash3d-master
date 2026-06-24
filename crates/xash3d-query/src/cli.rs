@@ -18,10 +18,11 @@ const PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[rustfmt::skip]
 const DEFAULT_MASTERS: &[&str] = &[
-    "mentality.rip:27010",
-    "ms2.mentality.rip:27010",
-    "ms3.mentality.rip:27010",
-    "mentality.rip:27011",
+    // UDP master servers are deprecated.
+    // "mentality.rip:27010",
+    // "ms2.mentality.rip:27010",
+    // "ms3.mentality.rip:27010",
+    // "mentality.rip:27011",
 ];
 
 const DEFAULT_CLIENT_BUILDNUM: u32 = 4000;
@@ -197,10 +198,12 @@ pub fn parse() -> Cli {
     let mut opts = Options::new();
     opts.optflag("h", "help", "print usage help");
     opts.optflag("v", "version", "print program version");
-    let help = format!(
-        "master address to connect [default: {}]",
+    let masters = if !cli.masters.is_empty() {
         cli.masters.join(",")
-    );
+    } else {
+        "none".to_string()
+    };
+    let help = format!("master address to connect [default: {masters}]");
     opts.optopt("M", "master", &help, "LIST");
     let help = format!(
         "time to wait results from masters [default: {}]",

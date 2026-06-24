@@ -26,3 +26,6 @@ serde_json.workspace = true
 crossterm = { workspace = true, optional = true }
 xash3d-protocol.workspace = true
 xash3d-observer.workspace = true
+
+[dev-dependencies]
+xash3d-test-utils.workspace = true

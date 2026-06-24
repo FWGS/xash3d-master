@@ -857,6 +857,7 @@ dependencies = [
  "log",
  "mio",
  "xash3d-protocol",
+ "xash3d-test-utils",
 ]
 
 [[package]]
@@ -881,6 +882,15 @@ dependencies = [
  "serde_json",
  "thiserror",
  "xash3d-observer",
+ "xash3d-protocol",
+ "xash3d-test-utils",
+]
+
+[[package]]
+name = "xash3d-test-utils"
+version = "0.1.0"
+dependencies = [
+ "log",
  "xash3d-protocol",
 ]
 

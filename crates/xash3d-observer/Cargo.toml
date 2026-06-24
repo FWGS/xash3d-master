@@ -16,3 +16,6 @@ log.workspace = true
 fastrand.workspace = true
 mio.workspace = true
 xash3d-protocol.workspace = true
+
+[dev-dependencies]
+xash3d-test-utils.workspace = true

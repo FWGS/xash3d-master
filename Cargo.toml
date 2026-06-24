@@ -14,6 +14,7 @@ repository = "https://github.com/FWGS/xash3d-master"
 #
 xash3d-protocol = { path = "crates/xash3d-protocol", version = "0.2.0", features = ["net"] }
 xash3d-observer = { path = "crates/xash3d-observer", version = "0.1.0" }
+xash3d-test-utils = { path = "crates/xash3d-test-utils", version = "0.1.0" }
 
 #
 # External crates

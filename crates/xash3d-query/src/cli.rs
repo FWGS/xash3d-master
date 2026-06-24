@@ -12,6 +12,8 @@ use getopts::Options;
 use log::LevelFilter;
 use xash3d_protocol::{self as proto, filter::Version};
 
+use crate::utils::IpVersion;
+
 const BIN_NAME: &str = env!("CARGO_BIN_NAME");
 const PKG_NAME: &str = env!("CARGO_PKG_NAME");
 const PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -131,6 +133,7 @@ pub struct Cli {
     pub log: LevelFilter,
     force_color: bool,
     pub filter: String,
+    pub ip_version: IpVersion,
 }
 
 impl Default for Cli {
@@ -152,6 +155,7 @@ impl Default for Cli {
             log: LevelFilter::Off,
             force_color: false,
             filter: String::new(),
+            ip_version: IpVersion::Any,
         }
     }
 }
@@ -247,6 +251,8 @@ pub fn parse() -> Cli {
     opts.optopt("g", "filter-gamedir", help, "GAMEDIR");
     let help = "set query filter map [default: all]";
     opts.optopt("m", "filter-map", help, "MAP");
+    let help = "prefered IP version [default: any]";
+    opts.optopt("", "ip-version", help, "VERSION");
 
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => m,
@@ -327,6 +333,18 @@ pub fn parse() -> Cli {
                 process::exit(1);
             }
         };
+    }
+
+    if let Some(s) = matches.opt_str("ip-version") {
+        cli.ip_version = match s.as_str() {
+            "any" => IpVersion::Any,
+            "4" | "v4" => IpVersion::V4,
+            "6" | "v6" => IpVersion::V6,
+            _ => {
+                eprintln!("error: invalid argument {s:?} for --ip-version option");
+                process::exit(1);
+            }
+        }
     }
 
     cli.filter = filter.opt_get(&matches);

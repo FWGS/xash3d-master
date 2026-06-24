@@ -32,7 +32,7 @@ fn execute(cli: Cli) -> Result<(), QueryError> {
         }
         "info" => {
             // Query info for user specified servers.
-            let list = parse_server_addresses(&cli.args[1..]);
+            let list = parse_server_addresses(&cli.args[1..], cli.ip_version);
             query_servers_info::run_custom_servers(&cli, list)?;
         }
         "list" => {
@@ -41,7 +41,7 @@ fn execute(cli: Cli) -> Result<(), QueryError> {
         }
         "monitor" => {
             // Monitor servers in real time.
-            let list = parse_server_addresses(&cli.args[1..]);
+            let list = parse_server_addresses(&cli.args[1..], cli.ip_version);
             monitor_servers::run(&cli, list)?;
         }
         _ => return Err(QueryError::UndefinedCommand),

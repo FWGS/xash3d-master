@@ -13,7 +13,7 @@ use crate::{
     cli::Cli,
     color::Colored,
     server_info::{PlayerInfo, Players, ServerInfo},
-    server_result::{ServerResult, ServerResultKind},
+    server_result::{ServerAddress, ServerResult, ServerResultKind},
     utils::{self, print_json},
     QueryError,
 };
@@ -78,21 +78,27 @@ impl<'a> Printer<'a> {
         }
     }
 
-    fn label_server(&self, address: SocketAddr) -> impl fmt::Display {
-        struct LabelServer {
+    fn label_server<'b>(&self, result: &'b ServerResult) -> impl fmt::Display + 'b {
+        struct LabelServer<'a> {
             label: Label,
-            address: SocketAddr,
+            result: &'a ServerResult,
         }
 
-        impl fmt::Display for LabelServer {
+        impl fmt::Display for LabelServer<'_> {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                write!(f, "{}: {}", self.label, self.address)
+                write!(f, "{}: ", self.label)?;
+                if let Some(addr) = &self.result.address.domain {
+                    write!(f, "{addr}")?;
+                } else {
+                    write!(f, "{}", self.result.address.resolved)?;
+                }
+                Ok(())
             }
         }
 
         LabelServer {
             label: self.label("server"),
-            address,
+            result,
         }
     }
 
@@ -116,7 +122,7 @@ impl<'a> Printer<'a> {
     }
 
     fn print_server_info(&mut self, cli: &Cli, server: &ServerResult, info: &ServerInfo) {
-        print!("{}", self.label_server(server.address));
+        print!("{}", self.label_server(server));
         if let Some(ping) = server.ping_millis_f32() {
             print!(" [ping {ping:.0}ms]");
         }
@@ -172,15 +178,15 @@ impl<'a> Printer<'a> {
     }
 
     fn print_timeout(&mut self, _: &Cli, server: &ServerResult) {
-        println!("{} [timeout]", self.label_server(server.address));
+        println!("{} [timeout]", self.label_server(server));
     }
 
     fn print_invalid_protocol(&mut self, _: &Cli, server: &ServerResult) {
-        println!("{} [protocol error]", self.label_server(server.address));
+        println!("{} [protocol error]", self.label_server(server));
     }
 
     fn print_invalid_packet(&mut self, _: &Cli, server: &ServerResult) {
-        println!("{} [invalid]", self.label_server(server.address));
+        println!("{} [invalid]", self.label_server(server));
     }
 
     fn print(&mut self, cli: &Cli) {
@@ -257,33 +263,41 @@ impl QueryServersInfo {
         }
     }
 
-    fn insert_custom_server(&mut self, addr: SocketAddr) {
-        self.servers_custom.insert(addr);
-        self.insert_server(addr);
+    fn insert_custom_server(&mut self, server: ServerAddress) {
+        self.servers_custom.insert(server.resolved);
+        self.insert_server(server.resolved, server.domain);
     }
 
-    fn insert_server(&mut self, addr: SocketAddr) {
-        let server = Server::new(addr).with_players(self.players);
+    fn insert_server(&mut self, resolved: SocketAddr, address: Option<String>) {
+        let server = Server::new(resolved).with_players(self.players);
         self.observer.insert_server(server);
 
         // Set default result to timeout for all new servers.
-        if let Entry::Vacant(e) = self.servers.entry(addr) {
-            e.insert(ServerResult::new_timeout(addr));
+        if let Entry::Vacant(e) = self.servers.entry(resolved) {
+            let mut result = ServerResult::new_timeout(resolved);
+            if let Some(address) = address {
+                result.address.domain = Some(address);
+            }
+            e.insert(result);
         }
     }
 
-    fn set_server_result(&mut self, addr: SocketAddr, result: ServerResult) {
+    fn set_server_result_kind(&mut self, addr: SocketAddr, kind: ServerResultKind) {
+        let Some(e) = self.servers.get_mut(&addr) else {
+            eprintln!("warning: unexpected server {addr}");
+            return;
+        };
         if self.custom {
             self.servers_custom.remove(&addr);
         }
-        self.servers.insert(addr, result);
+        e.kind = kind;
     }
 
     fn set_server_result_ok(&mut self, addr: SocketAddr, ping: Duration, info: ServerInfo) {
-        let e = self
-            .servers
-            .entry(addr)
-            .or_insert_with(|| ServerResult::new_timeout(addr));
+        let Some(e) = self.servers.get_mut(&addr) else {
+            eprintln!("warning: unexpected server {addr}");
+            return;
+        };
         if self.custom && (!self.players || e.has_players()) {
             self.servers_custom.remove(&addr);
         }
@@ -317,7 +331,7 @@ impl QueryServersInfo {
                     }
 
                     for addr in list.iter() {
-                        self.insert_server(addr);
+                        self.insert_server(addr, None);
                     }
                 }
                 Event::ServerInfo(server_info) => {
@@ -329,14 +343,14 @@ impl QueryServersInfo {
                     self.set_server_players(addr, players.into());
                 }
                 Event::ServerInvalidProtocol(addr) => {
-                    let result = ServerResult::new_invalid_protocol(addr);
-                    self.set_server_result(addr, result);
+                    let kind = ServerResultKind::InvalidProtocol;
+                    self.set_server_result_kind(addr, kind);
                 }
                 Event::ServerInvalidPacket(addr, data) => {
                     let result = self.servers.get(&addr);
                     if result.is_none() || result.is_some_and(|i| i.kind.is_timeout()) {
-                        let result = ServerResult::new_invalid_packet(addr, data);
-                        self.set_server_result(addr, result);
+                        let kind = ServerResultKind::InvalidPacket { data: data.into() };
+                        self.set_server_result_kind(addr, kind);
                     }
                 }
                 _ => {}
@@ -346,7 +360,7 @@ impl QueryServersInfo {
         }
 
         let mut servers: Vec<_> = self.servers.into_values().collect();
-        servers.sort_by_key(|a| a.address);
+        servers.sort_by_key(|a| a.address.resolved);
         Printer::new(cli, self.custom, &servers).print(cli);
 
         Ok(())
@@ -359,15 +373,15 @@ pub(crate) fn run(cli: &Cli) -> Result<(), QueryError> {
     query.run(cli)
 }
 
-pub(crate) fn run_custom_servers(cli: &Cli, servers: Vec<SocketAddr>) -> Result<(), QueryError> {
+pub(crate) fn run_custom_servers(cli: &Cli, servers: Vec<ServerAddress>) -> Result<(), QueryError> {
     if servers.is_empty() {
         return Ok(());
     }
 
     let observer = utils::create_observer(cli)?;
     let mut query = QueryServersInfo::new(cli, observer, true);
-    for addr in servers {
-        query.insert_custom_server(addr);
+    for i in servers {
+        query.insert_custom_server(i);
     }
     query.run(cli)
 }

@@ -1,6 +1,7 @@
 use std::{
     collections::{hash_map::Entry, HashMap},
     net::SocketAddr,
+    time::Duration,
 };
 
 use xash3d_observer::{event::Event, Buffer, Server};
@@ -8,24 +9,67 @@ use xash3d_observer::{event::Event, Buffer, Server};
 use crate::{
     cli::Cli,
     server_info::ServerInfo,
-    server_result::{ServerResult, ServerResultKind},
+    server_result::{ServerAddress, ServerResult, ServerResultKind},
     utils::{self, print_json},
     QueryError,
 };
 
-pub(crate) fn run(cli: &Cli, servers: Vec<SocketAddr>) -> Result<(), QueryError> {
+struct Monitor<'a> {
+    cli: &'a Cli,
+    servers: HashMap<SocketAddr, ServerInfo>,
+    domains: HashMap<SocketAddr, String>,
+}
+
+impl<'a> Monitor<'a> {
+    fn new(cli: &'a Cli) -> Self {
+        Self {
+            cli,
+            servers: HashMap::new(),
+            domains: HashMap::new(),
+        }
+    }
+
+    fn print_json(&self, mut result: ServerResult) {
+        if let Some(domain) = self.domains.get(&result.address.resolved) {
+            result.address.domain = Some(domain.clone());
+        }
+        print_json(self.cli, &result);
+    }
+
+    fn print_info(&mut self, addr: SocketAddr, ping: Duration, info: ServerInfo) {
+        match self.servers.entry(addr) {
+            Entry::Occupied(mut e) => {
+                let p = e.get().printer(self.cli);
+                println!("{:24?} --- {:>7.1} {}", addr, ' ', p,);
+                let p = info.printer(self.cli);
+                println!("{addr:24?} +++ {ping:>7.1?} {p}");
+                e.insert(info);
+            }
+            Entry::Vacant(e) => {
+                let p = info.printer(self.cli);
+                println!("{addr:24?} +++ {ping:>7.1?} {p}");
+                e.insert(info);
+            }
+        }
+    }
+}
+
+pub(crate) fn run(cli: &Cli, servers: Vec<ServerAddress>) -> Result<(), QueryError> {
     let mut observer = if servers.is_empty() {
         utils::create_observer_with_masters(cli)?
     } else {
         utils::create_observer(cli)?
     };
 
+    let mut monitor = Monitor::new(cli);
     for addr in servers {
-        let server = Server::new(addr);
+        if let Some(domain) = addr.domain {
+            monitor.domains.insert(addr.resolved, domain);
+        }
+        let server = Server::new(addr.resolved);
         observer.insert_server(server);
     }
 
-    let mut servers = HashMap::<SocketAddr, ServerInfo>::new();
     let mut buffer = Buffer::new();
     loop {
         match observer.wait_event(&mut buffer, None)? {
@@ -42,39 +86,25 @@ pub(crate) fn run(cli: &Cli, servers: Vec<SocketAddr>) -> Result<(), QueryError>
                 if cli.json {
                     let mut result = ServerResult::new_timeout(addr);
                     result.set_ok(ping, info);
-                    print_json(cli, &result);
+                    monitor.print_json(result);
                 } else {
-                    match servers.entry(addr) {
-                        Entry::Occupied(mut e) => {
-                            let p = e.get().printer(cli);
-                            println!("{:24?} --- {:>7.1} {}", addr, ' ', p,);
-                            let p = info.printer(cli);
-                            println!("{addr:24?} +++ {ping:>7.1?} {p}");
-                            e.insert(info);
-                        }
-                        Entry::Vacant(e) => {
-                            let p = info.printer(cli);
-                            println!("{addr:24?} +++ {ping:>7.1?} {p}");
-                            e.insert(info);
-                        }
-                    }
+                    monitor.print_info(addr, ping, info);
                 }
             }
             Event::ServerInfo(server_info) if cli.json && !server_info.is_changed() => {
                 let result = ServerResult::new_ping(*server_info.address(), server_info.ping());
-                print_json(cli, &result);
+                monitor.print_json(result);
             }
             Event::ServerInfoTimeout(addr) if cli.json => {
                 let result = ServerResult::new_timeout(addr);
-                print_json(cli, &result);
+                monitor.print_json(result);
+            }
+            Event::ServerRemove(addr) if cli.json => {
+                let result = ServerResult::new(addr, None, ServerResultKind::Remove);
+                monitor.print_json(result);
             }
             Event::ServerRemove(addr) => {
-                if cli.json {
-                    let result = ServerResult::new(addr, None, ServerResultKind::Remove);
-                    print_json(cli, &result);
-                } else {
-                    servers.remove(&addr);
-                }
+                monitor.servers.remove(&addr);
             }
             _ => {}
         }

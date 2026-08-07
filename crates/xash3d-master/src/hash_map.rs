@@ -107,13 +107,9 @@ impl<K: Eq + Hash, V> TimedHashMap<K, V> {
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        self.map.remove(k).and_then(|i| {
-            if i.is_valid(RelativeTime::now(), self.timeout) {
-                Some(i)
-            } else {
-                None
-            }
-        })
+        self.map
+            .remove(k)
+            .filter(|i| i.is_valid(RelativeTime::now(), self.timeout))
     }
 
     pub fn entry(&mut self, key: K) -> Entry<'_, K, Timed<V>> {
@@ -151,13 +147,9 @@ impl<K: Eq + Hash, V> TimedHashMap<K, V> {
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        self.map.get(k).and_then(|i| {
-            if i.is_valid(RelativeTime::now(), self.timeout) {
-                Some(i)
-            } else {
-                None
-            }
-        })
+        self.map
+            .get(k)
+            .filter(|i| i.is_valid(RelativeTime::now(), self.timeout))
     }
 
     /// Retains only the elements specified by the predicate.

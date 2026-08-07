@@ -746,7 +746,7 @@ impl<Addr: AddrExt> UdpServerGeneric<Addr> {
 
         match admin {
             Some(admin) => {
-                info!("{from}: admin({}), command: {:?}", &admin.name, msg.command);
+                info!("{from}: admin({}), command: {:?}", admin.name, msg.command);
                 self.admin_command(msg.command);
             }
             None => {

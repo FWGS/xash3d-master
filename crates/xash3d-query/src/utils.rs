@@ -7,7 +7,10 @@ use std::{
 use serde::Serialize;
 use xash3d_observer::{Master, Observer};
 
-use crate::{cli::Cli, server_result::ServerAddress};
+use crate::{
+    cli::Cli,
+    server_result::{ServerAddress, UnresolvedServer},
+};
 
 pub fn create_observer(cli: &Cli) -> io::Result<Observer> {
     let mut observer = Observer::new()?;
@@ -52,8 +55,16 @@ impl IpVersion {
     }
 }
 
-pub fn parse_server_addresses(servers: &[String], ip_version: IpVersion) -> Vec<ServerAddress> {
+/// Resolves server addresses.
+///
+/// An address that cannot be resolved does not prevent the others from being used, it is
+/// returned in the second list.
+pub fn parse_server_addresses(
+    servers: &[String],
+    ip_version: IpVersion,
+) -> (Vec<ServerAddress>, Vec<UnresolvedServer>) {
     let mut list = Vec::with_capacity(servers.len());
+    let mut unresolved = Vec::new();
     for address in servers {
         if let Ok(addr) = address.parse() {
             list.push(ServerAddress {
@@ -87,19 +98,20 @@ pub fn parse_server_addresses(servers: &[String], ip_version: IpVersion) -> Vec<
                     });
                 } else {
                     eprintln!("warning: no IP address for server {address}");
+                    unresolved.push(UnresolvedServer::new(address, "no IP address"));
                 }
             }
             Err(e) => {
-                eprintln!("error: invalid server address {address}, {e}");
+                eprintln!("warning: invalid server address {address}, {e}");
+                unresolved.push(UnresolvedServer::new(address, e));
             }
         }
     }
-    if servers.len() != list.len() {
-        process::exit(1);
-    }
     list.sort_unstable();
     list.dedup_by_key(|i| i.resolved);
-    list
+    unresolved.sort_unstable_by(|a, b| a.address.cmp(&b.address));
+    unresolved.dedup_by(|a, b| a.address == b.address);
+    (list, unresolved)
 }
 
 pub fn print_json<T: Serialize>(cli: &Cli, value: &T) {

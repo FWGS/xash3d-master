@@ -20,6 +20,8 @@ use crate::{cli::Cli, utils::parse_server_addresses};
 enum QueryError {
     #[error("Undefined command")]
     UndefinedCommand,
+    #[error("no servers could be resolved")]
+    NoServers,
     #[error(transparent)]
     Io(#[from] io::Error),
 }
@@ -32,8 +34,8 @@ fn execute(cli: Cli) -> Result<(), QueryError> {
         }
         "info" => {
             // Query info for user specified servers.
-            let list = parse_server_addresses(&cli.args[1..], cli.ip_version);
-            query_servers_info::run_custom_servers(&cli, list)?;
+            let (list, unresolved) = parse_server_addresses(&cli.args[1..], cli.ip_version);
+            query_servers_info::run_custom_servers(&cli, list, unresolved)?;
         }
         "list" => {
             // List servers received from master servers.
@@ -41,7 +43,13 @@ fn execute(cli: Cli) -> Result<(), QueryError> {
         }
         "monitor" => {
             // Monitor servers in real time.
-            let list = parse_server_addresses(&cli.args[1..], cli.ip_version);
+            let (list, unresolved) = parse_server_addresses(&cli.args[1..], cli.ip_version);
+
+            // an empty list means all servers from master servers, which is not what was asked for
+            if list.is_empty() && !unresolved.is_empty() {
+                return Err(QueryError::NoServers);
+            }
+
             monitor_servers::run(&cli, list)?;
         }
         _ => return Err(QueryError::UndefinedCommand),

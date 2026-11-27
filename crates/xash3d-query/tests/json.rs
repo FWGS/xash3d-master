@@ -82,3 +82,48 @@ fn query_json() {
         println!("CHECKED: {} {}", server.address, server.host);
     }
 }
+
+#[derive(Debug, Deserialize)]
+struct ServerStatus {
+    address: String,
+    status: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct QueryStatus {
+    servers: Vec<ServerStatus>,
+}
+
+/// An address that cannot be resolved must not prevent other servers from being queried.
+#[test]
+fn query_json_unresolved() {
+    // The .invalid TLD is reserved and never resolves.
+    let unresolved = "unresolved.invalid:27015";
+    let server = FakeServer::new(49).run().to_string();
+
+    let output = Command::new(QUERY_PATH)
+        .args(["info", "-j", "-P", unresolved, &server])
+        .output()
+        .unwrap();
+    if !output.stderr.is_empty() {
+        println!("stderr:");
+        println!("{}", str::from_utf8(&output.stderr).unwrap());
+    }
+
+    if !output.status.success() {
+        panic!("error: query failed with status {}", output.status);
+    }
+
+    let result = serde_json::from_slice::<QueryStatus>(&output.stdout).unwrap();
+    let status = |address: &str| {
+        result
+            .servers
+            .iter()
+            .find(|server| server.address == address)
+            .unwrap_or_else(|| panic!("not found a response for {address}"))
+            .status
+            .as_str()
+    };
+    assert_eq!(status(&server), "ok");
+    assert_eq!(status(unresolved), "unresolved");
+}

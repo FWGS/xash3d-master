@@ -13,7 +13,7 @@ use crate::{
     cli::Cli,
     color::Colored,
     server_info::{PlayerInfo, Players, ServerInfo},
-    server_result::{ServerAddress, ServerResult, ServerResultKind},
+    server_result::{ServerAddress, ServerResult, ServerResultKind, UnresolvedServer},
     utils::{self, print_json},
     QueryError,
 };
@@ -25,7 +25,14 @@ struct InfoResult<'a> {
     server_timeout: u64,
     masters: &'a [Box<str>],
     filter: &'a str,
-    servers: &'a [ServerResult],
+    servers: &'a [InfoServer<'a>],
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(untagged)]
+enum InfoServer<'a> {
+    Result(&'a ServerResult),
+    Unresolved(&'a UnresolvedServer),
 }
 
 const LABEL_WIDTH: usize = 10;
@@ -57,16 +64,23 @@ struct Printer<'a> {
     all_servers: bool,
     colored_output: bool,
     servers: &'a [ServerResult],
+    unresolved: &'a [UnresolvedServer],
     /// Temporary storage for players.
     players: Vec<&'a PlayerInfo>,
 }
 
 impl<'a> Printer<'a> {
-    fn new(cli: &Cli, custom: bool, servers: &'a [ServerResult]) -> Self {
+    fn new(
+        cli: &Cli,
+        custom: bool,
+        servers: &'a [ServerResult],
+        unresolved: &'a [UnresolvedServer],
+    ) -> Self {
         Self {
             all_servers: custom || cli.all_servers,
             colored_output: cli.colored_output(),
             servers,
+            unresolved,
             players: Vec::new(),
         }
     }
@@ -103,13 +117,17 @@ impl<'a> Printer<'a> {
     }
 
     fn print_json(&self, cli: &Cli) {
+        let servers: Vec<_> = (self.servers.iter().map(InfoServer::Result))
+            .chain(self.unresolved.iter().map(InfoServer::Unresolved))
+            .collect();
+
         let result = InfoResult {
             protocol: &cli.protocol,
             master_timeout: cli.master_timeout.as_secs(),
             server_timeout: cli.server_timeout.as_secs(),
             masters: &cli.masters,
             filter: &cli.filter,
-            servers: self.servers,
+            servers: &servers,
         };
 
         if cli.json {
@@ -230,6 +248,12 @@ impl<'a> Printer<'a> {
                 _ => {}
             }
         }
+
+        for server in self.unresolved {
+            print_separator();
+            let label = self.label("server");
+            println!("{label}: {} [unresolved]", server.address);
+        }
     }
 }
 
@@ -240,6 +264,7 @@ struct QueryServersInfo {
     timeout: Duration,
     servers: HashMap<SocketAddr, ServerResult>,
     servers_custom: HashSet<SocketAddr>,
+    unresolved: Vec<UnresolvedServer>,
     observer: Observer,
 }
 
@@ -259,6 +284,7 @@ impl QueryServersInfo {
             timeout,
             servers: HashMap::new(),
             servers_custom: HashSet::new(),
+            unresolved: Vec::new(),
             observer,
         }
     }
@@ -361,7 +387,7 @@ impl QueryServersInfo {
 
         let mut servers: Vec<_> = self.servers.into_values().collect();
         servers.sort_by_key(|a| a.address.resolved);
-        Printer::new(cli, self.custom, &servers).print(cli);
+        Printer::new(cli, self.custom, &servers, &self.unresolved).print(cli);
 
         Ok(())
     }
@@ -373,13 +399,18 @@ pub(crate) fn run(cli: &Cli) -> Result<(), QueryError> {
     query.run(cli)
 }
 
-pub(crate) fn run_custom_servers(cli: &Cli, servers: Vec<ServerAddress>) -> Result<(), QueryError> {
-    if servers.is_empty() {
+pub(crate) fn run_custom_servers(
+    cli: &Cli,
+    servers: Vec<ServerAddress>,
+    unresolved: Vec<UnresolvedServer>,
+) -> Result<(), QueryError> {
+    if servers.is_empty() && unresolved.is_empty() {
         return Ok(());
     }
 
     let observer = utils::create_observer(cli)?;
     let mut query = QueryServersInfo::new(cli, observer, true);
+    query.unresolved = unresolved;
     for i in servers {
         query.insert_custom_server(i);
     }

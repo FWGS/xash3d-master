@@ -72,6 +72,26 @@ impl Serialize for ServerAddress {
     }
 }
 
+/// A server whose address could not be resolved.
+#[derive(Clone, Debug, Serialize)]
+#[serde(tag = "status", rename = "unresolved")]
+pub struct UnresolvedServer {
+    #[serde(serialize_with = "serialize_unix_time")]
+    pub time: SystemTime,
+    pub address: String,
+    pub error: String,
+}
+
+impl UnresolvedServer {
+    pub fn new(address: &str, error: impl ToString) -> Self {
+        Self {
+            time: SystemTime::now(),
+            address: address.to_string(),
+            error: error.to_string(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct ServerResult {
     #[serde(serialize_with = "serialize_unix_time")]

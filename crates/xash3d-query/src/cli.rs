@@ -163,16 +163,12 @@ impl Default for Cli {
 
 impl Cli {
     pub fn colored_output(&self) -> bool {
-        if self.force_color {
-            return true;
-        }
-
         #[cfg(feature = "color")]
         if crossterm::tty::IsTty::is_tty(&io::stdout()) {
             return true;
         }
 
-        false
+        self.force_color
     }
 }
 

@@ -1,4 +1,8 @@
-use std::{process::Command, str};
+use std::{
+    io::{BufRead, BufReader},
+    process::{Command, Stdio},
+    str,
+};
 
 use serde::Deserialize;
 use xash3d_test_utils::server::FakeServer;
@@ -126,4 +130,33 @@ fn query_json_unresolved() {
     };
     assert_eq!(status(&server), "ok");
     assert_eq!(status(unresolved), "unresolved");
+}
+
+/// Monitor must report an address that cannot be resolved and keep monitoring other servers.
+#[test]
+fn monitor_json_unresolved() {
+    let unresolved = "unresolved.invalid:27015";
+    let server = FakeServer::new(49).run().to_string();
+
+    let mut child = Command::new(QUERY_PATH)
+        .args(["monitor", "-j", "-c", unresolved, &server])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+
+    let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+    let mut next_event = || {
+        let line = lines.next().expect("monitor exited").unwrap();
+        serde_json::from_str::<ServerStatus>(&line).unwrap()
+    };
+    let events = [next_event(), next_event()];
+
+    child.kill().unwrap();
+    child.wait().unwrap();
+
+    assert_eq!(events[0].address, unresolved);
+    assert_eq!(events[0].status, "unresolved");
+    assert_eq!(events[1].address, server);
+    assert_eq!(events[1].status, "ok");
 }

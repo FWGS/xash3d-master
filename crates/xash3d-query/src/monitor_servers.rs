@@ -9,7 +9,7 @@ use xash3d_observer::{event::Event, Buffer, Server};
 use crate::{
     cli::Cli,
     server_info::ServerInfo,
-    server_result::{ServerAddress, ServerResult, ServerResultKind},
+    server_result::{ServerAddress, ServerResult, ServerResultKind, UnresolvedServer},
     utils::{self, print_json},
     QueryError,
 };
@@ -54,12 +54,25 @@ impl<'a> Monitor<'a> {
     }
 }
 
-pub(crate) fn run(cli: &Cli, servers: Vec<ServerAddress>) -> Result<(), QueryError> {
+pub(crate) fn run(
+    cli: &Cli,
+    servers: Vec<ServerAddress>,
+    unresolved: Vec<UnresolvedServer>,
+) -> Result<(), QueryError> {
     let mut observer = if servers.is_empty() {
         utils::create_observer_with_masters(cli)?
     } else {
         utils::create_observer(cli)?
     };
+
+    // FIXME: these servers are not monitored, so this is the only event they get
+    for server in &unresolved {
+        if cli.json {
+            print_json(cli, server);
+        } else {
+            println!("{:24} !!! unresolved", server.address);
+        }
+    }
 
     let mut monitor = Monitor::new(cli);
     for addr in servers {

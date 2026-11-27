@@ -50,7 +50,7 @@ fn execute(cli: Cli) -> Result<(), QueryError> {
                 return Err(QueryError::NoServers);
             }
 
-            monitor_servers::run(&cli, list)?;
+            monitor_servers::run(&cli, list, unresolved)?;
         }
         _ => return Err(QueryError::UndefinedCommand),
     }
